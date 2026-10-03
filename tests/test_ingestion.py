@@ -66,3 +66,30 @@ def test_color_normalizer():
     # Green plant area should be rejected (mostly False)
     assert np.mean(ink_mask[62:78, 22:78]) < 0.2
 
+
+def test_transcription_reference_and_yield_validator():
+    from voynich_ductus.ingestion.transcription_reference import TranscriptionReference, PaleographyYieldValidator
+
+    # Test normalization of folio IDs
+    meta_f1r = TranscriptionReference.get_metadata("f1r")
+    assert meta_f1r is not None
+    assert meta_f1r.folio_id == "f001r"
+    assert meta_f1r.expected_lines == 28
+    assert meta_f1r.currier_language == "Currier A"
+    assert meta_f1r.scribe_hand == "Hand 1"
+
+    # Test yield evaluation
+    yield_res = PaleographyYieldValidator.evaluate_yield(
+        folio_id="f001r",
+        detected_lines=19,
+        detected_words=20,
+        extracted_strokes=577
+    )
+    assert yield_res["has_reference"] is True
+    assert yield_res["line_yield_pct"] == 67.9
+    assert yield_res["expected_lines"] == 28
+    assert yield_res["detected_lines"] == 19
+    assert yield_res["avg_strokes_per_word"] == 28.85
+    assert len(yield_res["diagnostics"]) > 0  # low word extraction because max_words_per_page=20 was used
+
+

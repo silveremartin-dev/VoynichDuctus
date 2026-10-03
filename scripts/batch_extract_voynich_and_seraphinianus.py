@@ -14,6 +14,7 @@ from PIL import Image
 from voynich_ductus.ingestion.pdf_loader import PDFScanLoader
 from voynich_ductus.ingestion.iiif_client import IIIFClient
 from voynich_ductus.ingestion.color_normalizer import ColorIlluminationNormalizer
+from voynich_ductus.ingestion.transcription_reference import TranscriptionReference, PaleographyYieldValidator
 from voynich_ductus.ingestion.binarization import Binarizer
 from voynich_ductus.ingestion.segmenter import LineSegmenter
 from voynich_ductus.vectorizer.skeleton import Skeletonizer
@@ -143,9 +144,10 @@ def cluster_and_induce_alphabet(all_strokes: List[Dict[str, Any]], n_clusters: i
     return clusterer, labels, tokenizer
 
 
-def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Dict], benchmark_results: Dict, output_path: Path):
+def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Dict], benchmark_results: Dict, yield_reports: List[Dict], output_path: Path):
     """
-    Renders the Grand Paleography Visual Atlas comparing real Voynich and Seraphinianus words.
+    Renders the Grand Paleography Visual Atlas comparing real Voynich and Seraphinianus words,
+    along with information-theoretic diagnostics and paleographic extraction yield benchmarks.
     """
     palette = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#00ced1", "#e6ab02", "#66a61e"]
 
@@ -201,6 +203,22 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
             <td><span class="badge-hyp">{diag['top_hypothesis']}</span></td>
         </tr>
         """)
+
+    yield_rows = []
+    for yr in yield_reports:
+        if yr.get("has_reference"):
+            diag_str = ", ".join(yr["diagnostics"]) if yr["diagnostics"] else "Nominal Yield"
+            yield_rows.append(f"""
+            <tr>
+                <td><strong>{yr['folio_id']}</strong> ({yr['section']})</td>
+                <td>{yr['currier_language']} / {yr['scribe_hand']}</td>
+                <td>{yr['detected_lines']} / {yr['expected_lines']} ({yr['line_yield_pct']}%)</td>
+                <td>{yr['detected_words']} / {yr['expected_words']} ({yr['word_yield_pct']}%)</td>
+                <td>{yr['extracted_strokes']}</td>
+                <td>{yr['avg_strokes_per_word']}</td>
+                <td><span class="badge-hyp">{yr['status']}</span> <small style="color:var(--text-dim)">{diag_str}</small></td>
+            </tr>
+            """)
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -347,6 +365,28 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
     </div>
 
     <div class="section-title">
+        <span>Ground-Truth Paleographic Yield Benchmark (Takahashi EVA Census vs Automated Vectorization)</span>
+    </div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Folio & Section</th>
+                    <th>Language / Scribe</th>
+                    <th>Lines (Detected / Census)</th>
+                    <th>Words (Vectorized / Census)</th>
+                    <th>Extracted Strokes</th>
+                    <th>Strokes / Word</th>
+                    <th>Calibration Diagnostic</th>
+                </tr>
+            </thead>
+            <tbody>
+                {"".join(yield_rows)}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section-title">
         <span>Comparative Information-Theoretic Diagnostics Suite</span>
     </div>
     <div class="table-container">
@@ -391,6 +431,7 @@ def main():
     all_voynich_strokes = []
     all_serafini_words = []
     all_serafini_strokes = []
+    yield_reports = []
 
     # 1. Process Voynich Manuscript Scans (from Yale Beinecke high-res or PDF)
     # Master archival folios
@@ -402,6 +443,17 @@ def main():
             res = process_manuscript_page(folio_id, img, base_out, "voynich", normalizer, max_words_per_page=35)
             all_voynich_words.extend(res["words"])
             all_voynich_strokes.extend(res["strokes"])
+
+            # Evaluate yield vs standard paleographic ground truth census
+            yr = PaleographyYieldValidator.evaluate_yield(
+                folio_id=folio_id,
+                detected_lines=res["line_count"],
+                detected_words=res["word_count"],
+                extracted_strokes=len(res["strokes"])
+            )
+            yield_reports.append(yr)
+            if yr["has_reference"]:
+                print(f"  [>] Ground Truth Benchmark: {yr['detected_lines']}/{yr['expected_lines']} lines ({yr['line_yield_pct']}%), Scribe: {yr['scribe_hand']} ({yr['currier_language']})")
 
     # 2. Process Codex Seraphinianus Scans (from PDF)
     serafini_pdf = Path("data/scans/seraphinianus/Codex Seraphinianus.pdf")
@@ -438,8 +490,9 @@ def main():
 
     # 5. Generate Grand Visual Atlas
     atlas_path = base_out / "grand_paleography_atlas.html"
-    generate_grand_atlas_html(all_voynich_words, all_serafini_words, bench_results, atlas_path)
+    generate_grand_atlas_html(all_voynich_words, all_serafini_words, bench_results, yield_reports, atlas_path)
 
 
 if __name__ == "__main__":
     main()
+
