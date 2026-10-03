@@ -44,3 +44,25 @@ def test_segmenter():
 
     words = segmenter.segment_words(line1)
     assert len(words) == 2
+
+
+def test_color_normalizer():
+    from voynich_ductus.ingestion.color_normalizer import ColorIlluminationNormalizer
+
+    normalizer = ColorIlluminationNormalizer()
+    
+    # Create synthetic RGB image with parchment background (warm beige), dark text ink, and green plant leaf
+    h, w = 100, 100
+    img_arr = np.full((h, w, 3), [220, 200, 170], dtype=np.uint8) # parchment
+    img_arr[20:30, 20:80] = [40, 30, 20] # dark ink text
+    img_arr[60:80, 20:80] = [40, 150, 40] # bright green leaf pigment
+    
+    pil_img = Image.fromarray(img_arr)
+    ink_mask, clean_gray = normalizer.extract_ink_mask_chromatic(pil_img)
+    
+    assert ink_mask.shape == (h, w)
+    # Ink area should be True (detected)
+    assert np.mean(ink_mask[22:28, 22:78]) > 0.5
+    # Green plant area should be rejected (mostly False)
+    assert np.mean(ink_mask[62:78, 22:78]) < 0.2
+

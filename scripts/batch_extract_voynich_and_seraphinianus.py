@@ -1,6 +1,7 @@
 """
 Full-scale batch vectorization and paleographic atlas generator.
-Processes real scans of the Voynich Manuscript (Beinecke MS 408) and the Codex Seraphinianus (Luigi Serafini).
+Processes real master scans of the Voynich Manuscript (Beinecke MS 408) and the Codex Seraphinianus (Luigi Serafini).
+Applies color normalization, illumination flattening, and chromatic pigment separation.
 """
 
 import os
@@ -12,6 +13,7 @@ from PIL import Image
 
 from voynich_ductus.ingestion.pdf_loader import PDFScanLoader
 from voynich_ductus.ingestion.iiif_client import IIIFClient
+from voynich_ductus.ingestion.color_normalizer import ColorIlluminationNormalizer
 from voynich_ductus.ingestion.binarization import Binarizer
 from voynich_ductus.ingestion.segmenter import LineSegmenter
 from voynich_ductus.vectorizer.skeleton import Skeletonizer
@@ -26,19 +28,33 @@ from voynich_ductus.diagnostics.benchmark_suite import BenchmarkSuite
 from voynich_ductus.utils.io import BenchmarkFormatter
 
 
-def process_manuscript_image(page_id: str, image: Image.Image, output_dir: Path, subfolder: str, max_words: int = 30) -> Dict[str, Any]:
+def process_manuscript_page(
+    page_id: str,
+    image: Image.Image,
+    output_dir: Path,
+    subfolder: str,
+    normalizer: ColorIlluminationNormalizer,
+    max_words_per_page: int = 40
+) -> Dict[str, Any]:
     """
-    Performs binarization, peak-valley line slicing, CC word extraction, and ductus vectorization on any scan page.
+    Normalizes color/illumination, separates ink from colored pigments,
+    slices text lines & words, and vectorizes into SVG ductus files.
     """
-    print(f"[*] Processing {subfolder.upper()} page {page_id} (Size: {image.size})...")
+    print(f"[*] Processing {subfolder.upper()} page '{page_id}' (Resolution: {image.size[0]}x{image.size[1]})...")
     
-    binarizer = Binarizer(method="sauvola", window_size=25, k=0.22)
-    binary = binarizer.binarize(image)
-    binary = binarizer.remove_small_artifacts(binary, min_size=5)
+    # 1. Color normalization & Chromatic pigment separation (strips green/ochre/blue paint)
+    ink_mask, _ = normalizer.extract_ink_mask_chromatic(image)
+    
+    # Fallback to local Sauvola adaptive binarization if ink mask is too sparse
+    if np.sum(ink_mask) < 2000:
+        binarizer = Binarizer(method="sauvola", window_size=25, k=0.22)
+        ink_mask = binarizer.binarize(image)
+        ink_mask = binarizer.remove_small_artifacts(ink_mask, min_size=5)
 
-    segmenter = LineSegmenter(min_line_pitch=32, min_line_height=18, min_word_width=18, min_word_area=35)
-    lines = segmenter.segment_lines(binary, auto_isolate=True)
-    print(f"  [+] Extracted {len(lines)} text lines on {page_id}")
+    # 2. Text Paragraph & Line Extraction (excludes marginal drawings & header arches)
+    segmenter = LineSegmenter(min_line_pitch=30, min_line_height=16, min_word_width=18, min_word_area=35)
+    lines = segmenter.segment_lines(ink_mask, auto_isolate=True)
+    print(f"  [+] Identified {len(lines)} clean text lines on '{page_id}'")
 
     skel_engine = Skeletonizer(method="medial_axis")
     graph_extractor = StrokeGraphExtractor()
@@ -49,14 +65,14 @@ def process_manuscript_image(page_id: str, image: Image.Image, output_dir: Path,
     word_count = 0
 
     for line in lines:
-        if word_count >= max_words:
+        if word_count >= max_words_per_page:
             break
-        raw_words = segmenter.segment_words(line["image"], line_offset=(line["bbox"][0], line["bbox"][1]), space_gap_min=13)
+        raw_words = segmenter.segment_words(line["image"], line_offset=(line["bbox"][0], line["bbox"][1]), space_gap_min=12)
         for w in raw_words:
-            if word_count >= max_words:
+            if word_count >= max_words_per_page:
                 break
             w_img = w["image"]
-            if w_img.shape[0] < 12 or w_img.shape[1] < 15:
+            if w_img.shape[0] < 10 or w_img.shape[1] < 15:
                 continue
 
             # Vectorize word
@@ -133,7 +149,7 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
     """
     palette = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#00ced1", "#e6ab02", "#66a61e"]
 
-    def render_cards(word_list, max_items=24):
+    def render_cards(word_list, max_items=36):
         cards = []
         for it in word_list[:max_items]:
             chips = "".join(f'<span class="chip" style="background:{palette[i % len(palette)]}">T{i+1}</span>' for i in range(min(it['stroke_count'], 10)))
@@ -191,7 +207,7 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VoynichDuctus & Codex Seraphinianus — Real Scans Vector Paleography Atlas</title>
+    <title>VoynichDuctus & Codex Seraphinianus — Real Master Scans Vector Paleography Atlas</title>
     <style>
         :root {{
             --bg: #0b0f19;
@@ -307,24 +323,24 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
 </head>
 <body>
     <div class="header">
-        <h1>VoynichDuctus & Codex Seraphinianus — Real Scans Paleography Atlas</h1>
+        <h1>VoynichDuctus & Codex Seraphinianus — Real Master Scans Paleography Atlas</h1>
         <p class="intro">
-            Comprehensive batch derendering from genuine scanned pages to parametric vector stroke graphs (SVG).
-            Colors represent the scribal pen sequence (1st stroke, 2nd stroke, etc.) resolved via Euler-Bernoulli tangent continuity and right-handed biomechanical writing priors.
+            High-purity batch vectorization with flat-field illumination flattening and chromatic pigment separation.
+            Colored illustration areas (green leaves, ochre roots, blue water) are automatically rejected to extract pure iron-gall and monochrome cursive text strokes.
         </p>
     </div>
 
     <div class="section-title">
-        <span>Voynich Manuscript (Beinecke MS 408 — Real Folios 1r & 1v)</span>
-        <span class="badge-voynich">{len(voynich_words)} Real Words Vectorized</span>
+        <span>Voynich Manuscript (Beinecke MS 408 — Master Scans 1r & 1v)</span>
+        <span class="badge-voynich">{len(voynich_words)} Pure Words Vectorized</span>
     </div>
     <div class="grid">
         {render_cards(voynich_words)}
     </div>
 
     <div class="section-title">
-        <span>Codex Seraphinianus (Luigi Serafini, 1981 — Real Digitized Scans)</span>
-        <span class="badge-serafini">{len(serafini_words)} Real Words Vectorized</span>
+        <span>Codex Seraphinianus (Luigi Serafini, 1981 — High-Resolution Scans)</span>
+        <span class="badge-serafini">{len(serafini_words)} Pure Words Vectorized</span>
     </div>
     <div class="grid">
         {render_cards(serafini_words)}
@@ -358,7 +374,7 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
 """
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"\n[+] Real Scans Paleography Atlas saved to: {output_path.resolve()}")
+    print(f"\n[+] Real Master Scans Paleography Atlas saved to: {output_path.resolve()}")
 
 
 def main():
@@ -369,18 +385,21 @@ def main():
     (base_out / "seraphinianus" / "png").mkdir(parents=True, exist_ok=True)
     (base_out / "seraphinianus" / "svg").mkdir(parents=True, exist_ok=True)
 
+    normalizer = ColorIlluminationNormalizer()
+
     all_voynich_words = []
     all_voynich_strokes = []
     all_serafini_words = []
     all_serafini_strokes = []
 
     # 1. Process Voynich Manuscript Scans (from Yale Beinecke high-res or PDF)
-    high_res_folies = [Path("data/scans/f001r.jpg"), Path("data/scans/f001v.jpg")]
-    for hf in high_res_folies:
-        if hf.exists():
-            img = Image.open(hf)
-            folio_id = hf.stem
-            res = process_manuscript_image(folio_id, img, base_out, "voynich", max_words=25)
+    # Master archival folios
+    voynich_sources = [Path("data/scans/f001r.jpg"), Path("data/scans/f001v.jpg")]
+    for vf in voynich_sources:
+        if vf.exists():
+            img = Image.open(vf)
+            folio_id = vf.stem
+            res = process_manuscript_page(folio_id, img, base_out, "voynich", normalizer, max_words_per_page=35)
             all_voynich_words.extend(res["words"])
             all_voynich_strokes.extend(res["strokes"])
 
@@ -388,22 +407,22 @@ def main():
     serafini_pdf = Path("data/scans/seraphinianus/Codex Seraphinianus.pdf")
     if serafini_pdf.exists():
         loader_s = PDFScanLoader(serafini_pdf)
-        # Process sample text-heavy pages (e.g. pages 15, 20, 25)
-        for page_idx in [15, 20, 25]:
+        # Process multiple text-dense pages across chapters
+        for page_idx in [15, 20, 25, 30]:
             try:
                 page_img = loader_s.get_page_image(page_idx, target_min_dim=1500)
-                res_s = process_manuscript_image(f"serafini_p{page_idx:03d}", page_img, base_out, "seraphinianus", max_words=15)
+                res_s = process_manuscript_page(f"serafini_p{page_idx:03d}", page_img, base_out, "seraphinianus", normalizer, max_words_per_page=20)
                 all_serafini_words.extend(res_s["words"])
                 all_serafini_strokes.extend(res_s["strokes"])
             except Exception as e:
                 print(f"[-] Error processing Seraphinianus page {page_idx}: {e}")
 
-    # 3. Unsupervised Clustering on Voynich strokes
+    # 3. Unsupervised Alphabet Induction
     if all_voynich_strokes:
         clusterer, labels, tokenizer = cluster_and_induce_alphabet(all_voynich_strokes, n_clusters=25)
         print(f"[+] Discovered {clusterer.get_cluster_count()} canonical glyph clusters across real manuscript folios.")
 
-    # 4. Run Comparative Information-Theoretic Diagnostics
+    # 4. Comparative Information-Theoretic Diagnostics
     from voynich_ductus.generators.timm_self_citation import TimmSelfCitationGenerator
     from voynich_ductus.generators.seraphinianus import SeraphinianusEngine
     from voynich_ductus.generators.baselines import BaselineGenerator
