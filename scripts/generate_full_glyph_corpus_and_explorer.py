@@ -546,7 +546,15 @@ def generate_explorer_html(
 
 def main():
     base_out = Path("./output/atlas_dataset")
-    base_out.mkdir(parents=True, exist_ok=True)
+    
+    # 1. Clean slate: wipe old glyph dirs to ensure 100% pure extractions
+    import shutil
+    for sub in ["voynich", "seraphinianus"]:
+        sub_dir = base_out / sub / "glyphs"
+        if sub_dir.exists():
+            shutil.rmtree(sub_dir)
+        (base_out / sub / "glyphs" / "png").mkdir(parents=True, exist_ok=True)
+        (base_out / sub / "glyphs" / "svg").mkdir(parents=True, exist_ok=True)
 
     segmenter = GlyphSegmenter()
     catalogue_builder = GlyphCatalogue(target_alphabet_size=28)
@@ -558,21 +566,37 @@ def main():
     voynich_pages_data = []
     all_voynich_glyphs = []
 
-    voynich_sources = [Path("data/scans/f001r.jpg"), Path("data/scans/f001v.jpg")]
-    for vf in voynich_sources:
+    # Master archival scans first
+    voynich_sources = [("f001r", Path("data/scans/f001r.jpg")), ("f001v", Path("data/scans/f001v.jpg"))]
+    for folio_id, vf in voynich_sources:
         if vf.exists():
             img = Image.open(vf)
-            folio_id = vf.stem
-            print(f"[*] Extracting all glyphs on Voynich '{folio_id}'...")
+            print(f"[*] Extracting all glyphs on Voynich master '{folio_id}'...")
             res = segmenter.extract_page_glyphs(folio_id, img, output_dir=base_out, subfolder="voynich")
-            print(f"  [+] Identified {res['line_count']} lines, extracted {res['glyph_count']} isolated glyphs.")
+            print(f"  [+] Identified {res['line_count']} lines, extracted {res['glyph_count']} pure isolated glyphs.")
             voynich_pages_data.append(res)
             all_voynich_glyphs.extend(res["glyphs"])
 
-    print(f"[*] Inducing Voynich Canonical Alphabet from {len(all_voynich_glyphs)} isolated glyphs...")
+    # Load additional text folios from Voynich PDF if available
+    voynich_pdf = Path("data/scans/voynich/VoynichManuscript.pdf")
+    if voynich_pdf.exists():
+        loader_v = PDFScanLoader(voynich_pdf)
+        for page_idx in [2, 3, 4, 5]:  # folios 2r, 2v, 3r, 3v
+            try:
+                folio_name = f"f{page_idx:03d}"
+                print(f"[*] Extracting all glyphs on Voynich folio '{folio_name}' from PDF...")
+                p_img = loader_v.get_page_image(page_idx, target_min_dim=1500)
+                res_v = segmenter.extract_page_glyphs(folio_name, p_img, output_dir=base_out, subfolder="voynich")
+                print(f"  [+] Identified {res_v['line_count']} lines, extracted {res_v['glyph_count']} pure isolated glyphs.")
+                voynich_pages_data.append(res_v)
+                all_voynich_glyphs.extend(res_v["glyphs"])
+            except Exception as e:
+                print(f"[-] Error on Voynich PDF page {page_idx}: {e}")
+
+    print(f"\n[*] Inducing Voynich Canonical Alphabet from {len(all_voynich_glyphs)} isolated glyphs...")
     voynich_catalogue = catalogue_builder.build_catalogue(all_voynich_glyphs)
     catalogue_builder.export_catalogue_json(voynich_catalogue, base_out / "voynich" / "voynich_alphabet_catalogue.json")
-    print(f"  [+] Discovered {voynich_catalogue['canonical_alphabet_size']} unique canonical glyph archetypes.")
+    print(f"  [+] Discovered {voynich_catalogue['canonical_alphabet_size']} unique canonical glyph archetypes across Voynich folios.")
 
     # 2. Process Codex Seraphinianus Pages
     print("\n=======================================================")
@@ -584,22 +608,23 @@ def main():
     serafini_pdf = Path("data/scans/seraphinianus/Codex Seraphinianus.pdf")
     if serafini_pdf.exists():
         loader_s = PDFScanLoader(serafini_pdf)
-        for p_idx in [15, 20, 25, 30]:
+        # Select dense cursive text pages
+        for p_idx in [15, 20, 25, 30, 35, 40]:
             try:
                 page_id = f"serafini_p{p_idx:03d}"
                 print(f"[*] Extracting all glyphs on Seraphinianus page {p_idx}...")
                 p_img = loader_s.get_page_image(p_idx, target_min_dim=1500)
                 res_s = segmenter.extract_page_glyphs(page_id, p_img, output_dir=base_out, subfolder="seraphinianus")
-                print(f"  [+] Identified {res_s['line_count']} lines, extracted {res_s['glyph_count']} isolated glyphs.")
+                print(f"  [+] Identified {res_s['line_count']} lines, extracted {res_s['glyph_count']} pure isolated glyphs.")
                 serafini_pages_data.append(res_s)
                 all_serafini_glyphs.extend(res_s["glyphs"])
             except Exception as e:
-                print(f"[-] Error on page {p_idx}: {e}")
+                print(f"[-] Error on Seraphinianus page {p_idx}: {e}")
 
-    print(f"[*] Inducing Seraphinianus Canonical Alphabet from {len(all_serafini_glyphs)} isolated glyphs...")
+    print(f"\n[*] Inducing Seraphinianus Canonical Alphabet from {len(all_serafini_glyphs)} isolated glyphs...")
     serafini_catalogue = catalogue_builder.build_catalogue(all_serafini_glyphs)
     catalogue_builder.export_catalogue_json(serafini_catalogue, base_out / "seraphinianus" / "seraphinianus_alphabet_catalogue.json")
-    print(f"  [+] Discovered {serafini_catalogue['canonical_alphabet_size']} unique canonical glyph archetypes.")
+    print(f"  [+] Discovered {serafini_catalogue['canonical_alphabet_size']} unique canonical glyph archetypes across Seraphinianus pages.")
 
     # 3. Generate Interactive Visual Explorer
     explorer_path = base_out / "grand_glyph_explorer.html"
@@ -608,3 +633,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

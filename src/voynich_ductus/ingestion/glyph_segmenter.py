@@ -73,11 +73,20 @@ class GlyphSegmenter:
         # Subtract colored paint from text ink mask
         ink_mask = sauvola_mask & (~is_paint)
 
-        # 3. Strip page borders / margins (outer 3%)
-        margin_y = max(10, int(H * 0.03))
-        margin_x = max(10, int(W * 0.03))
+        # 3. Strip page borders & binding margins (outer 8% on all edges)
+        margin_y = max(20, int(H * 0.08))
+        margin_x = max(20, int(W * 0.08))
         inner_mask = np.zeros_like(ink_mask)
         inner_mask[margin_y:H - margin_y, margin_x:W - margin_x] = True
+
+        # Cut off outer 12% corners (where folio marks, creases, or thumb marks reside)
+        corner_y = int(H * 0.12)
+        corner_x = int(W * 0.12)
+        inner_mask[:corner_y, :corner_x] = False
+        inner_mask[:corner_y, W - corner_x:] = False
+        inner_mask[H - corner_y:, :corner_x] = False
+        inner_mask[H - corner_y:, W - corner_x:] = False
+
         ink_mask = ink_mask & inner_mask
 
         # 4. Remove large drawing connected components (drawings, frames, large diagrams)
@@ -88,8 +97,14 @@ class GlyphSegmenter:
         for p in props:
             ph = p.bbox[2] - p.bbox[0]
             pw = p.bbox[3] - p.bbox[1]
-            if p.area > self.max_drawing_area or ph > self.max_glyph_height * 2.2 or pw > self.max_glyph_width * 3.0:
-                # Clear large drawing component
+            aspect = pw / max(1, ph)
+            # Rejection criteria:
+            # - Too large area (drawings/diagrams)
+            # - Height or width exceeding text line scale
+            # - Extreme aspect ratio (horizontal rules or vertical crease lines)
+            is_drawing = p.area > self.max_drawing_area or ph > self.max_glyph_height * 1.8 or pw > self.max_glyph_width * 2.5
+            is_line_smear = (aspect > 5.0 and pw > 80) or (aspect < 0.15 and ph > 80)
+            if is_drawing or is_line_smear:
                 clean_text_mask[labeled == p.label] = False
 
         return clean_text_mask, rgb_arr
@@ -124,10 +139,17 @@ class GlyphSegmenter:
             for p in w_props:
                 gh = p.bbox[2] - p.bbox[0]
                 gw = p.bbox[3] - p.bbox[1]
+                aspect = gw / max(1, gh)
+                density = p.area / max(1, gh * gw)
+
+                # Strict glyph dimension and density validation
                 if p.area < self.min_glyph_area or gh < self.min_glyph_height or gw < self.min_glyph_width:
                     continue
-                if gh > self.max_glyph_height:
+                if gh > self.max_glyph_height or gw > self.max_glyph_width:
                     continue
+                if aspect > 4.2 or aspect < 0.18 or density < 0.10:
+                    continue
+
 
                 glyph_id = f"{page_id}_{word_id}_G{glyph_idx:02d}"
                 gy0 = y_off + wy0 + p.bbox[0]
