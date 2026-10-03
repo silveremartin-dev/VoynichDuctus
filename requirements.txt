@@ -1,0 +1,12 @@
+numpy>=1.22.0
+scipy>=1.8.0
+scikit-image>=0.19.0
+scikit-learn>=1.1.0
+networkx>=2.8.0
+Pillow>=9.0.0
+requests>=2.28.0
+matplotlib>=3.5.0
+click>=8.0.0
+tqdm>=4.64.0
+pytest>=7.0.0
+pytest-cov>=4.0.0
