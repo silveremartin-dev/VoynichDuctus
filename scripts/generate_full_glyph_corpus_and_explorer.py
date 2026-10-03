@@ -181,7 +181,7 @@ def generate_explorer_html(
         main {{
             flex: 1;
             padding: 12px 16px;
-            max-width: 1900px;
+            max-width: 1920px;
             margin: 0 auto;
             width: 100%;
         }}
@@ -204,7 +204,7 @@ def generate_explorer_html(
         /* 4-Panel Page Layout */
         .page-view-layout {{
             display: grid;
-            grid-template-columns: 210px 1.4fr 1fr 1.3fr;
+            grid-template-columns: 210px 1.4fr 1fr 1.35fr;
             gap: 12px;
             height: calc(100vh - 150px);
         }}
@@ -415,24 +415,32 @@ def generate_explorer_html(
         .inspector-trio {{
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 6px;
+            gap: 8px;
         }}
         .preview-box-large {{
             background: #000;
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 6px;
+            padding: 8px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 180px;
+            height: 250px;
+            min-height: 250px;
             text-align: center;
+            overflow: hidden;
         }}
-        .preview-box-large img, .preview-box-large svg {{
-            max-width: 100%;
-            max-height: 150px;
+        .preview-box-large img {{
+            width: 100%;
+            height: 200px;
             object-fit: contain;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
+        }}
+        .preview-box-large svg {{
+            width: 100%;
+            height: 200px;
         }}
         .meta-list {{
             background: var(--card-bg);
@@ -959,7 +967,7 @@ def generate_explorer_html(
             const ctx = canvas.getContext('2d');
             ctx.drawImage(pageImageObj, 0, 0);
 
-            // Draw bounding boxes for all glyphs
+            // Draw discrete and elegant bounding boxes
             page.glyphs.forEach(g => {{
                 if (archetypeFilterVal !== 'ALL' && g.canonical_type !== archetypeFilterVal) {{
                     return;
@@ -969,22 +977,17 @@ def generate_explorer_html(
                 const isSelected = selectedGlyph && selectedGlyph.glyph_id === g.glyph_id;
 
                 if (isSelected) {{
-                    ctx.strokeStyle = '#38bdf8';
-                    ctx.lineWidth = 6;
-                    ctx.fillStyle = 'rgba(56, 189, 248, 0.45)';
+                    // Selected box: crisp glowing cyan rectangular frame (NO distracting circles!)
+                    ctx.strokeStyle = '#00e5ff';
+                    ctx.lineWidth = 3.5;
+                    ctx.fillStyle = 'rgba(0, 229, 255, 0.25)';
                     ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
                     ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-
-                    // Add glowing target marker
-                    ctx.beginPath();
-                    ctx.arc((x0 + x1)/2, (y0 + y1)/2, Math.max(16, (x1 - x0)/1.3), 0, 2 * Math.PI);
-                    ctx.strokeStyle = 'rgba(56, 189, 248, 0.95)';
-                    ctx.lineWidth = 3.5;
-                    ctx.stroke();
                 }} else {{
-                    ctx.strokeStyle = 'rgba(245, 158, 11, 0.85)';
-                    ctx.lineWidth = 2.5;
-                    ctx.fillStyle = 'rgba(245, 158, 11, 0.15)';
+                    // Default box: subtle, elegant semi-transparent frame
+                    ctx.strokeStyle = 'rgba(56, 189, 248, 0.40)';
+                    ctx.lineWidth = 1.5;
+                    ctx.fillStyle = 'rgba(56, 189, 248, 0.04)';
                     ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
                     ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
                 }}

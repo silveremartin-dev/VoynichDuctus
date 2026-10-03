@@ -72,16 +72,21 @@ class GlyphSegmenter:
         mean_page_sat = float(np.mean(sat))
         is_warm_parchment = mean_page_sat >= 0.18
 
+        from scipy.ndimage import binary_dilation
+
         if is_warm_parchment:
             # Voynich / Medieval parchment:
             # Text ink is dark iron-gall. Illustrations are green foliage, blue water, or vivid red paint.
-            is_green = (hue >= 0.18) & (hue <= 0.48) & (sat > 0.35) & (val > 0.40)
-            is_blue = (hue >= 0.50) & (hue <= 0.75) & (sat > 0.35) & (val > 0.40)
-            is_illustration_color = is_green | is_blue | ((chroma > 0.35) & (val > 0.45))
+            is_green = (hue >= 0.15) & (hue <= 0.48) & (sat > 0.18) & (val > 0.20)
+            is_blue = (hue >= 0.48) & (hue <= 0.78) & (sat > 0.18) & (val > 0.20)
+            is_red = ((hue >= 0.85) | (hue <= 0.05)) & (sat > 0.28) & (val > 0.25)
+            is_illustration_color = is_green | is_blue | is_red | ((chroma > 0.30) & (val > 0.35))
+            is_illustration_color = binary_dilation(is_illustration_color, iterations=4)
         else:
             # Codex Seraphinianus / Printed paper:
-            # Text ink is strictly achromatic (chroma < 0.08). All colored pixels are illustrations!
-            is_illustration_color = (chroma > 0.08)
+            # Text ink is strictly achromatic (chroma < 0.07). All colored pixels are illustrations!
+            is_illustration_color = (chroma > 0.07)
+            is_illustration_color = binary_dilation(is_illustration_color, iterations=5)
 
         # 2. Local adaptive Sauvola thresholding for ink
         sauvola_mask = self.binarizer.binarize(image)
@@ -89,7 +94,6 @@ class GlyphSegmenter:
 
         # Subtract colored illustration paints
         ink_mask = sauvola_mask & (~is_illustration_color)
-
 
         # 3. Strip page borders & binding margins (outer 8% on all edges)
         margin_y = max(20, int(H * 0.08))
@@ -201,11 +205,11 @@ class GlyphSegmenter:
                 fill_factor = item["area"] / max(1, gh * gw)
 
                 # 1. Strict glyph dimension & scale bounds (captures standard medieval minims)
-                if item["area"] < 12 or gh < 7 or gw < 4:
+                if item["area"] < 14 or gh < 8 or gw < 5:
                     continue
                 if gh > self.max_glyph_height or gw > self.max_glyph_width:
                     continue
-                if aspect > 3.5 or aspect < 0.15:
+                if aspect > 3.4 or aspect < 0.16:
                     continue
 
                 # 2. Filamentary 1D fractal stroke check (rejects solid textures, fur, ink blobs)
@@ -229,14 +233,18 @@ class GlyphSegmenter:
                         if subfolder == "seraphinianus":
                             # Strict achromatic check for Seraphinianus (rejects colored illustrations, allows JPEG ink artifacts)
                             chroma_ink = np.max(ink_pixels, axis=1) - np.min(ink_pixels, axis=1)
-                            if np.mean(chroma_ink) > 0.12:
+                            if np.mean(chroma_ink) > 0.10:
                                 continue
                         else:
-                            # Voynich / Medieval parchment: reject green/blue/cyan paint (Hue in [0.22, 0.65])
+                            # Voynich / Medieval parchment: reject green/blue/cyan paint (Hue in [0.15, 0.78])
                             from skimage.color import rgb2hsv
                             ink_hsv = rgb2hsv(ink_pixels.reshape(-1, 1, 3))
-                            is_colored_paint = (ink_hsv[:, 0, 2] > 0.35) & (ink_hsv[:, 0, 1] > 0.35) & (ink_hsv[:, 0, 0] >= 0.20) & (ink_hsv[:, 0, 0] <= 0.65)
-                            if np.mean(is_colored_paint) > 0.35:
+                            is_paint_stroke = (
+                                ((ink_hsv[:, 0, 0] >= 0.15) & (ink_hsv[:, 0, 0] <= 0.48) & (ink_hsv[:, 0, 1] > 0.16)) |
+                                ((ink_hsv[:, 0, 0] >= 0.48) & (ink_hsv[:, 0, 0] <= 0.78) & (ink_hsv[:, 0, 1] > 0.16)) |
+                                (((ink_hsv[:, 0, 0] >= 0.85) | (ink_hsv[:, 0, 0] <= 0.05)) & (ink_hsv[:, 0, 1] > 0.28) & (ink_hsv[:, 0, 2] > 0.35))
+                            )
+                            if np.mean(is_paint_stroke) > 0.15:
                                 continue
 
                 # Vectorize glyph ductus
@@ -248,8 +256,12 @@ class GlyphSegmenter:
                 except Exception:
                     ordered_strokes = []
 
-                if not ordered_strokes or len(ordered_strokes) > 5:
+                if not ordered_strokes or len(ordered_strokes) > 6:
                     continue
+
+                total_stroke_len = sum(len(s.get("points", [])) for s in ordered_strokes)
+                if total_stroke_len < 12:
+                    continue  # Reject micro-speck noise
 
                 glyph_id = f"{page_id}_{word_id}_G{glyph_idx:02d}"
 
