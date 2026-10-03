@@ -133,7 +133,7 @@ To prevent unfalsifiable claims, the pipeline includes ground-truth reference ge
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/VoynichDuctus.git
+git clone https://github.com/silveremartin-dev/VoynichDuctus.git
 cd VoynichDuctus
 
 # Install in editable mode
