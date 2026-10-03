@@ -37,11 +37,17 @@ venv.bak/
 
 # Data and large downloads
 data/
+scans/
+scan/
 downloads/
 raw_scans/
 output/
 *.tiff
 *.tif
+*.pdf
+*.jpg
+*.jpeg
+*.png
 *.h5
 *.pt
 *.onnx

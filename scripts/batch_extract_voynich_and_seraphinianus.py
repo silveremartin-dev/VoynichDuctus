@@ -1,6 +1,6 @@
 """
-Batch Extraction and Unsupervised Alphabet Induction Pipeline for
-the Voynich Manuscript (Beinecke MS 408) and the Codex Seraphinianus.
+Full-scale batch vectorization and paleographic atlas generator.
+Processes real scans of the Voynich Manuscript (Beinecke MS 408) and the Codex Seraphinianus (Luigi Serafini).
 """
 
 import os
@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Tuple
 import numpy as np
 from PIL import Image
 
+from voynich_ductus.ingestion.pdf_loader import PDFScanLoader
 from voynich_ductus.ingestion.iiif_client import IIIFClient
 from voynich_ductus.ingestion.binarization import Binarizer
 from voynich_ductus.ingestion.segmenter import LineSegmenter
@@ -21,43 +22,41 @@ from voynich_ductus.embeddings.geometric_features import GeometricFeatureExtract
 from voynich_ductus.embeddings.stroke_autoencoder import StrokeLatentProjector
 from voynich_ductus.clustering.clusterer import GlyphClusterer
 from voynich_ductus.clustering.tokenizer import StrokeTokenizer
-from voynich_ductus.generators.seraphinianus import SeraphinianusEngine
 from voynich_ductus.diagnostics.benchmark_suite import BenchmarkSuite
 from voynich_ductus.utils.io import BenchmarkFormatter
 
 
-def process_real_folio(folio_id: str, scan_path: Path, output_dir: Path, max_words: int = 30) -> Dict[str, Any]:
+def process_manuscript_image(page_id: str, image: Image.Image, output_dir: Path, subfolder: str, max_words: int = 30) -> Dict[str, Any]:
     """
-    Processes a real manuscript folio: binarizes, segments lines/words, vectorizes to SVG, and extracts strokes.
+    Performs binarization, peak-valley line slicing, CC word extraction, and ductus vectorization on any scan page.
     """
-    print(f"[*] Processing real folio {folio_id} from {scan_path.name}...")
-    img = Image.open(scan_path)
+    print(f"[*] Processing {subfolder.upper()} page {page_id} (Size: {image.size})...")
     
     binarizer = Binarizer(method="sauvola", window_size=25, k=0.22)
-    binary = binarizer.binarize(img)
+    binary = binarizer.binarize(image)
     binary = binarizer.remove_small_artifacts(binary, min_size=5)
 
-    segmenter = LineSegmenter(min_line_height=18)
-    lines = segmenter.segment_lines(binary)
-    print(f"  [+] Found {len(lines)} lines on {folio_id}")
+    segmenter = LineSegmenter(min_line_pitch=32, min_line_height=18, min_word_width=18, min_word_area=35)
+    lines = segmenter.segment_lines(binary, auto_isolate=True)
+    print(f"  [+] Extracted {len(lines)} text lines on {page_id}")
 
     skel_engine = Skeletonizer(method="medial_axis")
     graph_extractor = StrokeGraphExtractor()
     resolver = JunctionResolver(right_handed_prior=True)
 
     words_data = []
-    all_folio_strokes = []
-
+    all_strokes = []
     word_count = 0
+
     for line in lines:
         if word_count >= max_words:
             break
-        raw_words = segmenter.segment_words(line["image"], line_offset=(line["bbox"][0], line["bbox"][1]), space_threshold=14)
-        for w_idx, w in enumerate(raw_words):
+        raw_words = segmenter.segment_words(line["image"], line_offset=(line["bbox"][0], line["bbox"][1]), space_gap_min=13)
+        for w in raw_words:
             if word_count >= max_words:
                 break
             w_img = w["image"]
-            if w_img.shape[0] < 10 or w_img.shape[1] < 10:
+            if w_img.shape[0] < 12 or w_img.shape[1] < 15:
                 continue
 
             # Vectorize word
@@ -68,16 +67,16 @@ def process_real_folio(folio_id: str, scan_path: Path, output_dir: Path, max_wor
                 continue
             ordered_strokes = resolver.resolve_and_order_strokes(raw_strokes)
 
-            word_id = f"{folio_id}_{line['line_id']}_{w['word_id']}"
+            word_id = f"{page_id}_{line['line_id']}_{w['word_id']}"
             svg_filename = f"{word_id}.svg"
             png_filename = f"{word_id}.png"
 
-            svg_path = output_dir / "voynich" / "svg" / svg_filename
-            png_path = output_dir / "voynich" / "png" / png_filename
+            svg_path = output_dir / subfolder / "svg" / svg_filename
+            png_path = output_dir / subfolder / "png" / png_filename
 
-            # Save cropped PNG patch
+            # Save clean cropped PNG patch
             y0, x0, y1, x1 = w["bbox"]
-            crop_patch = img.crop((x0, y0, x1, y1))
+            crop_patch = image.crop((x0, y0, x1, y1))
             crop_patch.save(png_path)
 
             # Export SVG
@@ -86,86 +85,33 @@ def process_real_folio(folio_id: str, scan_path: Path, output_dir: Path, max_wor
 
             words_data.append({
                 "word_id": word_id,
-                "folio_id": folio_id,
+                "page_id": page_id,
                 "bbox": w["bbox"],
                 "stroke_count": len(ordered_strokes),
                 "strokes": ordered_strokes,
-                "svg_rel": f"voynich/svg/{svg_filename}",
-                "png_rel": f"voynich/png/{png_filename}",
+                "svg_rel": f"{subfolder}/svg/{svg_filename}",
+                "png_rel": f"{subfolder}/png/{png_filename}",
                 "svg_content": svg_str
             })
 
-            all_folio_strokes.extend(ordered_strokes)
+            all_strokes.extend(ordered_strokes)
             word_count += 1
 
-    print(f"  [+] Extracted and vectorized {len(words_data)} real words ({len(all_folio_strokes)} strokes).")
+    print(f"  [+] Vectorized {len(words_data)} intact words ({len(all_strokes)} strokes).")
     return {
-        "folio_id": folio_id,
+        "page_id": page_id,
         "line_count": len(lines),
-        "word_count": len(words_data),
-        "words": words_data,
-        "strokes": all_folio_strokes
-    }
-
-
-def process_seraphinianus_corpus(output_dir: Path, num_words: int = 25) -> Dict[str, Any]:
-    """
-    Generates and vectorizes a corpus of Codex Seraphinianus words into SVGs.
-    """
-    print(f"[*] Processing Codex Seraphinianus corpus ({num_words} cursive words)...")
-    skel_engine = Skeletonizer(method="medial_axis")
-    graph_extractor = StrokeGraphExtractor()
-    resolver = JunctionResolver(right_handed_prior=True)
-    binarizer = Binarizer(method="sauvola", window_size=15)
-
-    words_data = []
-    all_strokes = []
-
-    for i in range(num_words):
-        has_cap = (i % 5 == 0)
-        n_prims = np.random.randint(3, 6)
-        img = SeraphinianusEngine.generate_serafini_word_image(num_primitives=n_prims, has_capital=has_cap)
-
-        word_id = f"serafini_word_{i+1:03d}"
-        png_path = output_dir / "seraphinianus" / "png" / f"{word_id}.png"
-        svg_path = output_dir / "seraphinianus" / "svg" / f"{word_id}.svg"
-        img.save(png_path)
-
-        binary = binarizer.binarize(img)
-        binary = binarizer.remove_small_artifacts(binary, min_size=4)
-
-        skel, widths = skel_engine.extract_skeleton(binary)
-        pixel_graph = graph_extractor.build_pixel_graph(skel, widths)
-        raw_strokes = graph_extractor.decompose_into_strokes(pixel_graph)
-        ordered_strokes = resolver.resolve_and_order_strokes(raw_strokes)
-
-        h, w = binary.shape
-        svg_str = VectorExporter.to_svg(ordered_strokes, width=w, height=h, output_path=svg_path)
-
-        words_data.append({
-            "word_id": word_id,
-            "has_capital": has_cap,
-            "stroke_count": len(ordered_strokes),
-            "strokes": ordered_strokes,
-            "svg_rel": f"seraphinianus/svg/{word_id}.svg",
-            "png_rel": f"seraphinianus/png/{word_id}.png",
-            "svg_content": svg_str
-        })
-        all_strokes.extend(ordered_strokes)
-
-    print(f"  [+] Extracted and vectorized {len(words_data)} Seraphinianus words ({len(all_strokes)} strokes).")
-    return {
         "word_count": len(words_data),
         "words": words_data,
         "strokes": all_strokes
     }
 
 
-def cluster_and_induce_alphabet(all_strokes: List[Dict[str, Any]], n_clusters: int = 24) -> Tuple[GlyphClusterer, np.ndarray, StrokeTokenizer]:
+def cluster_and_induce_alphabet(all_strokes: List[Dict[str, Any]], n_clusters: int = 25) -> Tuple[GlyphClusterer, np.ndarray, StrokeTokenizer]:
     """
-    Extracts 16-D geometric features from all extracted strokes and clusters them into canonical glyph primitives.
+    Induces canonical alphabet from extracted real stroke features via unsupervised clustering.
     """
-    print(f"[*] Extracting geometric descriptors from {len(all_strokes)} strokes...")
+    print(f"[*] Extracting 16-D geometric descriptors from {len(all_strokes)} strokes...")
     feature_extractor = GeometricFeatureExtractor()
     features = feature_extractor.extract_batch(all_strokes)
 
@@ -173,7 +119,7 @@ def cluster_and_induce_alphabet(all_strokes: List[Dict[str, Any]], n_clusters: i
     projector = StrokeLatentProjector(latent_dim=latent_dim)
     latent_space = projector.fit_transform(features)
 
-    print(f"[*] Inducing canonical alphabet via unsupervised clustering (target = ~{n_clusters} glyph primitives)...")
+    print(f"[*] Discovering canonical alphabet via unsupervised clustering (target = ~{n_clusters} glyph primitives)...")
     clusterer = GlyphClusterer(method="agglomerative", n_clusters=min(n_clusters, len(latent_space)))
     labels = clusterer.fit_predict(latent_space)
 
@@ -183,16 +129,16 @@ def cluster_and_induce_alphabet(all_strokes: List[Dict[str, Any]], n_clusters: i
 
 def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Dict], benchmark_results: Dict, output_path: Path):
     """
-    Generates an HTML atlas displaying real Voynich vs Seraphinianus words, vector SVGs, and diagnostics.
+    Renders the Grand Paleography Visual Atlas comparing real Voynich and Seraphinianus words.
     """
     palette = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#a65628", "#f781bf", "#00ced1", "#e6ab02", "#66a61e"]
 
-    def render_cards(word_list, max_items=18):
+    def render_cards(word_list, max_items=24):
         cards = []
         for it in word_list[:max_items]:
-            chips = "".join(f'<span class="chip" style="background:{palette[i % len(palette)]}">T{i+1}</span>' for i in range(min(it['stroke_count'], 12)))
-            if it['stroke_count'] > 12:
-                chips += f'<span class="chip" style="background:#64748b">+{it["stroke_count"]-12}</span>'
+            chips = "".join(f'<span class="chip" style="background:{palette[i % len(palette)]}">T{i+1}</span>' for i in range(min(it['stroke_count'], 10)))
+            if it['stroke_count'] > 10:
+                chips += f'<span class="chip" style="background:#475569">+{it["stroke_count"]-10}</span>'
 
             cards.append(f"""
             <div class="card">
@@ -202,11 +148,11 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
                 </div>
                 <div class="duo-view">
                     <div class="box">
-                        <span class="box-lbl">Original Crop</span>
+                        <span class="box-lbl">Scan Crop</span>
                         <img src="{it['png_rel']}" alt="{it['word_id']}">
                     </div>
                     <div class="box svg-box">
-                        <span class="box-lbl">Vector Ductus (SVG)</span>
+                        <span class="box-lbl">Ductus SVG</span>
                         {it['svg_content']}
                     </div>
                 </div>
@@ -219,7 +165,6 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
             """)
         return "\n".join(cards)
 
-    # Build benchmark table HTML
     table_rows = []
     for name, res in benchmark_results.items():
         ent = res["entropy"]
@@ -246,7 +191,7 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VoynichDuctus & Codex Seraphinianus — Grand Paleography Vector Atlas</title>
+    <title>VoynichDuctus & Codex Seraphinianus — Real Scans Vector Paleography Atlas</title>
     <style>
         :root {{
             --bg: #0b0f19;
@@ -277,7 +222,7 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
             display: flex;
             align-items: center;
             gap: 12px;
-            font-size: 1.5rem;
+            font-size: 1.4rem;
             margin: 40px 0 20px 0;
             padding-bottom: 8px;
             border-bottom: 2px solid var(--border);
@@ -305,7 +250,7 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
             align-items: center;
             margin-bottom: 12px;
         }}
-        .card-header h4 {{ margin: 0; font-size: 1rem; color: var(--accent); }}
+        .card-header h4 {{ margin: 0; font-size: 0.95rem; color: var(--accent); }}
         .badge {{ background: #1e293b; color: #94a3b8; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }}
         
         .duo-view {{
@@ -326,8 +271,8 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
             min-height: 80px;
         }}
         .box-lbl {{ font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px; }}
-        .box img {{ max-width: 90%; max-height: 65px; border-radius: 4px; object-fit: contain; }}
-        .svg-box svg {{ max-width: 100%; max-height: 65px; }}
+        .box img {{ max-width: 90%; max-height: 70px; border-radius: 4px; object-fit: contain; }}
+        .svg-box svg {{ max-width: 100%; max-height: 70px; }}
         
         .legend-row {{ margin-bottom: 10px; }}
         .legend-lbl {{ font-size: 0.75rem; color: var(--text-dim); display: block; margin-bottom: 4px; }}
@@ -362,24 +307,24 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
 </head>
 <body>
     <div class="header">
-        <h1>VoynichDuctus & Codex Seraphinianus — Vector Paleography Atlas</h1>
+        <h1>VoynichDuctus & Codex Seraphinianus — Real Scans Paleography Atlas</h1>
         <p class="intro">
-            Comprehensive batch derendering from raw scans to vector stroke graphs (SVG).
+            Comprehensive batch derendering from genuine scanned pages to parametric vector stroke graphs (SVG).
             Colors represent the scribal pen sequence (1st stroke, 2nd stroke, etc.) resolved via Euler-Bernoulli tangent continuity and right-handed biomechanical writing priors.
         </p>
     </div>
 
     <div class="section-title">
-        <span>Voynich Manuscript (Beinecke MS 408 — Real Folio Scans)</span>
-        <span class="badge-voynich">{len(voynich_words)} Words Vectorized</span>
+        <span>Voynich Manuscript (Beinecke MS 408 — Real Folios 1r & 1v)</span>
+        <span class="badge-voynich">{len(voynich_words)} Real Words Vectorized</span>
     </div>
     <div class="grid">
         {render_cards(voynich_words)}
     </div>
 
     <div class="section-title">
-        <span>Codex Seraphinianus (Luigi Serafini, 1981 — Cursive Asemic Script)</span>
-        <span class="badge-serafini">{len(serafini_words)} Words Vectorized</span>
+        <span>Codex Seraphinianus (Luigi Serafini, 1981 — Real Digitized Scans)</span>
+        <span class="badge-serafini">{len(serafini_words)} Real Words Vectorized</span>
     </div>
     <div class="grid">
         {render_cards(serafini_words)}
@@ -413,7 +358,7 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
 """
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"\n[+] Grand Paleography Atlas saved to: {output_path.resolve()}")
+    print(f"\n[+] Real Scans Paleography Atlas saved to: {output_path.resolve()}")
 
 
 def main():
@@ -424,33 +369,43 @@ def main():
     (base_out / "seraphinianus" / "png").mkdir(parents=True, exist_ok=True)
     (base_out / "seraphinianus" / "svg").mkdir(parents=True, exist_ok=True)
 
-    # 1. Download and process real Voynich folios
-    client = IIIFClient()
-    folio_ids = ["1r", "1v"]
     all_voynich_words = []
     all_voynich_strokes = []
+    all_serafini_words = []
+    all_serafini_strokes = []
 
-    for fid in folio_ids:
-        try:
-            scan_file = client.download_folio(fid)
-            folio_res = process_real_folio(fid, scan_file, base_out, max_words=25)
-            all_voynich_words.extend(folio_res["words"])
-            all_voynich_strokes.extend(folio_res["strokes"])
-        except Exception as e:
-            print(f"[-] Error processing folio {fid}: {e}")
+    # 1. Process Voynich Manuscript Scans (from Yale Beinecke high-res or PDF)
+    high_res_folies = [Path("data/scans/f001r.jpg"), Path("data/scans/f001v.jpg")]
+    for hf in high_res_folies:
+        if hf.exists():
+            img = Image.open(hf)
+            folio_id = hf.stem
+            res = process_manuscript_image(folio_id, img, base_out, "voynich", max_words=25)
+            all_voynich_words.extend(res["words"])
+            all_voynich_strokes.extend(res["strokes"])
 
-    # 2. Process Codex Seraphinianus
-    serafini_res = process_seraphinianus_corpus(base_out, num_words=20)
-    all_serafini_words = serafini_res["words"]
-    all_serafini_strokes = serafini_res["strokes"]
+    # 2. Process Codex Seraphinianus Scans (from PDF)
+    serafini_pdf = Path("data/scans/seraphinianus/Codex Seraphinianus.pdf")
+    if serafini_pdf.exists():
+        loader_s = PDFScanLoader(serafini_pdf)
+        # Process sample text-heavy pages (e.g. pages 15, 20, 25)
+        for page_idx in [15, 20, 25]:
+            try:
+                page_img = loader_s.get_page_image(page_idx, target_min_dim=1500)
+                res_s = process_manuscript_image(f"serafini_p{page_idx:03d}", page_img, base_out, "seraphinianus", max_words=15)
+                all_serafini_words.extend(res_s["words"])
+                all_serafini_strokes.extend(res_s["strokes"])
+            except Exception as e:
+                print(f"[-] Error processing Seraphinianus page {page_idx}: {e}")
 
-    # 3. Cluster and induce alphabet on Voynich strokes
+    # 3. Unsupervised Clustering on Voynich strokes
     if all_voynich_strokes:
         clusterer, labels, tokenizer = cluster_and_induce_alphabet(all_voynich_strokes, n_clusters=25)
         print(f"[+] Discovered {clusterer.get_cluster_count()} canonical glyph clusters across real manuscript folios.")
 
-    # 4. Run full comparative diagnostics
+    # 4. Run Comparative Information-Theoretic Diagnostics
     from voynich_ductus.generators.timm_self_citation import TimmSelfCitationGenerator
+    from voynich_ductus.generators.seraphinianus import SeraphinianusEngine
     from voynich_ductus.generators.baselines import BaselineGenerator
 
     suite = BenchmarkSuite()
@@ -462,9 +417,9 @@ def main():
     }
     bench_results = suite.compare_corpora(diag_corpora)
 
-    # 5. Generate Grand Visual Atlas HTML
-    atlas_html_path = base_out / "grand_paleography_atlas.html"
-    generate_grand_atlas_html(all_voynich_words, all_serafini_words, bench_results, atlas_html_path)
+    # 5. Generate Grand Visual Atlas
+    atlas_path = base_out / "grand_paleography_atlas.html"
+    generate_grand_atlas_html(all_voynich_words, all_serafini_words, bench_results, atlas_path)
 
 
 if __name__ == "__main__":
