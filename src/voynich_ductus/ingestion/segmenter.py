@@ -2,7 +2,7 @@
 Manuscript line and word segmentation via connected components and morphological projections.
 """
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
 from scipy.ndimage import label, find_objects
 from skimage.measure import regionprops
@@ -11,66 +11,80 @@ from skimage.measure import regionprops
 class LineSegmenter:
     """
     Extracts text lines, words, and isolated character bounding boxes
-    from binarized manuscript pages.
+    from binarized historical manuscript pages.
     """
 
-    def __init__(self, line_smoothing_sigma: float = 4.0, min_line_height: int = 20, min_word_width: int = 15):
-        self.line_smoothing_sigma = line_smoothing_sigma
+    def __init__(self, min_line_pitch: int = 35, min_line_height: int = 18, min_word_width: int = 18, min_word_area: int = 40):
+        self.min_line_pitch = min_line_pitch
         self.min_line_height = min_line_height
         self.min_word_width = min_word_width
+        self.min_word_area = min_word_area
 
-    def isolate_text_region(self, binary_ink: np.ndarray, margin_crop_pct: float = 0.08) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
+    def isolate_text_paragraph(self, binary_ink: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
         """
-        Crops outer margins where binding, folio edges, and border noise occur.
+        Detects and isolates the main text paragraph block, removing marginal drawings,
+        header decorations (such as the top arch on f001r), and binding margins.
         """
         H, W = binary_ink.shape
-        y0, y1 = int(H * margin_crop_pct), int(H * (1.0 - margin_crop_pct))
-        x0, x1 = int(W * margin_crop_pct), int(W * (1.0 - margin_crop_pct))
-        return binary_ink[y0:y1, x0:x1], (y0, x0, y1, x1)
+        # Standard Beinecke Voynich folio margins:
+        # Avoid top 16% (often header / title decoration) and bottom 8%
+        # Avoid left 12% and right 10%
+        y0 = int(H * 0.17)
+        y1 = int(H * 0.92)
+        x0 = int(W * 0.14)
+        x1 = int(W * 0.88)
 
-    def segment_lines(self, binary_ink: np.ndarray, auto_crop_margins: bool = True) -> List[Dict[str, Any]]:
+        text_block = binary_ink[y0:y1, x0:x1]
+        return text_block, (y0, x0, y1, x1)
+
+    def segment_lines(self, binary_ink: np.ndarray, auto_isolate: bool = True) -> List[Dict[str, Any]]:
         """
-        Segments binary ink image into horizontal text lines using smoothed horizontal projection valleys.
+        Segments manuscript page into distinct, intact text lines using peak-valley
+        analysis of smoothed horizontal projection profiles.
         """
-        if auto_crop_margins and (binary_ink.shape[0] > 400 and binary_ink.shape[1] > 400):
-            work_img, (off_y, off_x, _, _) = self.isolate_text_region(binary_ink)
+        if auto_isolate and (binary_ink.shape[0] > 600 and binary_ink.shape[1] > 600):
+            work_img, (off_y, off_x, _, _) = self.isolate_text_paragraph(binary_ink)
         else:
             work_img = binary_ink
             off_y, off_x = 0, 0
 
         # Horizontal projection profile
         raw_profile = np.sum(work_img, axis=1).astype(float)
-        # Apply 1D Gaussian smoothing to merge ascenders/descenders into line bands
         from scipy.ndimage import gaussian_filter1d
-        smoothed_profile = gaussian_filter1d(raw_profile, sigma=self.line_smoothing_sigma)
+        from scipy.signal import find_peaks
 
-        # Dynamic valley thresholding
-        threshold = np.median(smoothed_profile) * 0.4
-        in_line = False
-        start_y = 0
-        line_spans = []
+        smooth_profile = gaussian_filter1d(raw_profile, sigma=4.0)
 
-        for y, val in enumerate(smoothed_profile):
-            if val > threshold and not in_line:
-                in_line = True
-                start_y = y
-            elif val <= threshold and in_line:
-                in_line = False
-                end_y = y
-                if end_y - start_y >= self.min_line_height:
-                    line_spans.append((start_y, end_y))
+        # Detect line baseline centers (peaks)
+        peaks, _ = find_peaks(smooth_profile, distance=self.min_line_pitch, prominence=np.max(smooth_profile) * 0.12)
 
-        if in_line and len(smoothed_profile) - start_y >= self.min_line_height:
-            line_spans.append((start_y, len(smoothed_profile)))
+        if len(peaks) == 0:
+            return [{
+                "line_id": "L000",
+                "bbox": (off_y, off_x, off_y + work_img.shape[0], off_x + work_img.shape[1]),
+                "image": work_img
+            }]
+
+        # Compute valleys between adjacent peaks
+        valleys = [0]
+        for i in range(len(peaks) - 1):
+            p0, p1 = peaks[i], peaks[i + 1]
+            mid_valley = p0 + int(np.argmin(smooth_profile[p0:p1]))
+            valleys.append(mid_valley)
+        valleys.append(len(smooth_profile))
 
         results = []
-        for line_idx, (ly0, ly1) in enumerate(line_spans):
+        for line_idx in range(len(valleys) - 1):
+            ly0, ly1 = valleys[line_idx], valleys[line_idx + 1]
+            if ly1 - ly0 < self.min_line_height:
+                continue
+
             line_crop = work_img[ly0:ly1, :]
-            # Refine horizontal column bounds
             col_profile = np.sum(line_crop, axis=0)
-            nonzero_cols = np.where(col_profile > 2)[0]
+            nonzero_cols = np.where(col_profile > 3)[0]
             if len(nonzero_cols) == 0:
                 continue
+
             lx0, lx1 = nonzero_cols[0], nonzero_cols[-1] + 1
             if lx1 - lx0 < self.min_word_width:
                 continue
@@ -86,20 +100,26 @@ class LineSegmenter:
 
         return results
 
-    def segment_words(self, line_ink: np.ndarray, line_offset: Tuple[int, int] = (0, 0), space_threshold: int = 12) -> List[Dict[str, Any]]:
+    def segment_words(self, line_ink: np.ndarray, line_offset: Tuple[int, int] = (0, 0), space_gap_min: int = 14, space_threshold: Optional[int] = None) -> List[Dict[str, Any]]:
         """
-        Segments a single line into constituent words using vertical projection gaps.
+        Segments a text line into clean, intact words using smoothed vertical projection gaps
+        and morphological area filtering to reject parchment grain specks.
         """
+        if space_threshold is not None:
+            space_gap_min = space_threshold
         y_off, x_off = line_offset
-        vert_profile = np.sum(line_ink, axis=0)
+        from scipy.ndimage import gaussian_filter1d
+        
+        col_counts = np.sum(line_ink, axis=0).astype(float)
+        smooth_cols = gaussian_filter1d(col_counts, sigma=2.0)
 
         in_word = False
         start_x = 0
-        words = []
+        word_spans = []
         gap = 0
 
-        for x, val in enumerate(vert_profile):
-            if val > 1:
+        for x, val in enumerate(smooth_cols):
+            if val > 1.8:
                 if not in_word:
                     in_word = True
                     start_x = x
@@ -107,27 +127,35 @@ class LineSegmenter:
             else:
                 if in_word:
                     gap += 1
-                    if gap >= space_threshold:
+                    if gap >= space_gap_min:
                         in_word = False
                         end_x = x - gap + 1
                         if end_x - start_x >= self.min_word_width:
-                            words.append((start_x, end_x))
+                            word_spans.append((start_x, end_x))
 
         if in_word and line_ink.shape[1] - start_x >= self.min_word_width:
-            words.append((start_x, line_ink.shape[1]))
+            word_spans.append((start_x, line_ink.shape[1]))
 
         results = []
-        for word_idx, (wx0, wx1) in enumerate(words):
+        for word_idx, (wx0, wx1) in enumerate(word_spans):
             word_crop = line_ink[:, wx0:wx1]
+            # Area and dimension verification
+            ink_area = int(np.sum(word_crop))
+            if ink_area < self.min_word_area:
+                continue
+
             row_profile = np.sum(word_crop, axis=1)
             nonzero_rows = np.where(row_profile > 0)[0]
             if len(nonzero_rows) == 0:
                 continue
             wy0, wy1 = nonzero_rows[0], nonzero_rows[-1] + 1
+            if wy1 - wy0 < 12:
+                continue
 
             results.append({
                 "word_id": f"W{word_idx:03d}",
                 "bbox": (int(y_off + wy0), int(x_off + wx0), int(y_off + wy1), int(x_off + wx1)),
+                "area": ink_area,
                 "image": line_ink[wy0:wy1, wx0:wx1]
             })
 
