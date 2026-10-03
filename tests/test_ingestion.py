@@ -82,14 +82,15 @@ def test_transcription_reference_and_yield_validator():
     yield_res = PaleographyYieldValidator.evaluate_yield(
         folio_id="f001r",
         detected_lines=19,
-        detected_words=20,
+        detected_glyphs=203,
         extracted_strokes=577
     )
     assert yield_res["has_reference"] is True
     assert yield_res["line_yield_pct"] == 67.9
     assert yield_res["expected_lines"] == 28
     assert yield_res["detected_lines"] == 19
-    assert yield_res["avg_strokes_per_word"] == 28.85
-    assert len(yield_res["diagnostics"]) > 0  # low word extraction because max_words_per_page=20 was used
+    assert yield_res["detected_glyphs"] == 203
+    assert yield_res["expected_glyphs"] == 1180
+
 
 

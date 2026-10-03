@@ -1,11 +1,12 @@
 """
 Full-scale Glyph Extraction, Kinematic Ductus Vectorization, and Interactive Grand Explorer.
 Extracts individual isolated glyphs across Voynich Manuscript and Codex Seraphinianus,
-induces canonical alphabets, and renders the comprehensive interactive visual explorer.
+induces canonical alphabets, and renders the comprehensive interactive visual explorer with full page overlays.
 """
 
 import os
 import json
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any
 from PIL import Image
@@ -37,6 +38,7 @@ def clean_page_data_for_json(pages_data: List[Dict[str, Any]]) -> List[Dict[str,
                 "height": int(g["height"]),
                 "width": int(g["width"]),
                 "area": int(g["area"]),
+                "fill_factor": float(g.get("fill_factor", 0.25)),
                 "stroke_count": int(g["stroke_count"]),
                 "png_rel": g["png_rel"],
                 "svg_rel": g["svg_rel"],
@@ -45,8 +47,12 @@ def clean_page_data_for_json(pages_data: List[Dict[str, Any]]) -> List[Dict[str,
             })
         clean_pages.append({
             "page_id": p["page_id"],
+            "page_img_rel": p.get("page_img_rel", ""),
+            "image_width": p.get("image_width", 1500),
+            "image_height": p.get("image_height", 2000),
             "line_count": p["line_count"],
             "glyph_count": p["glyph_count"],
+            "yield_report": p.get("yield_report", {}),
             "lines": clean_lines,
             "glyphs": clean_glyphs
         })
@@ -63,7 +69,6 @@ def generate_explorer_html(
     """
     Builds the interactive full-scale paleographic explorer web application.
     """
-    # Prepare serializable payload for client-side interactivity
     app_data = {
         "voynich": {
             "title": "Voynich Manuscript (Beinecke MS 408)",
@@ -79,13 +84,12 @@ def generate_explorer_html(
 
     app_json = json.dumps(app_data, ensure_ascii=False)
 
-
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VoynichDuctus — Full Glyph Extraction & Paleography Corpus Explorer</title>
+    <title>VoynichDuctus — Autonomous Digital Paleography & Grand Glyph Explorer</title>
     <style>
         :root {{
             --bg-dark: #090d16;
@@ -112,7 +116,7 @@ def generate_explorer_html(
         header {{
             background: var(--panel-bg);
             border-bottom: 1px solid var(--border);
-            padding: 16px 24px;
+            padding: 14px 24px;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -125,13 +129,13 @@ def generate_explorer_html(
             align-items: center;
             gap: 12px;
         }}
-        .brand h1 {{ font-size: 1.4rem; font-weight: 700; }}
+        .brand h1 {{ font-size: 1.35rem; font-weight: 700; }}
         .brand span {{ color: var(--accent); font-size: 0.85rem; }}
         
         .controls {{
             display: flex;
             align-items: center;
-            gap: 16px;
+            gap: 14px;
         }}
         .btn-toggle {{
             background: var(--card-bg);
@@ -139,7 +143,7 @@ def generate_explorer_html(
             border: 1px solid var(--border);
             padding: 8px 16px;
             border-radius: 6px;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             cursor: pointer;
             transition: all 0.2s;
         }}
@@ -148,7 +152,7 @@ def generate_explorer_html(
         
         .nav-tabs {{
             display: flex;
-            gap: 8px;
+            gap: 6px;
             background: #0b1120;
             padding: 4px;
             border-radius: 8px;
@@ -172,54 +176,57 @@ def generate_explorer_html(
 
         main {{
             flex: 1;
-            padding: 24px;
-            max-width: 1600px;
+            padding: 20px;
+            max-width: 1700px;
             margin: 0 auto;
             width: 100%;
         }}
 
         .stats-bar {{
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 24px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 14px;
+            margin-bottom: 20px;
         }}
         .stat-card {{
             background: var(--panel-bg);
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 14px 18px;
+            padding: 12px 16px;
         }}
-        .stat-card h4 {{ font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; }}
-        .stat-card .val {{ font-size: 1.6rem; font-weight: 700; color: var(--accent); }}
+        .stat-card h4 {{ font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; }}
+        .stat-card .val {{ font-size: 1.45rem; font-weight: 700; color: var(--accent); }}
 
-        /* Layout Grid */
+        /* 4-Panel Page Layout */
         .page-view-layout {{
             display: grid;
-            grid-template-columns: 280px 1fr 340px;
-            gap: 20px;
-            height: calc(100vh - 190px);
+            grid-template-columns: 260px 420px 1fr 320px;
+            gap: 16px;
+            height: calc(100vh - 180px);
         }}
         .panel {{
             background: var(--panel-bg);
             border: 1px solid var(--border);
             border-radius: 10px;
             overflow-y: auto;
-            padding: 16px;
+            padding: 14px;
             display: flex;
             flex-direction: column;
         }}
         .panel h3 {{
-            font-size: 1rem;
-            margin-bottom: 12px;
-            padding-bottom: 8px;
+            font-size: 0.95rem;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
             border-bottom: 1px solid var(--border);
             color: var(--accent);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }}
 
-        /* Page & Line Selector List */
+        /* Page List */
         .page-item {{
-            padding: 10px 14px;
+            padding: 10px 12px;
             border-radius: 6px;
             cursor: pointer;
             background: var(--card-bg);
@@ -233,19 +240,37 @@ def generate_explorer_html(
         .page-item:hover {{ border-color: var(--accent); }}
         .page-item.active {{ background: #1e3a8a; border-color: var(--accent); font-weight: 600; }}
 
+        /* Full Page Canvas Overlay */
+        .canvas-container {{
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            border-radius: 6px;
+            overflow: auto;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }}
+        #page-canvas {{
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }}
+
         /* Glyph Grid */
         .glyphs-container {{
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
-            gap: 10px;
+            grid-template-columns: repeat(auto-fill, minmax(75px, 1fr));
+            gap: 8px;
             overflow-y: auto;
-            padding: 8px;
+            padding: 4px;
         }}
         .glyph-card {{
             background: var(--card-bg);
             border: 1px solid var(--border);
             border-radius: 6px;
-            padding: 8px;
+            padding: 6px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -254,16 +279,16 @@ def generate_explorer_html(
             transition: all 0.15s;
             aspect-ratio: 1;
         }}
-        .glyph-card:hover {{ border-color: var(--accent); transform: scale(1.04); background: var(--card-hover); }}
-        .glyph-card.selected {{ border-color: var(--accent); box-shadow: 0 0 12px rgba(56, 189, 248, 0.4); background: #0c4a6e; }}
-        .glyph-card img {{ max-width: 85%; max-height: 50px; object-fit: contain; margin-bottom: 4px; }}
-        .glyph-card .gid {{ font-size: 0.65rem; color: var(--text-muted); }}
+        .glyph-card:hover {{ border-color: var(--accent); transform: scale(1.05); background: var(--card-hover); }}
+        .glyph-card.selected {{ border-color: var(--accent); box-shadow: 0 0 12px rgba(56, 189, 248, 0.5); background: #0c4a6e; }}
+        .glyph-card img {{ max-width: 85%; max-height: 40px; object-fit: contain; margin-bottom: 2px; }}
+        .glyph-card .gid {{ font-size: 0.6rem; color: var(--text-muted); }}
 
         /* Inspector */
         .inspector-content {{
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 14px;
             align-items: center;
             text-align: center;
         }}
@@ -272,51 +297,62 @@ def generate_explorer_html(
             background: #000;
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 16px;
+            padding: 12px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 140px;
+            min-height: 120px;
         }}
-        .preview-box img {{ max-width: 100%; max-height: 120px; object-fit: contain; }}
-        .preview-box svg {{ max-width: 100%; max-height: 120px; }}
+        .preview-box img {{ max-width: 100%; max-height: 100px; object-fit: contain; }}
+        .preview-box svg {{ max-width: 100%; max-height: 100px; }}
         .meta-list {{
             width: 100%;
             text-align: left;
-            font-size: 0.85rem;
+            font-size: 0.82rem;
             color: var(--text-muted);
             line-height: 1.6;
         }}
         .meta-list strong {{ color: var(--text-main); }}
 
+        /* Yield Summary Box */
+        .yield-box {{
+            background: #0c1524;
+            border: 1px solid #1e3a8a;
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 10px;
+            font-size: 0.78rem;
+            line-height: 1.5;
+        }}
+
         /* Catalogue Tab View */
         .catalogue-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 16px;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 14px;
         }}
         .catalogue-card {{
             background: var(--panel-bg);
             border: 1px solid var(--border);
             border-radius: 10px;
-            padding: 16px;
+            padding: 14px;
             display: flex;
             flex-direction: column;
-            gap: 12px;
+            gap: 10px;
         }}
         .catalogue-header {{
             display: flex;
             justify-content: space-between;
             align-items: center;
         }}
-        .catalogue-header h3 {{ font-size: 1.1rem; color: var(--accent); }}
+        .catalogue-header h3 {{ font-size: 1.05rem; color: var(--accent); }}
         .catalogue-duo {{
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 8px;
+            gap: 6px;
             background: #000;
-            padding: 10px;
+            padding: 8px;
             border-radius: 6px;
             border: 1px solid var(--border);
         }}
@@ -325,11 +361,11 @@ def generate_explorer_html(
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 70px;
+            min-height: 65px;
         }}
-        .catalogue-duo img {{ max-width: 80%; max-height: 60px; object-fit: contain; }}
-        .catalogue-duo svg {{ max-width: 90%; max-height: 60px; }}
-        .badge-freq {{ background: #1e293b; color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; }}
+        .catalogue-duo img {{ max-width: 85%; max-height: 55px; object-fit: contain; }}
+        .catalogue-duo svg {{ max-width: 90%; max-height: 55px; }}
+        .badge-freq {{ background: #1e293b; color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; }}
     </style>
 </head>
 <body>
@@ -342,8 +378,8 @@ def generate_explorer_html(
             <button class="btn-toggle active-voynich" id="btn-voynich" onclick="setManuscript('voynich')">Voynich Manuscript</button>
             <button class="btn-toggle" id="btn-serafini" onclick="setManuscript('seraphinianus')">Codex Seraphinianus</button>
             <div class="nav-tabs">
-                <button class="tab-btn active" id="tab-btn-pages" onclick="setTab('pages')">Page & Glyph Extraction</button>
-                <button class="tab-btn" id="tab-btn-catalogue" onclick="setTab('catalogue')">Discovered Alphabet Catalogue</button>
+                <button class="tab-btn active" id="tab-btn-pages" onclick="setTab('pages')">Page Overlay & Glyphs</button>
+                <button class="tab-btn" id="tab-btn-catalogue" onclick="setTab('catalogue')">Canonical Alphabet</button>
             </div>
         </div>
     </header>
@@ -353,20 +389,28 @@ def generate_explorer_html(
 
         <!-- TAB 1: Pages & Glyphs View -->
         <div id="view-pages" class="page-view-layout">
-            <div class="panel" id="pages-panel">
+            <div class="panel">
                 <h3>Manuscript Pages</h3>
                 <div id="pages-list"></div>
+                <div id="yield-panel"></div>
+            </div>
+
+            <div class="panel">
+                <h3>Full Page & Bounding Boxes</h3>
+                <div class="canvas-container">
+                    <canvas id="page-canvas"></canvas>
+                </div>
             </div>
 
             <div class="panel" style="flex:1;">
-                <h3 id="glyphs-title">Isolated Glyphs & Kinematic Ductus</h3>
+                <h3 id="glyphs-title">Isolated Glyphs</h3>
                 <div class="glyphs-container" id="glyphs-grid"></div>
             </div>
 
-            <div class="panel" id="inspector-panel">
-                <h3>Glyph Ductus Inspector</h3>
+            <div class="panel">
+                <h3>Ductus Inspector</h3>
                 <div class="inspector-content" id="inspector-content">
-                    <p style="color:var(--text-muted); margin-top:40px;">Select any glyph from the center panel to inspect its scan crop and vector ductus.</p>
+                    <p style="color:var(--text-muted); margin-top:40px;">Select any glyph from the grid or page overlay to inspect its scan crop and vector ductus.</p>
                 </div>
             </div>
         </div>
@@ -383,6 +427,7 @@ def generate_explorer_html(
         let currentTab = 'pages';
         let currentPageIdx = 0;
         let selectedGlyph = null;
+        let pageImageObj = new Image();
 
         function setManuscript(ms) {{
             currentMs = ms;
@@ -404,6 +449,7 @@ def generate_explorer_html(
 
         function selectPage(idx) {{
             currentPageIdx = idx;
+            selectedGlyph = null;
             renderPagesTab();
         }}
 
@@ -411,6 +457,7 @@ def generate_explorer_html(
             selectedGlyph = g;
             renderGlyphGrid();
             renderInspector();
+            drawCanvasOverlay();
         }}
 
         function render() {{
@@ -422,23 +469,23 @@ def generate_explorer_html(
             document.getElementById('stats-bar').innerHTML = `
                 <div class="stat-card">
                     <h4>Manuscript</h4>
-                    <div class="val" style="font-size:1.1rem; color:${{currentMs === 'voynich' ? 'var(--voynich-color)' : 'var(--serafini-color)'}};">${{msData.title}}</div>
+                    <div class="val" style="font-size:1.05rem; color:${{currentMs === 'voynich' ? 'var(--voynich-color)' : 'var(--serafini-color)'}};">${{msData.title}}</div>
                 </div>
                 <div class="stat-card">
                     <h4>Processed Pages</h4>
                     <div class="val">${{msData.pages.length}}</div>
                 </div>
                 <div class="stat-card">
-                    <h4>Detected Text Lines</h4>
+                    <h4>Identified Lines</h4>
                     <div class="val">${{totalLines}}</div>
                 </div>
                 <div class="stat-card">
-                    <h4>Autonomous Glyphs</h4>
+                    <h4>Pure Isolated Glyphs</h4>
                     <div class="val">${{totalGlyphs}}</div>
                 </div>
                 <div class="stat-card">
-                    <h4>Canonical Alphabet Size</h4>
-                    <div class="val">${{msData.catalogue.canonical_alphabet_size}} Types</div>
+                    <h4>Canonical Alphabet</h4>
+                    <div class="val">${{msData.catalogue.canonical_alphabet_size}} Archetypes</div>
                 </div>
             `;
 
@@ -462,14 +509,71 @@ def generate_explorer_html(
                 </div>
             `).join('');
 
+            const page = msData.pages[currentPageIdx];
+            const yr = page.yield_report;
+            const yieldPanel = document.getElementById('yield-panel');
+            if (yr && yr.has_reference) {{
+                yieldPanel.innerHTML = `
+                    <div class="yield-box">
+                        <div style="font-weight:600; color:var(--accent); margin-bottom:4px;">Census Benchmark (${{yr.folio_id}})</div>
+                        <div>Lines: <strong>${{yr.detected_lines}}/${{yr.expected_lines}}</strong> (${{yr.line_yield_pct}}%)</div>
+                        <div>Glyphs: <strong>${{yr.detected_glyphs}}/${{yr.expected_glyphs}}</strong> (${{yr.glyph_yield_pct}}%)</div>
+                        <div>Hand: <strong>${{yr.scribe_hand}}</strong> (${{yr.currier_language}})</div>
+                        <div style="color:var(--text-muted); font-size:0.7rem; margin-top:4px;">Section: ${{yr.section}}</div>
+                    </div>
+                `;
+            }} else {{
+                yieldPanel.innerHTML = '';
+            }}
+
+            loadPageImageAndDraw();
             renderGlyphGrid();
             renderInspector();
         }}
 
+        function loadPageImageAndDraw() {{
+            const page = data[currentMs].pages[currentPageIdx];
+            if (page.page_img_rel) {{
+                pageImageObj = new Image();
+                pageImageObj.src = page.page_img_rel;
+                pageImageObj.onload = () => {{
+                    drawCanvasOverlay();
+                }};
+            }}
+        }}
+
+        function drawCanvasOverlay() {{
+            const canvas = document.getElementById('page-canvas');
+            const page = data[currentMs].pages[currentPageIdx];
+            if (!pageImageObj.complete || pageImageObj.naturalWidth === 0) return;
+
+            canvas.width = pageImageObj.naturalWidth;
+            canvas.height = pageImageObj.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(pageImageObj, 0, 0);
+
+            // Draw bounding boxes for all glyphs
+            page.glyphs.forEach(g => {{
+                const [y0, x0, y1, x1] = g.bbox;
+                const isSelected = selectedGlyph && selectedGlyph.glyph_id === g.glyph_id;
+
+                if (isSelected) {{
+                    ctx.strokeStyle = '#38bdf8';
+                    ctx.lineWidth = 4;
+                    ctx.fillStyle = 'rgba(56, 189, 248, 0.4)';
+                    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+                    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+                }} else {{
+                    ctx.strokeStyle = 'rgba(245, 158, 11, 0.65)';
+                    ctx.lineWidth = 1.5;
+                    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+                }}
+            }});
+        }}
+
         function renderGlyphGrid() {{
-            const msData = data[currentMs];
-            const page = msData.pages[currentPageIdx];
-            document.getElementById('glyphs-title').innerText = `${{page.page_id}} — ${{page.glyph_count}} Isolated Glyphs (${{page.line_count}} text lines)`;
+            const page = data[currentMs].pages[currentPageIdx];
+            document.getElementById('glyphs-title').innerText = `${{page.page_id}} — ${{page.glyph_count}} Pure Glyphs`;
             
             const grid = document.getElementById('glyphs-grid');
             grid.innerHTML = page.glyphs.map(g => `
@@ -483,26 +587,27 @@ def generate_explorer_html(
         function renderInspector() {{
             const ins = document.getElementById('inspector-content');
             if (!selectedGlyph) {{
-                ins.innerHTML = `<p style="color:var(--text-muted); margin-top:40px;">Select any glyph from the center panel to inspect its scan crop and vector ductus.</p>`;
+                ins.innerHTML = `<p style="color:var(--text-muted); margin-top:40px;">Select any glyph from the grid or page overlay to inspect its scan crop and vector ductus.</p>`;
                 return;
             }}
             ins.innerHTML = `
                 <div class="preview-box">
-                    <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:6px;">ORIGINAL SCAN CROP</span>
+                    <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">ORIGINAL SCAN CROP</span>
                     <img src="${{selectedGlyph.png_rel}}" alt="${{selectedGlyph.glyph_id}}">
                 </div>
                 <div class="preview-box">
-                    <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:6px;">VECTOR KINEMATIC DUCTUS</span>
+                    <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">VECTOR KINEMATIC DUCTUS</span>
                     ${{selectedGlyph.svg_content}}
                 </div>
                 <div class="meta-list">
                     <div><strong>Glyph ID:</strong> ${{selectedGlyph.glyph_id}}</div>
                     <div><strong>Bounding Box:</strong> (${{selectedGlyph.bbox.join(', ')}})</div>
                     <div><strong>Dimensions:</strong> ${{selectedGlyph.width}}x${{selectedGlyph.height}} px (Area: ${{selectedGlyph.area}} px²)</div>
+                    <div><strong>Fill Factor:</strong> ${{selectedGlyph.fill_factor}} (1D Filiform)</div>
                     <div><strong>Stroke Count:</strong> ${{selectedGlyph.stroke_count}} kinematic strokes</div>
                     <div><strong>Assigned Archetype:</strong> <span style="color:var(--accent); font-weight:bold;">${{selectedGlyph.canonical_type || 'Unclassified'}}</span></div>
                 </div>
-                <a href="${{selectedGlyph.svg_rel}}" download class="btn-toggle" style="text-decoration:none; margin-top:8px;">⬇ Download Glyph SVG</a>
+                <a href="${{selectedGlyph.svg_rel}}" download class="btn-toggle" style="text-decoration:none; margin-top:6px;">⬇ Download Glyph SVG</a>
             `;
         }}
 
@@ -547,12 +652,12 @@ def generate_explorer_html(
 def main():
     base_out = Path("./output/atlas_dataset")
     
-    # 1. Clean slate: wipe old glyph dirs to ensure 100% pure extractions
-    import shutil
+    # 1. Clean slate: wipe old directories for 100% fresh extraction
     for sub in ["voynich", "seraphinianus"]:
-        sub_dir = base_out / sub / "glyphs"
+        sub_dir = base_out / sub
         if sub_dir.exists():
             shutil.rmtree(sub_dir)
+        (base_out / sub / "pages").mkdir(parents=True, exist_ok=True)
         (base_out / sub / "glyphs" / "png").mkdir(parents=True, exist_ok=True)
         (base_out / sub / "glyphs" / "svg").mkdir(parents=True, exist_ok=True)
 
@@ -573,11 +678,20 @@ def main():
             img = Image.open(vf)
             print(f"[*] Extracting all glyphs on Voynich master '{folio_id}'...")
             res = segmenter.extract_page_glyphs(folio_id, img, output_dir=base_out, subfolder="voynich")
-            print(f"  [+] Identified {res['line_count']} lines, extracted {res['glyph_count']} pure isolated glyphs.")
+            
+            # Census yield validation
+            yr = PaleographyYieldValidator.evaluate_yield(
+                folio_id=folio_id,
+                detected_lines=res["line_count"],
+                detected_glyphs=res["glyph_count"],
+                extracted_strokes=sum(len(g["strokes"]) for g in res["glyphs"])
+            )
+            res["yield_report"] = yr
+            print(f"  [+] Identified {res['line_count']}/{yr.get('expected_lines', 28)} lines ({yr.get('line_yield_pct', 0)}%), extracted {res['glyph_count']}/{yr.get('expected_glyphs', 1100)} glyphs ({yr.get('glyph_yield_pct', 0)}%).")
             voynich_pages_data.append(res)
             all_voynich_glyphs.extend(res["glyphs"])
 
-    # Load additional text folios from Voynich PDF if available
+    # Load additional folios from Voynich PDF
     voynich_pdf = Path("data/scans/voynich/VoynichManuscript.pdf")
     if voynich_pdf.exists():
         loader_v = PDFScanLoader(voynich_pdf)
@@ -587,7 +701,14 @@ def main():
                 print(f"[*] Extracting all glyphs on Voynich folio '{folio_name}' from PDF...")
                 p_img = loader_v.get_page_image(page_idx, target_min_dim=1500)
                 res_v = segmenter.extract_page_glyphs(folio_name, p_img, output_dir=base_out, subfolder="voynich")
-                print(f"  [+] Identified {res_v['line_count']} lines, extracted {res_v['glyph_count']} pure isolated glyphs.")
+                yr_v = PaleographyYieldValidator.evaluate_yield(
+                    folio_id=folio_name,
+                    detected_lines=res_v["line_count"],
+                    detected_glyphs=res_v["glyph_count"],
+                    extracted_strokes=sum(len(g["strokes"]) for g in res_v["glyphs"])
+                )
+                res_v["yield_report"] = yr_v
+                print(f"  [+] Identified {res_v['line_count']}/{yr_v.get('expected_lines', 20)} lines ({yr_v.get('line_yield_pct', 0)}%), extracted {res_v['glyph_count']}/{yr_v.get('expected_glyphs', 750)} glyphs ({yr_v.get('glyph_yield_pct', 0)}%).")
                 voynich_pages_data.append(res_v)
                 all_voynich_glyphs.extend(res_v["glyphs"])
             except Exception as e:
@@ -608,7 +729,6 @@ def main():
     serafini_pdf = Path("data/scans/seraphinianus/Codex Seraphinianus.pdf")
     if serafini_pdf.exists():
         loader_s = PDFScanLoader(serafini_pdf)
-        # Select dense cursive text pages
         for p_idx in [15, 20, 25, 30, 35, 40]:
             try:
                 page_id = f"serafini_p{p_idx:03d}"
@@ -633,4 +753,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

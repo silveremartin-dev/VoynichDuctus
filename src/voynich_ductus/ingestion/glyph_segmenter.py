@@ -121,6 +121,7 @@ class GlyphSegmenter:
     ) -> List[Dict[str, Any]]:
         """
         Segments a single text line into words, and words into individual glyphs with SVG ductus.
+        Enforces strict color neutrality (grayscale ink) and filamentary 1D stroke topology.
         """
         y_off, x_off = line_offset
         words = self.line_segmenter.segment_words(line_mask, line_offset=(0, 0), space_gap_min=10)
@@ -140,26 +141,46 @@ class GlyphSegmenter:
                 gh = p.bbox[2] - p.bbox[0]
                 gw = p.bbox[3] - p.bbox[1]
                 aspect = gw / max(1, gh)
-                density = p.area / max(1, gh * gw)
+                fill_factor = p.area / max(1, gh * gw)
 
-                # Strict glyph dimension and density validation
-                if p.area < self.min_glyph_area or gh < self.min_glyph_height or gw < self.min_glyph_width:
+                # 1. Strict glyph dimension & scale bounds
+                if p.area < 18 or gh < 12 or gw < 7:
                     continue
                 if gh > self.max_glyph_height or gw > self.max_glyph_width:
                     continue
-                if aspect > 4.2 or aspect < 0.18 or density < 0.10:
+                if aspect > 4.0 or aspect < 0.20:
                     continue
 
+                # 2. Filamentary 1D fractal stroke check (rejects solid textures, fur, ink blobs)
+                # True written glyphs have open white loops / filiform centerlines (fill factor in [0.08, 0.48])
+                if fill_factor < 0.08 or fill_factor > 0.48:
+                    continue
 
-                glyph_id = f"{page_id}_{word_id}_G{glyph_idx:02d}"
                 gy0 = y_off + wy0 + p.bbox[0]
                 gx0 = x_off + wx0 + p.bbox[1]
                 gy1 = y_off + wy0 + p.bbox[2]
                 gx1 = x_off + wx0 + p.bbox[3]
 
+                # 3. Strict Chromatic Pigment Discrimination (rejects green leaves, blue water, vivid paints)
+                pad = 2
+                cy0, cx0 = max(0, gy0 - pad), max(0, gx0 - pad)
+                cy1, cx1 = min(page_rgb.shape[0], gy1 + pad), min(page_rgb.shape[1], gx1 + pad)
                 g_mask = (labeled_w[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] == p.label)
+                
+                crop_patch_rgb = page_rgb[gy0:gy1, gx0:gx1].astype(np.float32) / 255.0
+                if crop_patch_rgb.shape[0] == g_mask.shape[0] and crop_patch_rgb.shape[1] == g_mask.shape[1]:
+                    ink_pixels = crop_patch_rgb[g_mask]
+                    if ink_pixels.shape[0] > 0:
+                        from skimage.color import rgb2hsv
+                        ink_hsv = rgb2hsv(ink_pixels.reshape(-1, 1, 3))
+                        # Paint check: bright + saturated green/blue/cyan/magenta pigments
+                        is_paint_stroke = (ink_hsv[:, 0, 2] > 0.45) & (ink_hsv[:, 0, 1] > 0.30) & ((ink_hsv[:, 0, 0] > 0.15) & (ink_hsv[:, 0, 0] < 0.85))
+                        if np.mean(is_paint_stroke) > 0.35:
+                            # Reject colored illustration paint stroke
+                            continue
 
                 # Vectorize glyph ductus
+
                 try:
                     skel, widths = self.skel_engine.extract_skeleton(g_mask)
                     pixel_graph = self.graph_extractor.build_pixel_graph(skel, widths)
@@ -170,6 +191,8 @@ class GlyphSegmenter:
 
                 if not ordered_strokes:
                     continue
+
+                glyph_id = f"{page_id}_{word_id}_G{glyph_idx:02d}"
 
                 # Save crops and SVGs if output_dir provided
                 png_rel, svg_rel, svg_str = "", "", ""
@@ -182,12 +205,9 @@ class GlyphSegmenter:
                     png_path = output_dir / subfolder / "glyphs" / "png" / png_filename
                     svg_path = output_dir / subfolder / "glyphs" / "svg" / svg_filename
 
-                    # Crop patch from original RGB page image (with 2px margin)
-                    pad = 2
-                    cy0, cx0 = max(0, gy0 - pad), max(0, gx0 - pad)
-                    cy1, cx1 = min(page_rgb.shape[0], gy1 + pad), min(page_rgb.shape[1], gx1 + pad)
-                    crop_rgb = page_rgb[cy0:cy1, cx0:cx1]
-                    Image.fromarray(crop_rgb).save(png_path)
+                    # Save crop patch
+                    save_patch = page_rgb[cy0:cy1, cx0:cx1]
+                    Image.fromarray(save_patch).save(png_path)
 
                     gh_m, gw_m = g_mask.shape
                     svg_str = VectorExporter.to_svg(ordered_strokes, width=gw_m, height=gh_m, output_path=svg_path)
@@ -204,6 +224,7 @@ class GlyphSegmenter:
                     "height": int(gh),
                     "width": int(gw),
                     "area": int(p.area),
+                    "fill_factor": round(float(fill_factor), 3),
                     "stroke_count": len(ordered_strokes),
                     "strokes": ordered_strokes,
                     "png_rel": png_rel,
@@ -224,12 +245,21 @@ class GlyphSegmenter:
     ) -> Dict[str, Any]:
         """
         Processes an entire manuscript page, extracting all lines, words, and individual glyphs.
+        Saves full page image for interactive explorer overlay.
         """
         clean_mask, page_rgb = self.extract_clean_page_mask(image)
         lines = self.line_segmenter.segment_lines(clean_mask, auto_isolate=False)
 
         if max_lines:
             lines = lines[:max_lines]
+
+        page_img_rel = ""
+        if output_dir:
+            pages_dir = output_dir / subfolder / "pages"
+            pages_dir.mkdir(parents=True, exist_ok=True)
+            page_img_path = pages_dir / f"{page_id}.jpg"
+            image.save(page_img_path, quality=85)
+            page_img_rel = f"{subfolder}/pages/{page_id}.jpg"
 
         all_page_glyphs = []
         for line in lines:
@@ -248,8 +278,12 @@ class GlyphSegmenter:
 
         return {
             "page_id": page_id,
+            "page_img_rel": page_img_rel,
+            "image_width": image.width,
+            "image_height": image.height,
             "line_count": len(lines),
             "glyph_count": len(all_page_glyphs),
             "lines": lines,
             "glyphs": all_page_glyphs
         }
+
