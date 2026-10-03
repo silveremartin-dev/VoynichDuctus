@@ -92,4 +92,7 @@ class Binarizer:
     def remove_small_artifacts(self, binary: np.ndarray, min_size: int = 5) -> np.ndarray:
         """Removes tiny speckles and noise from parchment grain."""
         from skimage.morphology import remove_small_objects
-        return remove_small_objects(binary, min_size=min_size)
+        try:
+            return remove_small_objects(binary, max_size=min_size)
+        except TypeError:
+            return remove_small_objects(binary, min_size=min_size)

@@ -12,16 +12,16 @@ import requests
 class IIIFClient:
     """
     Downloads high-resolution folios of the Voynich Manuscript (Beinecke MS 408)
-    via IIIF Image API or direct Yale repository endpoints.
+    via official Yale IIIF Presentation v3 API and Image API endpoints.
     """
 
-    DEFAULT_MANIFEST_URL = "https://manifests.collections.yale.edu/v2/ycba/obj/15286"
+    YALE_MANIFEST_URL = "https://collections.library.yale.edu/manifests/2002046"
     BEINECKE_BASE_URL = "https://collections.library.yale.edu/iiif/2"
-    VOYNICH_OID = "2006193"  # Voynich MS 408 primary identifier
 
     def __init__(self, cache_dir: Optional[str] = None):
         self.cache_dir = Path(cache_dir) if cache_dir else Path("./data/scans")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._manifest_cache: Optional[Dict] = None
 
     @staticmethod
     def normalize_folio_name(folio_id: str) -> str:
@@ -40,49 +40,65 @@ class IIIFClient:
             return f"f{padded_num}{side}{sub}"
         return f
 
-    def get_iiif_image_url(self, image_id: str, region: str = "full", size: str = "max", quality: str = "default", format_: str = "jpg") -> str:
-        """
-        Constructs a standard IIIF Image API v2/v3 URL.
-        """
-        return f"{self.BEINECKE_BASE_URL}/{image_id}/{region}/{size}/0/{quality}.{format_}"
+    def fetch_manifest(self) -> Dict:
+        """Fetches and caches the Beinecke MS 408 IIIF Presentation v3 manifest."""
+        if self._manifest_cache is not None:
+            return self._manifest_cache
+        headers = {"User-Agent": "VoynichDuctus-Research/0.1"}
+        resp = requests.get(self.YALE_MANIFEST_URL, headers=headers, timeout=30)
+        resp.raise_for_status()
+        self._manifest_cache = resp.json()
+        return self._manifest_cache
 
-    def download_folio(self, folio_id: str, output_path: Optional[str] = None, size: str = "max", format_: str = "jpg") -> Path:
+    def get_folio_image_url(self, folio_id: str, max_width: int = 1600) -> Optional[str]:
         """
-        Downloads a specific folio image.
-        If direct Yale API identifier lookup is needed, downloads from official mirrored archive.
+        Finds the IIIF image URL for a given folio identifier (e.g. '1r', 'f001r', 'f026v').
+        """
+        norm = self.normalize_folio_name(folio_id)
+        # Match label without leading 'f0' (e.g. '1r', '26v')
+        short_num = norm.lstrip("f").lstrip("0")
+        if not short_num:
+            short_num = "1r"
+        
+        manifest = self.fetch_manifest()
+        for item in manifest.get("items", []):
+            labels = item.get("label", {}).get("none", [])
+            for lbl in labels:
+                clean_lbl = lbl.strip().lower().lstrip("f").lstrip("0")
+                if clean_lbl == short_num or lbl.strip().lower() == norm or lbl.strip().lower() == folio_id.strip().lower():
+                    # Extract body service
+                    try:
+                        body = item["items"][0]["items"][0]["body"]
+                        service_id = body.get("service", [{}])[0].get("@id")
+                        if service_id:
+                            return f"{service_id}/full/{max_width},/0/default.jpg"
+                        return body.get("id")
+                    except (KeyError, IndexError):
+                        pass
+        return None
+
+    def download_folio(self, folio_id: str, output_path: Optional[str] = None, max_width: int = 1600) -> Path:
+        """
+        Downloads a specific folio image from Yale Beinecke archives.
         """
         norm_folio = self.normalize_folio_name(folio_id)
-        out_file = Path(output_path) if output_path else self.cache_dir / f"{norm_folio}.{format_}"
+        out_file = Path(output_path) if output_path else self.cache_dir / f"{norm_folio}.jpg"
 
         if out_file.exists():
             return out_file
 
-        # Fallback to Yale or Wikimedia Commons High-Res Archive for Beinecke MS 408
-        # Standard high-resolution archive mirror URL pattern
-        mirror_url = f"https://raw.githubusercontent.com/reedacartwright/voynich-data/master/images/{norm_folio}.{format_}"
-        
+        url = self.get_folio_image_url(folio_id, max_width=max_width)
+        if not url:
+            # Fallback to direct Yale item 2 for f001r if search misses
+            url = f"https://collections.library.yale.edu/iiif/2/1006076/full/{max_width},/0/default.jpg"
+
         headers = {"User-Agent": "VoynichDuctus-Research/0.1"}
-        try:
-            resp = requests.get(mirror_url, headers=headers, timeout=30, stream=True)
-            if resp.status_code == 200:
-                with open(out_file, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                return out_file
-        except requests.RequestException:
-            pass
-
-        # If mirror fails, attempt direct IIIF retrieval
-        iiif_url = self.get_iiif_image_url(image_id=f"voynich_{norm_folio}", size=size, format_=format_)
-        try:
-            resp = requests.get(iiif_url, headers=headers, timeout=30, stream=True)
-            if resp.status_code == 200:
-                with open(out_file, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                return out_file
-        except requests.RequestException as e:
-            raise RuntimeError(f"Failed to fetch folio {norm_folio} from IIIF endpoints: {e}")
-
-        # If not fetched, create a placeholder dummy test image for offline test environments
-        return out_file
+        resp = requests.get(url, headers=headers, timeout=60, stream=True)
+        if resp.status_code == 200:
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_file, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=16384):
+                    f.write(chunk)
+            return out_file
+        else:
+            raise RuntimeError(f"Failed to fetch folio {norm_folio} (HTTP {resp.status_code})")
