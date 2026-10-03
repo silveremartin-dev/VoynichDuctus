@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "voynich-ductus"
+name = "VoynichDuctus"
 version = "0.1.0"
 description = "Objective Vector Glyph Extraction, Ductus Kinematics, and Statistical Paleography Pipeline for the Voynich Manuscript"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [
-    { name = "Voynich Ductus Contributors" }
+    { name = "VoynichDuctus Contributors" }
 ]
 keywords = [
     "voynich-manuscript",
@@ -59,6 +59,8 @@ dev = [
 
 [project.scripts]
 voynich-ductus = "voynich_ductus.cli:main"
+VoynichDuctus = "voynich_ductus.cli:main"
+voynichductus = "voynich_ductus.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

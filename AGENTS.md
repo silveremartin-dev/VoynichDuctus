@@ -2,7 +2,7 @@
 
 ## 1. System Overview & Purpose
 
-`voynich-ductus` is an open-source scientific pipeline for digital paleography, stroke vectorization, and computational linguistics. Its primary mission is to **decouple the analysis of the Voynich Manuscript (Beinecke MS 408) from subjective human transliteration schemes (like the EVA alphabet)**.
+`VoynichDuctus` is an open-source scientific pipeline for digital paleography, stroke vectorization, and computational linguistics. Its primary mission is to **decouple the analysis of the Voynich Manuscript (Beinecke MS 408) from subjective human transliteration schemes (like the EVA alphabet)**.
 
 By converting raw high-resolution raster scans into topological stroke graphs and inferring scribal kinematics (*offline-to-online handwriting derendering*), the system discovers an **emergent, objective alphabet** via unsupervised clustering and tests it against formal information-theoretic diagnostic criteria.
 

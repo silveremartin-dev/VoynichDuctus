@@ -1,4 +1,4 @@
-# Voynich Ductus: Objective Vector Glyphs, Scribal Kinematics & Statistical Paleography
+# VoynichDuctus: Objective Vector Glyphs, Scribal Kinematics & Statistical Paleography
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -29,7 +29,7 @@ Over a century of failed attempts to decipher the Voynich Manuscript (Beinecke M
 
 Most modern computational studies suffer from a fatal flaw: they train models on human-transcribed ASCII corpora (such as the European Voynich Alphabet, **EVA**), analyzing 1990s transliteration choices rather than raw historical ink.
 
-**Voynich Ductus** provides an open-source, mathematically traceable pipeline:
+**VoynichDuctus** provides an open-source, mathematically traceable pipeline:
 1. **Parchment Normalization & Binarization**: Local adaptive thresholding (Sauvola/Wolf) specifically tuned for 600 DPI scans.
 2. **Topological Skeleton & Ductus Extraction**: 1D medial axis transform with distance maps capturing stroke width variations (*plein et délié*).
 3. **Kinematic Ordering**: Resolves X/Y-junctions using Euler-Bernoulli tangent continuity and 15th-century right-handed scribal priors.
@@ -65,7 +65,7 @@ Beinecke Scan (600 DPI)
 The European Voynich Alphabet (EVA) was devised to enable computer storage of the manuscript. However:
 - EVA forced arbitrary decisions on whether adjacent ink strokes form a single glyph or a ligature of distinct glyphs (e.g., deciding whether `ch`, `sh`, `ee`, `in` are atomic or composite).
 - Applying neural networks or NLP to EVA means analyzing modern human transcription conventions rather than scribal reality.
-- **Voynich Ductus** eliminates this dependency by working directly on raw pixel geometry and stroke trajectories.
+- **VoynichDuctus** eliminates this dependency by working directly on raw pixel geometry and stroke trajectories.
 
 ---
 
@@ -133,8 +133,8 @@ To prevent unfalsifiable claims, the pipeline includes ground-truth reference ge
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/voynich-ductus.git
-cd voynich-ductus
+git clone https://github.com/your-username/VoynichDuctus.git
+cd VoynichDuctus
 
 # Install in editable mode
 pip install -e .
@@ -144,20 +144,20 @@ pip install -e .
 
 ```bash
 # 1. Run the comparative information-theoretic benchmark
-voynich-ductus benchmark --words 1500
+VoynichDuctus benchmark --words 1500
 
 # 2. Generate text from Torsten Timm's self-citation model
-voynich-ductus generate --generator timm --words 100
+VoynichDuctus generate --generator timm --words 100
 
 # 3. Process and vectorize a manuscript image
-voynich-ductus process --input-image path/to/word_or_folio.png --output-svg output/ductus.svg --output-tokens output/tokens.txt
+VoynichDuctus process --input-image path/to/word_or_folio.png --output-svg output/ductus.svg --output-tokens output/tokens.txt
 ```
 
 ---
 
 ## 7. Benchmark Results & Findings
 
-Running the formal diagnostic suite (`voynich-ductus benchmark`) produces the following empirical comparison:
+Running the formal diagnostic suite (`VoynichDuctus benchmark`) produces the following empirical comparison:
 
 | Corpus / System | Words | H1 Char (bits) | H2 Cond (bits) | H2 Drop % | Hurst (DFA) | Gzip Ratio | Markov Top-1 (O2) | Top Diagnostic Hypothesis |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -176,7 +176,7 @@ Running the formal diagnostic suite (`voynich-ductus benchmark`) produces the fo
 ## 8. Project Structure
 
 ```
-voynich-ductus/
+VoynichDuctus/
 ├── AGENTS.md                  # Comprehensive AI agent developer guide & architectural specs
 ├── pyproject.toml             # Package setup and build specification
 ├── requirements.txt           # Core dependencies
