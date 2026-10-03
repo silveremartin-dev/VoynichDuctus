@@ -51,27 +51,45 @@ class GlyphSegmenter:
 
     def extract_clean_page_mask(self, image: Image.Image) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Extracts clean text ink mask, removing chromatic paints (green/ochre/blue)
-        and large drawing/border connected components.
+        Extracts clean text ink mask, strictly separating grayscale text ink
+        from colored illustrations (green/ochre/blue/red/yellow paints) and large drawings.
         """
         rgb_arr = np.array(image.convert("RGB"))
         H, W, _ = rgb_arr.shape
+        rgb_float = rgb_arr.astype(np.float32) / 255.0
 
-        # 1. Local adaptive Sauvola thresholding
+        # Calculate Chroma and Brightness
+        chroma = np.max(rgb_float, axis=2) - np.min(rgb_float, axis=2)
+        gray = np.mean(rgb_float, axis=2)
+
+        from skimage.color import rgb2hsv
+        hsv = rgb2hsv(rgb_float)
+        hue = hsv[:, :, 0]
+        sat = hsv[:, :, 1]
+        val = hsv[:, :, 2]
+
+        # 1. Detect background type and colored illustration pigments
+        mean_page_sat = float(np.mean(sat))
+        is_warm_parchment = mean_page_sat >= 0.18
+
+        if is_warm_parchment:
+            # Voynich / Medieval parchment:
+            # Text ink is dark iron-gall. Illustrations are green foliage, blue water, or vivid red paint.
+            is_green = (hue >= 0.18) & (hue <= 0.48) & (sat > 0.35) & (val > 0.40)
+            is_blue = (hue >= 0.50) & (hue <= 0.75) & (sat > 0.35) & (val > 0.40)
+            is_illustration_color = is_green | is_blue | ((chroma > 0.35) & (val > 0.45))
+        else:
+            # Codex Seraphinianus / Printed paper:
+            # Text ink is strictly achromatic (chroma < 0.08). All colored pixels are illustrations!
+            is_illustration_color = (chroma > 0.08)
+
+        # 2. Local adaptive Sauvola thresholding for ink
         sauvola_mask = self.binarizer.binarize(image)
         sauvola_mask = self.binarizer.remove_small_artifacts(sauvola_mask, min_size=6)
 
-        # 2. Chromatic pigment detection (green/blue/ochre illustrations)
-        flat_rgb = self.normalizer.flatten_illumination_fast(self.normalizer.to_rgb_array(image))
-        chroma = np.max(flat_rgb, axis=2) - np.min(flat_rgb, axis=2)
-        from skimage.color import rgb2hsv
-        hsv = rgb2hsv(flat_rgb)
-        is_green = (hsv[:, :, 0] >= 0.15) & (hsv[:, :, 0] <= 0.48) & (chroma > 0.12)
-        is_blue = (hsv[:, :, 0] >= 0.50) & (hsv[:, :, 0] <= 0.75) & (chroma > 0.12)
-        is_paint = is_green | is_blue | (chroma > 0.25)
+        # Subtract colored illustration paints
+        ink_mask = sauvola_mask & (~is_illustration_color)
 
-        # Subtract colored paint from text ink mask
-        ink_mask = sauvola_mask & (~is_paint)
 
         # 3. Strip page borders & binding margins (outer 8% on all edges)
         margin_y = max(20, int(H * 0.08))
@@ -79,7 +97,7 @@ class GlyphSegmenter:
         inner_mask = np.zeros_like(ink_mask)
         inner_mask[margin_y:H - margin_y, margin_x:W - margin_x] = True
 
-        # Cut off outer 12% corners (where folio marks, creases, or thumb marks reside)
+        # Cut off outer 12% corners (folio numbers, tears, binding shadows)
         corner_y = int(H * 0.12)
         corner_x = int(W * 0.12)
         inner_mask[:corner_y, :corner_x] = False
@@ -89,7 +107,7 @@ class GlyphSegmenter:
 
         ink_mask = ink_mask & inner_mask
 
-        # 4. Remove large drawing connected components (drawings, frames, large diagrams)
+        # 4. Remove large drawing connected components (drawings, frames, diagrams)
         labeled, num_features = label(ink_mask)
         props = regionprops(labeled)
 
@@ -98,12 +116,8 @@ class GlyphSegmenter:
             ph = p.bbox[2] - p.bbox[0]
             pw = p.bbox[3] - p.bbox[1]
             aspect = pw / max(1, ph)
-            # Rejection criteria:
-            # - Too large area (drawings/diagrams)
-            # - Height or width exceeding text line scale
-            # - Extreme aspect ratio (horizontal rules or vertical crease lines)
             is_drawing = p.area > self.max_drawing_area or ph > self.max_glyph_height * 1.8 or pw > self.max_glyph_width * 2.5
-            is_line_smear = (aspect > 5.0 and pw > 80) or (aspect < 0.15 and ph > 80)
+            is_line_smear = (aspect > 4.5 and pw > 70) or (aspect < 0.18 and ph > 70)
             if is_drawing or is_line_smear:
                 clean_text_mask[labeled == p.label] = False
 
@@ -144,16 +158,16 @@ class GlyphSegmenter:
                 fill_factor = p.area / max(1, gh * gw)
 
                 # 1. Strict glyph dimension & scale bounds
-                if p.area < 18 or gh < 12 or gw < 7:
+                if p.area < 16 or gh < 11 or gw < 6:
                     continue
                 if gh > self.max_glyph_height or gw > self.max_glyph_width:
                     continue
-                if aspect > 4.0 or aspect < 0.20:
+                if aspect > 4.0 or aspect < 0.18:
                     continue
 
                 # 2. Filamentary 1D fractal stroke check (rejects solid textures, fur, ink blobs)
-                # True written glyphs have open white loops / filiform centerlines (fill factor in [0.08, 0.48])
-                if fill_factor < 0.08 or fill_factor > 0.48:
+                # True written glyphs have open white loops / filiform centerlines (fill factor in [0.08, 0.50])
+                if fill_factor < 0.08 or fill_factor > 0.50:
                     continue
 
                 gy0 = y_off + wy0 + p.bbox[0]
@@ -161,7 +175,7 @@ class GlyphSegmenter:
                 gy1 = y_off + wy0 + p.bbox[2]
                 gx1 = x_off + wx0 + p.bbox[3]
 
-                # 3. Strict Chromatic Pigment Discrimination (rejects green leaves, blue water, vivid paints)
+                # 3. Strict Chromatic Pigment Discrimination (rejects colored illustration pixels)
                 pad = 2
                 cy0, cx0 = max(0, gy0 - pad), max(0, gx0 - pad)
                 cy1, cx1 = min(page_rgb.shape[0], gy1 + pad), min(page_rgb.shape[1], gx1 + pad)
@@ -171,13 +185,20 @@ class GlyphSegmenter:
                 if crop_patch_rgb.shape[0] == g_mask.shape[0] and crop_patch_rgb.shape[1] == g_mask.shape[1]:
                     ink_pixels = crop_patch_rgb[g_mask]
                     if ink_pixels.shape[0] > 0:
-                        from skimage.color import rgb2hsv
-                        ink_hsv = rgb2hsv(ink_pixels.reshape(-1, 1, 3))
-                        # Paint check: bright + saturated green/blue/cyan/magenta pigments
-                        is_paint_stroke = (ink_hsv[:, 0, 2] > 0.45) & (ink_hsv[:, 0, 1] > 0.30) & ((ink_hsv[:, 0, 0] > 0.15) & (ink_hsv[:, 0, 0] < 0.85))
-                        if np.mean(is_paint_stroke) > 0.35:
-                            # Reject colored illustration paint stroke
-                            continue
+                        if subfolder == "seraphinianus":
+                            # Strict achromatic check for Seraphinianus
+                            chroma_ink = np.max(ink_pixels, axis=1) - np.min(ink_pixels, axis=1)
+                            if np.mean(chroma_ink) > 0.08:
+                                continue
+                        else:
+                            # Voynich / Medieval parchment: reject green/blue paint and bright vivid dyes
+                            from skimage.color import rgb2hsv
+                            ink_hsv = rgb2hsv(ink_pixels.reshape(-1, 1, 3))
+                            is_paint_stroke = (ink_hsv[:, 0, 2] > 0.45) & (ink_hsv[:, 0, 1] > 0.35) & (((ink_hsv[:, 0, 0] >= 0.18) & (ink_hsv[:, 0, 0] <= 0.48)) | (ink_hsv[:, 0, 0] >= 0.50))
+                            if np.mean(is_paint_stroke) > 0.35:
+                                continue
+
+
 
                 # Vectorize glyph ductus
 

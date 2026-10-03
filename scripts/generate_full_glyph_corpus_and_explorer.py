@@ -559,17 +559,46 @@ def generate_explorer_html(
 
                 if (isSelected) {{
                     ctx.strokeStyle = '#38bdf8';
-                    ctx.lineWidth = 4;
-                    ctx.fillStyle = 'rgba(56, 189, 248, 0.4)';
+                    ctx.lineWidth = 5;
+                    ctx.fillStyle = 'rgba(56, 189, 248, 0.45)';
                     ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
                     ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+
+                    // Add glowing target marker
+                    ctx.beginPath();
+                    ctx.arc((x0 + x1)/2, (y0 + y1)/2, Math.max(14, (x1 - x0)/1.5), 0, 2 * Math.PI);
+                    ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
                 }} else {{
-                    ctx.strokeStyle = 'rgba(245, 158, 11, 0.65)';
-                    ctx.lineWidth = 1.5;
+                    ctx.strokeStyle = 'rgba(245, 158, 11, 0.75)';
+                    ctx.lineWidth = 2;
+                    ctx.fillStyle = 'rgba(245, 158, 11, 0.12)';
+                    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
                     ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
                 }}
             }});
+
+            // Setup click handler on canvas
+            canvas.onclick = function(evt) {{
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const clickX = (evt.clientX - rect.left) * scaleX;
+                const clickY = (evt.clientY - rect.top) * scaleY;
+
+                // Find clicked glyph
+                const hit = page.glyphs.find(g => {{
+                    const [y0, x0, y1, x1] = g.bbox;
+                    return clickX >= x0 - 4 && clickX <= x1 + 4 && clickY >= y0 - 4 && clickY <= y1 + 4;
+                }});
+
+                if (hit) {{
+                    selectGlyph(hit);
+                }}
+            }};
         }}
+
 
         function renderGlyphGrid() {{
             const page = data[currentMs].pages[currentPageIdx];
