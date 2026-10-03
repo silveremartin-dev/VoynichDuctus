@@ -150,58 +150,96 @@ class GlyphSegmenter:
             labeled_w, num_w = label(w_img)
             w_props = sorted(regionprops(labeled_w), key=lambda p: p.bbox[1])  # Left-to-right order
 
-            glyph_idx = 0
+            candidate_components = []
             for p in w_props:
                 gh = p.bbox[2] - p.bbox[0]
                 gw = p.bbox[3] - p.bbox[1]
-                aspect = gw / max(1, gh)
-                fill_factor = p.area / max(1, gh * gw)
+                g_mask = (labeled_w[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] == p.label)
 
-                # 1. Strict glyph dimension & scale bounds
-                if p.area < 16 or gh < 11 or gw < 6:
+                # Check if component is a composite pair of glyphs (e.g. '40' ligature or connected minims)
+                if gw > 1.35 * gh and gw >= 32:
+                    col_proj = np.sum(g_mask, axis=0)
+                    mid_start = int(0.25 * gw)
+                    mid_end = int(0.75 * gw)
+                    if mid_end > mid_start:
+                        min_col_idx = mid_start + int(np.argmin(col_proj[mid_start:mid_end]))
+                        min_val = col_proj[min_col_idx]
+                        max_val = max(np.max(col_proj[:min_col_idx]), np.max(col_proj[min_col_idx:]))
+                        if max_val > 0 and (min_val / max_val) <= 0.40:
+                            # Split into two sub-components
+                            mask1 = np.zeros_like(g_mask)
+                            mask1[:, :min_col_idx] = g_mask[:, :min_col_idx]
+                            mask2 = np.zeros_like(g_mask)
+                            mask2[:, min_col_idx:] = g_mask[:, min_col_idx:]
+
+                            if np.sum(mask1) >= 16:
+                                candidate_components.append({
+                                    "mask": mask1[:, :min_col_idx],
+                                    "bbox_local": (p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[1] + min_col_idx),
+                                    "area": int(np.sum(mask1))
+                                })
+                            if np.sum(mask2) >= 16:
+                                candidate_components.append({
+                                    "mask": mask2[:, min_col_idx:],
+                                    "bbox_local": (p.bbox[0], p.bbox[1] + min_col_idx, p.bbox[2], p.bbox[3]),
+                                    "area": int(np.sum(mask2))
+                                })
+                            continue
+
+                candidate_components.append({
+                    "mask": g_mask,
+                    "bbox_local": p.bbox,
+                    "area": int(p.area)
+                })
+
+            glyph_idx = 0
+            for item in candidate_components:
+                g_mask = item["mask"]
+                gh, gw = g_mask.shape
+                bbox_loc = item["bbox_local"]
+                aspect = gw / max(1, gh)
+                fill_factor = item["area"] / max(1, gh * gw)
+
+                # 1. Strict glyph dimension & scale bounds (captures standard medieval minims)
+                if item["area"] < 12 or gh < 7 or gw < 4:
                     continue
                 if gh > self.max_glyph_height or gw > self.max_glyph_width:
                     continue
-                if aspect > 4.0 or aspect < 0.18:
+                if aspect > 3.5 or aspect < 0.15:
                     continue
 
                 # 2. Filamentary 1D fractal stroke check (rejects solid textures, fur, ink blobs)
-                # True written glyphs have open white loops / filiform centerlines (fill factor in [0.08, 0.50])
-                if fill_factor < 0.08 or fill_factor > 0.50:
+                if fill_factor < 0.06 or fill_factor > 0.58:
                     continue
 
-                gy0 = y_off + wy0 + p.bbox[0]
-                gx0 = x_off + wx0 + p.bbox[1]
-                gy1 = y_off + wy0 + p.bbox[2]
-                gx1 = x_off + wx0 + p.bbox[3]
+                gy0 = y_off + wy0 + bbox_loc[0]
+                gx0 = x_off + wx0 + bbox_loc[1]
+                gy1 = y_off + wy0 + bbox_loc[2]
+                gx1 = x_off + wx0 + bbox_loc[3]
 
                 # 3. Strict Chromatic Pigment Discrimination (rejects colored illustration pixels)
                 pad = 2
                 cy0, cx0 = max(0, gy0 - pad), max(0, gx0 - pad)
                 cy1, cx1 = min(page_rgb.shape[0], gy1 + pad), min(page_rgb.shape[1], gx1 + pad)
-                g_mask = (labeled_w[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] == p.label)
                 
                 crop_patch_rgb = page_rgb[gy0:gy1, gx0:gx1].astype(np.float32) / 255.0
                 if crop_patch_rgb.shape[0] == g_mask.shape[0] and crop_patch_rgb.shape[1] == g_mask.shape[1]:
                     ink_pixels = crop_patch_rgb[g_mask]
                     if ink_pixels.shape[0] > 0:
                         if subfolder == "seraphinianus":
-                            # Strict achromatic check for Seraphinianus
+                            # Strict achromatic check for Seraphinianus (rejects colored illustrations, allows JPEG ink artifacts)
                             chroma_ink = np.max(ink_pixels, axis=1) - np.min(ink_pixels, axis=1)
-                            if np.mean(chroma_ink) > 0.08:
+                            if np.mean(chroma_ink) > 0.12:
                                 continue
                         else:
-                            # Voynich / Medieval parchment: reject green/blue paint and bright vivid dyes
+                            # Voynich / Medieval parchment: reject green/blue/cyan paint (Hue in [0.22, 0.65])
                             from skimage.color import rgb2hsv
                             ink_hsv = rgb2hsv(ink_pixels.reshape(-1, 1, 3))
-                            is_paint_stroke = (ink_hsv[:, 0, 2] > 0.45) & (ink_hsv[:, 0, 1] > 0.35) & (((ink_hsv[:, 0, 0] >= 0.18) & (ink_hsv[:, 0, 0] <= 0.48)) | (ink_hsv[:, 0, 0] >= 0.50))
-                            if np.mean(is_paint_stroke) > 0.35:
+                            is_colored_paint = (ink_hsv[:, 0, 2] > 0.35) & (ink_hsv[:, 0, 1] > 0.35) & (ink_hsv[:, 0, 0] >= 0.20) & (ink_hsv[:, 0, 0] <= 0.65)
+                            if np.mean(is_colored_paint) > 0.35:
                                 continue
 
-
-
                 # Vectorize glyph ductus
-
                 try:
                     skel, widths = self.skel_engine.extract_skeleton(g_mask)
                     pixel_graph = self.graph_extractor.build_pixel_graph(skel, widths)
@@ -210,7 +248,7 @@ class GlyphSegmenter:
                 except Exception:
                     ordered_strokes = []
 
-                if not ordered_strokes:
+                if not ordered_strokes or len(ordered_strokes) > 5:
                     continue
 
                 glyph_id = f"{page_id}_{word_id}_G{glyph_idx:02d}"
@@ -244,7 +282,7 @@ class GlyphSegmenter:
                     "bbox": (int(gy0), int(gx0), int(gy1), int(gx1)),
                     "height": int(gh),
                     "width": int(gw),
-                    "area": int(p.area),
+                    "area": int(item["area"]),
                     "fill_factor": round(float(fill_factor), 3),
                     "stroke_count": len(ordered_strokes),
                     "strokes": ordered_strokes,

@@ -1,8 +1,9 @@
 """
-Full-scale Glyph Extraction, Kinematic Ductus Vectorization, Corpus Correspondence Matching, and Interactive Grand Explorer.
+Full-scale Glyph Extraction, Kinematic Ductus Vectorization, Standard Corpus Matching, and Interactive Grand Explorer.
 Extracts individual isolated glyphs across Voynich Manuscript and Codex Seraphinianus,
 induces canonical alphabets with standard corpus correspondences (EVA, Currier, Serafini),
-indexes all spatial coordinates (x, y) across all folios, and renders the comprehensive interactive explorer.
+indexes all spatial coordinates (x, y) across all folios, and renders the comprehensive interactive explorer
+featuring interactive Zoom/Pan, Minimap, Auto-Zoom on glyph click, and 3-way visual comparisons.
 """
 
 import os
@@ -90,7 +91,7 @@ def generate_explorer_html(
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VoynichDuctus — Digital Paleography & Standard Corpus Glyph Explorer</title>
+    <title>VoynichDuctus — Autonomous Digital Paleography & Grand Glyph Explorer</title>
     <style>
         :root {{
             --bg-dark: #090d16;
@@ -114,11 +115,12 @@ def generate_explorer_html(
             min-height: 100vh;
             display: flex;
             flex-direction: column;
+            overflow-x: hidden;
         }}
         header {{
             background: var(--panel-bg);
             border-bottom: 1px solid var(--border);
-            padding: 12px 24px;
+            padding: 10px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -129,23 +131,23 @@ def generate_explorer_html(
         .brand {{
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
         }}
         .brand h1 {{ font-size: 1.25rem; font-weight: 700; }}
-        .brand span {{ color: var(--accent); font-size: 0.82rem; }}
+        .brand span {{ color: var(--accent); font-size: 0.8rem; }}
         
         .controls {{
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
         }}
         .btn-toggle {{
             background: var(--card-bg);
             color: var(--text-main);
             border: 1px solid var(--border);
-            padding: 8px 14px;
+            padding: 7px 13px;
             border-radius: 6px;
-            font-size: 0.85rem;
+            font-size: 0.82rem;
             cursor: pointer;
             transition: all 0.2s;
         }}
@@ -154,9 +156,9 @@ def generate_explorer_html(
         
         .nav-tabs {{
             display: flex;
-            gap: 6px;
+            gap: 4px;
             background: #0b1120;
-            padding: 4px;
+            padding: 3px;
             border-radius: 8px;
             border: 1px solid var(--border);
         }}
@@ -164,10 +166,10 @@ def generate_explorer_html(
             background: transparent;
             color: var(--text-muted);
             border: none;
-            padding: 6px 14px;
+            padding: 5px 12px;
             border-radius: 6px;
             cursor: pointer;
-            font-size: 0.85rem;
+            font-size: 0.82rem;
             transition: all 0.2s;
         }}
         .tab-btn.active {{
@@ -178,47 +180,48 @@ def generate_explorer_html(
 
         main {{
             flex: 1;
-            padding: 16px 20px;
-            max-width: 1750px;
+            padding: 12px 16px;
+            max-width: 1900px;
             margin: 0 auto;
             width: 100%;
         }}
 
         .stats-bar {{
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            gap: 12px;
-            margin-bottom: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 10px;
+            margin-bottom: 12px;
         }}
         .stat-card {{
             background: var(--panel-bg);
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 10px 14px;
+            padding: 8px 12px;
         }}
-        .stat-card h4 {{ font-size: 0.70rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 3px; }}
-        .stat-card .val {{ font-size: 1.35rem; font-weight: 700; color: var(--accent); }}
+        .stat-card h4 {{ font-size: 0.68rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 2px; }}
+        .stat-card .val {{ font-size: 1.25rem; font-weight: 700; color: var(--accent); }}
 
         /* 4-Panel Page Layout */
         .page-view-layout {{
             display: grid;
-            grid-template-columns: 240px 480px 1fr 340px;
-            gap: 14px;
-            height: calc(100vh - 165px);
+            grid-template-columns: 210px 1.4fr 1fr 1.3fr;
+            gap: 12px;
+            height: calc(100vh - 150px);
         }}
         .panel {{
             background: var(--panel-bg);
             border: 1px solid var(--border);
             border-radius: 10px;
             overflow-y: auto;
-            padding: 12px;
+            padding: 10px;
             display: flex;
             flex-direction: column;
+            position: relative;
         }}
         .panel h3 {{
-            font-size: 0.90rem;
+            font-size: 0.85rem;
             margin-bottom: 8px;
-            padding-bottom: 6px;
+            padding-bottom: 5px;
             border-bottom: 1px solid var(--border);
             color: var(--accent);
             display: flex;
@@ -228,7 +231,7 @@ def generate_explorer_html(
 
         /* Page List */
         .page-item {{
-            padding: 9px 12px;
+            padding: 8px 10px;
             border-radius: 6px;
             cursor: pointer;
             background: var(--card-bg);
@@ -242,44 +245,113 @@ def generate_explorer_html(
         .page-item:hover {{ border-color: var(--accent); }}
         .page-item.active {{ background: #1e3a8a; border-color: var(--accent); font-weight: 600; }}
 
-        /* Full Page Canvas Overlay */
-        .canvas-container {{
+        /* Interactive Canvas Container & Controls */
+        .canvas-wrapper {{
             position: relative;
             width: 100%;
             height: 100%;
             background: #000;
             border-radius: 6px;
-            overflow: auto;
+            overflow: hidden;
             display: flex;
             justify-content: center;
-            align-items: flex-start;
+            align-items: center;
+            cursor: grab;
+            user-select: none;
+        }}
+        .canvas-wrapper.grabbing {{
+            cursor: grabbing;
         }}
         #page-canvas {{
             display: block;
-            cursor: crosshair;
-            max-width: 100%;
-            height: auto;
+            transform-origin: 0 0;
+            position: absolute;
+            left: 0;
+            top: 0;
+        }}
+
+        /* Canvas Zoom Toolbar */
+        .canvas-toolbar {{
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(17, 24, 39, 0.85);
+            backdrop-filter: blur(4px);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 4px 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            z-index: 20;
+        }}
+        .btn-tool {{
+            background: var(--card-bg);
+            color: #fff;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }}
+        .btn-tool:hover {{ background: var(--accent); color: #000; }}
+        .zoom-level-text {{
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            min-width: 44px;
+            text-align: center;
+        }}
+
+        /* Minimap (Mini-vue) */
+        .minimap-container {{
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 110px;
+            height: 145px;
+            background: rgba(0, 0, 0, 0.85);
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            overflow: hidden;
+            z-index: 20;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.7);
+            cursor: pointer;
+        }}
+        #minimap-canvas {{
+            width: 100%;
+            height: 100%;
+            display: block;
+        }}
+        .minimap-viewport-box {{
+            position: absolute;
+            border: 2px solid #38bdf8;
+            background: rgba(56, 189, 248, 0.25);
+            pointer-events: none;
         }}
 
         /* Glyphs Grid */
         .glyphs-header-controls {{
             display: flex;
-            gap: 8px;
-            margin-bottom: 10px;
+            gap: 6px;
+            margin-bottom: 8px;
             align-items: center;
         }}
         .select-filter {{
             background: var(--card-bg);
             color: var(--text-main);
             border: 1px solid var(--border);
-            padding: 5px 8px;
+            padding: 4px 6px;
             border-radius: 6px;
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             outline: none;
         }}
         .glyphs-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
             gap: 6px;
             overflow-y: auto;
             flex: 1;
@@ -299,19 +371,19 @@ def generate_explorer_html(
         .glyph-card:hover {{ border-color: var(--accent); transform: translateY(-2px); }}
         .glyph-card.selected {{
             border-color: var(--accent);
-            background: rgba(56, 189, 248, 0.18);
-            box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+            background: rgba(56, 189, 248, 0.20);
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
         }}
         .glyph-card img {{
-            width: 48px;
-            height: 48px;
+            width: 46px;
+            height: 46px;
             object-fit: contain;
             filter: contrast(110%);
         }}
         .glyph-card .gid {{
-            font-size: 0.65rem;
+            font-size: 0.62rem;
             color: var(--text-muted);
-            margin-top: 3px;
+            margin-top: 2px;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -320,9 +392,9 @@ def generate_explorer_html(
         .badge-type {{
             background: #374151;
             color: var(--accent);
-            padding: 1px 5px;
+            padding: 1px 4px;
             border-radius: 4px;
-            font-size: 0.65rem;
+            font-size: 0.62rem;
             font-weight: 700;
             margin-top: 2px;
             cursor: pointer;
@@ -332,36 +404,45 @@ def generate_explorer_html(
             color: #000;
         }}
 
-        /* Inspector */
+        /* Detailed Glyph Inspector (Expanded Previews) */
         .inspector-panel {{
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
+            overflow-y: auto;
+            flex: 1;
         }}
-        .preview-box {{
+        .inspector-trio {{
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+        }}
+        .preview-box-large {{
             background: #000;
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 8px;
+            padding: 6px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 120px;
+            min-height: 180px;
+            text-align: center;
         }}
-        .preview-box img, .preview-box svg {{
+        .preview-box-large img, .preview-box-large svg {{
             max-width: 100%;
-            max-height: 110px;
+            max-height: 150px;
+            object-fit: contain;
         }}
         .meta-list {{
             background: var(--card-bg);
             border: 1px solid var(--border);
             border-radius: 6px;
-            padding: 10px;
-            font-size: 0.78rem;
+            padding: 8px 10px;
+            font-size: 0.74rem;
             display: flex;
             flex-direction: column;
-            gap: 5px;
+            gap: 4px;
         }}
         .meta-list strong {{ color: var(--text-muted); }}
 
@@ -369,33 +450,33 @@ def generate_explorer_html(
             background: #0b1727;
             border: 1px solid #1e3a8a;
             border-radius: 6px;
-            padding: 10px;
-            font-size: 0.78rem;
+            padding: 8px 10px;
+            font-size: 0.75rem;
         }}
         .corpus-title {{
             color: var(--accent);
             font-weight: 700;
-            margin-bottom: 4px;
+            margin-bottom: 3px;
             display: flex;
             justify-content: space-between;
         }}
 
-        /* Archetype / Catalogue Tab */
+        /* Catalogue Tab */
         .catalogue-grid {{
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-            gap: 16px;
+            gap: 14px;
             overflow-y: auto;
-            max-height: calc(100vh - 180px);
+            max-height: calc(100vh - 170px);
         }}
         .catalogue-card {{
             background: var(--panel-bg);
             border: 1px solid var(--border);
             border-radius: 10px;
-            padding: 14px;
+            padding: 12px;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
             cursor: pointer;
             transition: all 0.2s;
         }}
@@ -410,45 +491,46 @@ def generate_explorer_html(
             align-items: center;
         }}
         .catalogue-header h3 {{
-            font-size: 1.1rem;
+            font-size: 1.05rem;
             color: var(--accent);
         }}
         .badge-freq {{
             background: #1e293b;
             color: #38bdf8;
             border: 1px solid #38bdf8;
-            padding: 2px 8px;
+            padding: 2px 7px;
             border-radius: 12px;
-            font-size: 0.75rem;
+            font-size: 0.72rem;
             font-weight: 600;
         }}
-        .catalogue-duo {{
+        .catalogue-trio {{
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 6px;
         }}
         .c-box {{
             background: #000;
             border: 1px solid var(--border);
             border-radius: 6px;
-            padding: 6px;
+            padding: 4px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 90px;
+            min-height: 85px;
         }}
         .c-box img, .c-box svg {{
             max-width: 100%;
-            max-height: 80px;
+            max-height: 70px;
+            object-fit: contain;
         }}
         .btn-variations {{
             background: #1e3a8a;
             color: #fff;
             border: 1px solid var(--accent);
-            padding: 6px 12px;
+            padding: 6px 10px;
             border-radius: 6px;
-            font-size: 0.8rem;
+            font-size: 0.78rem;
             cursor: pointer;
             text-align: center;
             font-weight: 600;
@@ -469,7 +551,7 @@ def generate_explorer_html(
             display: none;
             justify-content: center;
             align-items: center;
-            padding: 24px;
+            padding: 20px;
         }}
         .modal-overlay.open {{ display: flex; }}
         .modal-content {{
@@ -477,7 +559,7 @@ def generate_explorer_html(
             border: 1px solid var(--border);
             border-radius: 12px;
             width: 100%;
-            max-width: 1200px;
+            max-width: 1250px;
             max-height: 90vh;
             display: flex;
             flex-direction: column;
@@ -485,53 +567,53 @@ def generate_explorer_html(
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
         }}
         .modal-header {{
-            padding: 16px 20px;
+            padding: 14px 18px;
             border-bottom: 1px solid var(--border);
             display: flex;
             justify-content: space-between;
             align-items: center;
             background: #0f172a;
         }}
-        .modal-header h2 {{ font-size: 1.25rem; color: var(--accent); }}
+        .modal-header h2 {{ font-size: 1.15rem; color: var(--accent); }}
         .modal-close {{
             background: transparent;
             border: none;
             color: var(--text-muted);
-            font-size: 1.5rem;
+            font-size: 1.4rem;
             cursor: pointer;
             line-height: 1;
         }}
         .modal-close:hover {{ color: #fff; }}
         .modal-body {{
-            padding: 20px;
+            padding: 16px;
             overflow-y: auto;
             flex: 1;
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 14px;
         }}
         .variations-banner {{
             display: grid;
-            grid-template-columns: 240px 1fr;
-            gap: 16px;
+            grid-template-columns: 280px 1fr;
+            gap: 14px;
             background: var(--card-bg);
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 14px;
+            padding: 12px;
         }}
         .variations-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-            gap: 10px;
+            grid-template-columns: repeat(auto-fill, minmax(125px, 1fr));
+            gap: 8px;
             overflow-y: auto;
-            max-height: 480px;
+            max-height: 460px;
             padding-right: 4px;
         }}
         .var-card {{
             background: var(--card-bg);
             border: 1px solid var(--border);
             border-radius: 6px;
-            padding: 8px;
+            padding: 6px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -545,18 +627,18 @@ def generate_explorer_html(
             background: #283548;
         }}
         .var-card img {{
-            width: 56px;
-            height: 56px;
+            width: 52px;
+            height: 52px;
             object-fit: contain;
-            margin-bottom: 6px;
+            margin-bottom: 4px;
         }}
         .var-card .loc {{
-            font-size: 0.72rem;
+            font-size: 0.70rem;
             font-weight: 700;
             color: var(--accent);
         }}
         .var-card .coords {{
-            font-size: 0.65rem;
+            font-size: 0.62rem;
             color: var(--text-muted);
             margin: 2px 0;
         }}
@@ -565,9 +647,9 @@ def generate_explorer_html(
             color: #fff;
             border: none;
             border-radius: 4px;
-            font-size: 0.65rem;
+            font-size: 0.62rem;
             padding: 3px 6px;
-            margin-top: 4px;
+            margin-top: 3px;
             cursor: pointer;
             width: 100%;
         }}
@@ -581,9 +663,9 @@ def generate_explorer_html(
             background: #0f172a;
             border: 1px solid #1e293b;
             border-radius: 6px;
-            padding: 8px 12px;
-            font-size: 0.75rem;
-            margin-bottom: 8px;
+            padding: 7px 10px;
+            font-size: 0.72rem;
+            margin-bottom: 6px;
             line-height: 1.4;
         }}
     </style>
@@ -592,13 +674,13 @@ def generate_explorer_html(
     <header>
         <div class="brand">
             <h1>VoynichDuctus</h1>
-            <span>Autonomous Paleography & Standard Corpus Engine</span>
+            <span>Interactive Digital Paleography & Standard Corpus Engine</span>
         </div>
         <div class="controls">
             <button id="btn-voynich" class="btn-toggle active-voynich" onclick="setManuscript('voynich')">Voynich (Beinecke MS 408)</button>
             <button id="btn-serafini" class="btn-toggle" onclick="setManuscript('seraphinianus')">Codex Seraphinianus</button>
             <div class="nav-tabs">
-                <button id="tab-pages" class="tab-btn active" onclick="setTab('pages')">Manuscript Pages Overlay</button>
+                <button id="tab-pages" class="tab-btn active" onclick="setTab('pages')">Manuscript Canvas & Bounding Boxes</button>
                 <button id="tab-catalogue" class="tab-btn" onclick="setTab('catalogue')">Canonical Alphabet & Corpora</button>
             </div>
         </div>
@@ -616,14 +698,29 @@ def generate_explorer_html(
                 <div id="pages-list" style="overflow-y:auto; flex:1;"></div>
             </div>
 
-            <!-- 2. High-Res Canvas Overlay -->
-            <div class="panel" style="padding: 6px;">
+            <!-- 2. High-Res Canvas Overlay with Zoom & Minimap -->
+            <div class="panel" style="padding: 4px;">
                 <h3>
-                    <span>Manuscript Scan & Spatial Bounding Boxes</span>
-                    <span id="canvas-status" style="font-size:0.75rem; color:var(--text-muted);">Click any box to inspect</span>
+                    <span>Interactive Folio Canvas</span>
+                    <span id="canvas-status" style="font-size:0.72rem; color:var(--text-muted);">Scroll to Zoom • Drag to Pan • Click box to inspect</span>
                 </h3>
-                <div class="canvas-container" id="canvas-container">
+                <div class="canvas-wrapper" id="canvas-wrapper">
                     <canvas id="page-canvas"></canvas>
+
+                    <!-- Minimap Mini-vue Overlay -->
+                    <div class="minimap-container" id="minimap-container">
+                        <canvas id="minimap-canvas"></canvas>
+                        <div class="minimap-viewport-box" id="minimap-viewport"></div>
+                    </div>
+
+                    <!-- Zoom Controls Toolbar -->
+                    <div class="canvas-toolbar">
+                        <button class="btn-tool" onclick="zoomIn()" title="Zoom In">+</button>
+                        <button class="btn-tool" onclick="zoomOut()" title="Zoom Out">-</button>
+                        <button class="btn-tool" onclick="resetZoom()" title="Reset Zoom / Fit Page" style="font-size:0.7rem; width:34px;">Fit</button>
+                        <button class="btn-tool" onclick="zoomActual()" title="100% Scale" style="font-size:0.7rem; width:34px;">1:1</button>
+                        <span class="zoom-level-text" id="zoom-text">100%</span>
+                    </div>
                 </div>
             </div>
 
@@ -638,20 +735,20 @@ def generate_explorer_html(
                 <div class="glyphs-grid" id="glyphs-grid"></div>
             </div>
 
-            <!-- 4. Inspector -->
+            <!-- 4. Detailed Inspector -->
             <div class="panel">
-                <h3>Glyph & Ductus Inspector</h3>
+                <h3>Glyph Ductus & Standard Corpus Comparison</h3>
                 <div class="inspector-panel" id="inspector-content"></div>
             </div>
         </div>
 
         <!-- TAB 2: Catalogue & Standard Corpora -->
         <div id="view-catalogue" style="display: none;">
-            <div style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
+            <div style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
                 <div>
-                    <h2 id="catalogue-title" style="font-size:1.3rem; color:var(--accent);">Canonical Alphabet Archetypes</h2>
-                    <p style="color:var(--text-muted); font-size:0.85rem; margin-top:3px;">
-                        Click any Archetype or "View All Variations" to inspect its morphology variations across folios and standard corpus cross-references.
+                    <h2 id="catalogue-title" style="font-size:1.25rem; color:var(--accent);">Canonical Alphabet Archetypes & Standard Transliteration Corpora</h2>
+                    <p style="color:var(--text-muted); font-size:0.82rem; margin-top:2px;">
+                        Side-by-side comparison of induced exemplars, kinematic ductus, and official reference calligraphy (EVA / Currier / Serafini). Click any card to inspect all variations.
                     </p>
                 </div>
             </div>
@@ -669,7 +766,7 @@ def generate_explorer_html(
             <div class="modal-body">
                 <div class="variations-banner" id="modal-banner"></div>
                 <div>
-                    <h4 style="font-size:0.9rem; color:var(--accent); margin-bottom:8px;" id="modal-count-header">All Extracted Occurrences Across Folios</h4>
+                    <h4 style="font-size:0.85rem; color:var(--accent); margin-bottom:8px;" id="modal-count-header">All Extracted Occurrences Across Folios</h4>
                     <div class="variations-grid" id="modal-variations-grid"></div>
                 </div>
             </div>
@@ -685,11 +782,22 @@ def generate_explorer_html(
         let pageImageObj = null;
         let archetypeFilterVal = 'ALL';
 
+        // Pan & Zoom Engine State
+        let zoomScale = 1.0;
+        let panX = 0;
+        let panY = 0;
+        let isPanning = false;
+        let startPanX = 0;
+        let startPanY = 0;
+
         function setManuscript(ms) {{
             currentMs = ms;
             currentPageIdx = 0;
             selectedGlyph = null;
             archetypeFilterVal = 'ALL';
+            zoomScale = 1.0;
+            panX = 0;
+            panY = 0;
             
             document.getElementById('btn-voynich').className = ms === 'voynich' ? 'btn-toggle active-voynich' : 'btn-toggle';
             document.getElementById('btn-serafini').className = ms === 'seraphinianus' ? 'btn-toggle active-serafini' : 'btn-toggle';
@@ -714,7 +822,7 @@ def generate_explorer_html(
             document.getElementById('stats-bar').innerHTML = `
                 <div class="stat-card">
                     <h4>Manuscript</h4>
-                    <div class="val" style="font-size:1.05rem; color:${{currentMs === 'voynich' ? 'var(--voynich-color)' : 'var(--serafini-color)'}};">${{msData.title}}</div>
+                    <div class="val" style="font-size:1.0rem; color:${{currentMs === 'voynich' ? 'var(--voynich-color)' : 'var(--serafini-color)'}};">${{msData.title}}</div>
                 </div>
                 <div class="stat-card">
                     <h4>Processed Pages</h4>
@@ -748,7 +856,7 @@ def generate_explorer_html(
                 <div class="page-item ${{idx === currentPageIdx ? 'active' : ''}}" onclick="selectPage(${{idx}})">
                     <div>
                         <strong>${{p.page_id}}</strong>
-                        <div style="font-size:0.75rem; color:var(--text-muted);">${{p.line_count}} lines</div>
+                        <div style="font-size:0.72rem; color:var(--text-muted);">${{p.line_count}} lines</div>
                     </div>
                     <span class="badge-freq">${{p.glyph_count}} glyphs</span>
                 </div>
@@ -760,11 +868,11 @@ def generate_explorer_html(
             if (yr && yr.has_reference) {{
                 yieldPanel.innerHTML = `
                     <div class="yield-box">
-                        <div style="font-weight:600; color:var(--accent); margin-bottom:4px;">Census Benchmark (${{yr.folio_id}})</div>
+                        <div style="font-weight:600; color:var(--accent); margin-bottom:3px;">Census Benchmark (${{yr.folio_id}})</div>
                         <div>Lines: <strong>${{yr.detected_lines}}/${{yr.expected_lines}}</strong> (${{yr.line_yield_pct}}%)</div>
                         <div>Glyphs: <strong>${{yr.detected_glyphs}}/${{yr.expected_glyphs}}</strong> (${{yr.glyph_yield_pct}}%)</div>
                         <div>Hand: <strong>${{yr.scribe_hand}}</strong> (${{yr.currier_language}})</div>
-                        <div style="color:var(--text-muted); font-size:0.7rem; margin-top:4px;">Section: ${{yr.section}}</div>
+                        <div style="color:var(--text-muted); font-size:0.68rem; margin-top:2px;">Section: ${{yr.section}}</div>
                     </div>
                 `;
             }} else {{
@@ -796,6 +904,9 @@ def generate_explorer_html(
 
         function selectPage(idx) {{
             currentPageIdx = idx;
+            zoomScale = 1.0;
+            panX = 0;
+            panY = 0;
             renderPagesTab();
         }}
 
@@ -805,10 +916,37 @@ def generate_explorer_html(
                 pageImageObj = new Image();
                 pageImageObj.src = page.page_img_rel;
                 pageImageObj.onload = () => {{
+                    fitCanvasToWrapper();
                     drawCanvasOverlay();
-                    centerCanvasOnSelectedGlyph();
+                    drawMinimap();
+                    if (selectedGlyph) {{
+                        autoZoomOnGlyph(selectedGlyph);
+                    }}
                 }};
             }}
+        }}
+
+        function fitCanvasToWrapper() {{
+            const wrapper = document.getElementById('canvas-wrapper');
+            const canvas = document.getElementById('page-canvas');
+            if (!pageImageObj || !pageImageObj.naturalWidth) return;
+
+            canvas.width = pageImageObj.naturalWidth;
+            canvas.height = pageImageObj.naturalHeight;
+
+            const scaleW = wrapper.clientWidth / canvas.width;
+            const scaleH = wrapper.clientHeight / canvas.height;
+            zoomScale = Math.min(scaleW, scaleH) * 0.96;
+            panX = (wrapper.clientWidth - canvas.width * zoomScale) / 2;
+            panY = (wrapper.clientHeight - canvas.height * zoomScale) / 2;
+            applyCanvasTransform();
+        }}
+
+        function applyCanvasTransform() {{
+            const canvas = document.getElementById('page-canvas');
+            canvas.style.transform = `translate(${{panX}}px, ${{panY}}px) scale(${{zoomScale}})`;
+            document.getElementById('zoom-text').innerText = `${{Math.round(zoomScale * 100)}}%`;
+            updateMinimapViewport();
         }}
 
         function drawCanvasOverlay() {{
@@ -839,61 +977,67 @@ def generate_explorer_html(
 
                     // Add glowing target marker
                     ctx.beginPath();
-                    ctx.arc((x0 + x1)/2, (y0 + y1)/2, Math.max(16, (x1 - x0)/1.4), 0, 2 * Math.PI);
+                    ctx.arc((x0 + x1)/2, (y0 + y1)/2, Math.max(16, (x1 - x0)/1.3), 0, 2 * Math.PI);
                     ctx.strokeStyle = 'rgba(56, 189, 248, 0.95)';
-                    ctx.lineWidth = 3;
+                    ctx.lineWidth = 3.5;
                     ctx.stroke();
                 }} else {{
-                    ctx.strokeStyle = 'rgba(245, 158, 11, 0.8)';
-                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = 'rgba(245, 158, 11, 0.85)';
+                    ctx.lineWidth = 2.5;
                     ctx.fillStyle = 'rgba(245, 158, 11, 0.15)';
                     ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
                     ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
                 }}
             }});
-
-            // Setup click handler on canvas
-            canvas.onclick = function(evt) {{
-                const rect = canvas.getBoundingClientRect();
-                const scaleX = canvas.width / rect.width;
-                const scaleY = canvas.height / rect.height;
-                const clickX = (evt.clientX - rect.left) * scaleX;
-                const clickY = (evt.clientY - rect.top) * scaleY;
-
-                // Find clicked glyph
-                const hit = page.glyphs.find(g => {{
-                    const [y0, x0, y1, x1] = g.bbox;
-                    return clickX >= x0 - 4 && clickX <= x1 + 4 && clickY >= y0 - 4 && clickY <= y1 + 4;
-                }});
-
-                if (hit) {{
-                    selectGlyph(hit);
-                }}
-            }};
         }}
 
-        function centerCanvasOnSelectedGlyph() {{
-            if (!selectedGlyph) return;
-            const [y0, x0, y1, x1] = selectedGlyph.bbox;
-            const container = document.getElementById('canvas-container');
+        function drawMinimap() {{
+            const mCanvas = document.getElementById('minimap-canvas');
+            if (!pageImageObj || !pageImageObj.naturalWidth) return;
+            mCanvas.width = 110;
+            mCanvas.height = 145;
+            const ctx = mCanvas.getContext('2d');
+            ctx.drawImage(pageImageObj, 0, 0, mCanvas.width, mCanvas.height);
+            updateMinimapViewport();
+        }}
+
+        function updateMinimapViewport() {{
+            const wrapper = document.getElementById('canvas-wrapper');
             const canvas = document.getElementById('page-canvas');
-            if (!canvas || canvas.width === 0) return;
+            const vBox = document.getElementById('minimap-viewport');
+            if (!canvas.width || !wrapper.clientWidth) return;
 
-            const scale = canvas.clientWidth / canvas.width;
-            const targetX = ((x0 + x1) / 2) * scale;
-            const targetY = ((y0 + y1) / 2) * scale;
+            const scaleX = 110 / canvas.width;
+            const scaleY = 145 / canvas.height;
 
-            container.scrollTo({{
-                left: targetX - container.clientWidth / 2,
-                top: targetY - container.clientHeight / 2,
-                behavior: 'smooth'
-            }});
+            const visibleW = (wrapper.clientWidth / zoomScale) * scaleX;
+            const visibleH = (wrapper.clientHeight / zoomScale) * scaleY;
+            const visibleX = (-panX / zoomScale) * scaleX;
+            const visibleY = (-panY / zoomScale) * scaleY;
+
+            vBox.style.width = `${{Math.max(10, Math.min(110, visibleW))}}px`;
+            vBox.style.height = `${{Math.max(10, Math.min(145, visibleH))}}px`;
+            vBox.style.left = `${{Math.max(0, Math.min(110 - visibleW, visibleX))}}px`;
+            vBox.style.top = `${{Math.max(0, Math.min(145 - visibleH, visibleY))}}px`;
         }}
 
-        function selectGlyph(glyph) {{
+        // Auto-Zoom on glyph to a clear, legible reading magnification
+        function autoZoomOnGlyph(glyph) {{
+            const wrapper = document.getElementById('canvas-wrapper');
+            const [y0, x0, y1, x1] = glyph.bbox;
+            const centerX = (x0 + x1) / 2;
+            const centerY = (y0 + y1) / 2;
+
+            zoomScale = 2.6; // Clear line reading zoom factor
+            panX = wrapper.clientWidth / 2 - centerX * zoomScale;
+            panY = wrapper.clientHeight / 2 - centerY * zoomScale;
+
+            applyCanvasTransform();
+        }}
+
+        function selectGlyph(glyph, shouldAutoZoom = true) {{
             selectedGlyph = glyph;
             
-            // Check if on correct page
             const msData = data[currentMs];
             const pIdx = msData.pages.findIndex(p => p.page_id === glyph.page_id);
             if (pIdx !== -1 && pIdx !== currentPageIdx) {{
@@ -903,9 +1047,123 @@ def generate_explorer_html(
             }}
 
             drawCanvasOverlay();
-            centerCanvasOnSelectedGlyph();
+            if (shouldAutoZoom) {{
+                autoZoomOnGlyph(glyph);
+            }}
             renderGlyphGrid();
             renderInspector();
+        }}
+
+        // Setup Interactive Mouse Zoom & Pan
+        (function setupPanZoom() {{
+            const wrapper = document.getElementById('canvas-wrapper');
+            
+            wrapper.addEventListener('wheel', (evt) => {{
+                evt.preventDefault();
+                const rect = wrapper.getBoundingClientRect();
+                const mouseX = evt.clientX - rect.left;
+                const mouseY = evt.clientY - rect.top;
+
+                const zoomFactor = evt.deltaY < 0 ? 1.18 : 0.85;
+                const newScale = Math.max(0.2, Math.min(8.0, zoomScale * zoomFactor));
+
+                panX = mouseX - (mouseX - panX) * (newScale / zoomScale);
+                panY = mouseY - (mouseY - panY) * (newScale / zoomScale);
+                zoomScale = newScale;
+
+                applyCanvasTransform();
+            }});
+
+            wrapper.addEventListener('mousedown', (evt) => {{
+                if (evt.button !== 0) return;
+                isPanning = true;
+                startPanX = evt.clientX - panX;
+                startPanY = evt.clientY - panY;
+                wrapper.classList.add('grabbing');
+            }});
+
+            window.addEventListener('mousemove', (evt) => {{
+                if (!isPanning) return;
+                panX = evt.clientX - startPanX;
+                panY = evt.clientY - startPanY;
+                applyCanvasTransform();
+            }});
+
+            window.addEventListener('mouseup', () => {{
+                isPanning = false;
+                wrapper.classList.remove('grabbing');
+            }});
+
+            // Click on canvas box
+            wrapper.addEventListener('click', (evt) => {{
+                if (isPanning) return;
+                const rect = wrapper.getBoundingClientRect();
+                const clickCanvasX = (evt.clientX - rect.left - panX) / zoomScale;
+                const clickCanvasY = (evt.clientY - rect.top - panY) / zoomScale;
+
+                const page = data[currentMs].pages[currentPageIdx];
+                const hit = page.glyphs.find(g => {{
+                    const [y0, x0, y1, x1] = g.bbox;
+                    return clickCanvasX >= x0 - 6 && clickCanvasX <= x1 + 6 && clickCanvasY >= y0 - 6 && clickCanvasY <= y1 + 6;
+                }});
+
+                if (hit) {{
+                    selectGlyph(hit, false);
+                }}
+            }});
+
+            // Minimap click to pan
+            const minimap = document.getElementById('minimap-container');
+            minimap.addEventListener('click', (evt) => {{
+                evt.stopPropagation();
+                const rect = minimap.getBoundingClientRect();
+                const mX = (evt.clientX - rect.left) / 110;
+                const mY = (evt.clientY - rect.top) / 145;
+
+                const canvas = document.getElementById('page-canvas');
+                const targetX = mX * canvas.width;
+                const targetY = mY * canvas.height;
+
+                panX = wrapper.clientWidth / 2 - targetX * zoomScale;
+                panY = wrapper.clientHeight / 2 - targetY * zoomScale;
+                applyCanvasTransform();
+            }});
+        }})();
+
+        function zoomIn() {{
+            const wrapper = document.getElementById('canvas-wrapper');
+            const centerX = wrapper.clientWidth / 2;
+            const centerY = wrapper.clientHeight / 2;
+            const newScale = Math.min(8.0, zoomScale * 1.3);
+            panX = centerX - (centerX - panX) * (newScale / zoomScale);
+            panY = centerY - (centerY - panY) * (newScale / zoomScale);
+            zoomScale = newScale;
+            applyCanvasTransform();
+        }}
+
+        function zoomOut() {{
+            const wrapper = document.getElementById('canvas-wrapper');
+            const centerX = wrapper.clientWidth / 2;
+            const centerY = wrapper.clientHeight / 2;
+            const newScale = Math.max(0.2, zoomScale / 1.3);
+            panX = centerX - (centerX - panX) * (newScale / zoomScale);
+            panY = centerY - (centerY - panY) * (newScale / zoomScale);
+            zoomScale = newScale;
+            applyCanvasTransform();
+        }}
+
+        function resetZoom() {{
+            fitCanvasToWrapper();
+        }}
+
+        function zoomActual() {{
+            const wrapper = document.getElementById('canvas-wrapper');
+            const centerX = wrapper.clientWidth / 2;
+            const centerY = wrapper.clientHeight / 2;
+            panX = centerX - (centerX - panX) * (1.0 / zoomScale);
+            panY = centerY - (centerY - panY) * (1.0 / zoomScale);
+            zoomScale = 1.0;
+            applyCanvasTransform();
         }}
 
         function renderGlyphGrid() {{
@@ -919,7 +1177,7 @@ def generate_explorer_html(
             
             const grid = document.getElementById('glyphs-grid');
             grid.innerHTML = filteredGlyphs.map(g => `
-                <div class="glyph-card ${{selectedGlyph && selectedGlyph.glyph_id === g.glyph_id ? 'selected' : ''}}" onclick='selectGlyph(${{JSON.stringify(g)}})'>
+                <div class="glyph-card ${{selectedGlyph && selectedGlyph.glyph_id === g.glyph_id ? 'selected' : ''}}" onclick='selectGlyph(${{JSON.stringify(g)}}, true)'>
                     <img src="${{g.png_rel}}" alt="${{g.glyph_id}}">
                     <span class="gid">${{g.glyph_id.split('_').slice(-2).join('_')}}</span>
                     <span class="badge-type" onclick="event.stopPropagation(); openArchetypeVariations('${{g.canonical_type}}')">${{g.canonical_type || 'G??'}}</span>
@@ -939,16 +1197,23 @@ def generate_explorer_html(
             const cm = arch?.corpus_match;
 
             let corpusHtml = '';
+            let refSvgBox = '';
             if (cm) {{
                 if (currentMs === 'voynich') {{
                     corpusHtml = `
                         <div class="corpus-box">
                             <div class="corpus-title">
-                                <span>Corpus Match: EVA '${{cm.eva_equivalent}}' / Currier '${{cm.currier_equivalent}}'</span>
-                                <span style="color:var(--success);">${{cm.confidence_pct}}% match</span>
+                                <span>Standard Corpus: EVA '${{cm.eva_equivalent}}' / Currier '${{cm.currier_equivalent}}'</span>
+                                <span style="color:var(--success); font-weight:bold;">${{cm.confidence_pct}}% match</span>
                             </div>
                             <div><strong>Category:</strong> ${{cm.category}} (${{cm.name}})</div>
-                            <div style="color:var(--text-muted); font-size:0.72rem; margin-top:3px;">${{cm.description}}</div>
+                            <div style="color:var(--text-muted); font-size:0.72rem; margin-top:2px;">${{cm.description}}</div>
+                        </div>
+                    `;
+                    refSvgBox = `
+                        <div class="preview-box-large">
+                            <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">EVA STANDARD REFERENCE</span>
+                            ${{cm.reference_svg || ''}}
                         </div>
                     `;
                 }} else {{
@@ -956,25 +1221,37 @@ def generate_explorer_html(
                         <div class="corpus-box">
                             <div class="corpus-title">
                                 <span>Typology: ${{cm.serafini_code}}</span>
-                                <span style="color:var(--success);">${{cm.confidence_pct}}% match</span>
+                                <span style="color:var(--success); font-weight:bold;">${{cm.confidence_pct}}% match</span>
                             </div>
                             <div><strong>Category:</strong> ${{cm.category}} (${{cm.name}})</div>
-                            <div style="color:var(--text-muted); font-size:0.72rem; margin-top:3px;">${{cm.description}}</div>
+                            <div style="color:var(--text-muted); font-size:0.72rem; margin-top:2px;">${{cm.description}}</div>
+                        </div>
+                    `;
+                    refSvgBox = `
+                        <div class="preview-box-large">
+                            <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">SERAFINI REFERENCE</span>
+                            ${{cm.reference_svg || ''}}
                         </div>
                     `;
                 }}
             }}
 
             ins.innerHTML = `
-                <div class="preview-box">
-                    <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">SCAN CROP</span>
-                    <img src="${{selectedGlyph.png_rel}}" alt="${{selectedGlyph.glyph_id}}">
+                <!-- 3-Way Side-by-Side Large Comparison -->
+                <div class="inspector-trio">
+                    <div class="preview-box-large">
+                        <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">ORIGINAL SCAN CROP</span>
+                        <img src="${{selectedGlyph.png_rel}}" alt="${{selectedGlyph.glyph_id}}">
+                    </div>
+                    <div class="preview-box-large">
+                        <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">KINEMATIC DUCTUS</span>
+                        ${{selectedGlyph.svg_content}}
+                    </div>
+                    ${{refSvgBox}}
                 </div>
-                <div class="preview-box">
-                    <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">KINEMATIC DUCTUS</span>
-                    ${{selectedGlyph.svg_content}}
-                </div>
+
                 ${{corpusHtml}}
+
                 <div class="meta-list">
                     <div><strong>Glyph ID:</strong> ${{selectedGlyph.glyph_id}}</div>
                     <div><strong>Page / Line:</strong> ${{selectedGlyph.page_id}} / Line ${{selectedGlyph.line_id}}</div>
@@ -984,6 +1261,7 @@ def generate_explorer_html(
                     <div><strong>Stroke Count:</strong> ${{selectedGlyph.stroke_count}} kinematic strokes</div>
                     <div><strong>Archetype:</strong> <span style="color:var(--accent); font-weight:bold; cursor:pointer;" onclick="openArchetypeVariations('${{selectedGlyph.canonical_type}}')">${{selectedGlyph.canonical_type}} (Click to view all variations)</span></div>
                 </div>
+
                 <button class="btn-variations" onclick="openArchetypeVariations('${{selectedGlyph.canonical_type}}')">🔍 View All ${{arch?.total_instances_count || ''}} Variations of ${{selectedGlyph.canonical_type}}</button>
                 <a href="${{selectedGlyph.svg_rel}}" download class="btn-toggle" style="text-decoration:none; margin-top:2px; text-align:center;">⬇ Download Glyph SVG</a>
             `;
@@ -995,12 +1273,19 @@ def generate_explorer_html(
             grid.innerHTML = cat.alphabet.map(a => {{
                 const cm = a.corpus_match;
                 let matchHeader = '';
+                let refSvgElem = '';
                 if (cm) {{
                     if (currentMs === 'voynich') {{
                         matchHeader = `<div style="color:var(--accent); font-size:0.85rem; font-weight:bold;">EVA: '${{cm.eva_equivalent}}' | Currier: '${{cm.currier_equivalent}}' <span style="font-size:0.75rem; color:var(--success); font-weight:normal;">(${{cm.confidence_pct}}% match)</span></div>`;
                     }} else {{
                         matchHeader = `<div style="color:var(--accent); font-size:0.85rem; font-weight:bold;">${{cm.serafini_code}}: ${{cm.name}} <span style="font-size:0.75rem; color:var(--success); font-weight:normal;">(${{cm.confidence_pct}}% match)</span></div>`;
                     }}
+                    refSvgElem = `
+                        <div class="c-box">
+                            <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">STANDARD REF</span>
+                            ${{cm.reference_svg || ''}}
+                        </div>
+                    `;
                 }}
 
                 return `
@@ -1010,19 +1295,20 @@ def generate_explorer_html(
                         <span class="badge-freq">${{a.frequency}} occurrences (${{a.percentage}}%)</span>
                     </div>
                     ${{matchHeader}}
-                    <div class="catalogue-duo">
+                    <div class="catalogue-trio">
                         <div class="c-box">
-                            <span style="font-size:0.6rem; color:var(--text-muted); margin-bottom:4px;">EXEMPLAR CROP</span>
+                            <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">EXEMPLAR</span>
                             <img src="${{a.exemplar_png}}" alt="${{a.type_id}}">
                         </div>
                         <div class="c-box">
-                            <span style="font-size:0.6rem; color:var(--text-muted); margin-bottom:4px;">CANONICAL DUCTUS</span>
+                            <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">DUCTUS</span>
                             ${{a.exemplar_svg_content}}
                         </div>
+                        ${{refSvgElem}}
                     </div>
-                    <div style="font-size:0.78rem; color:var(--text-muted); line-height:1.4;">
+                    <div style="font-size:0.75rem; color:var(--text-muted); line-height:1.3;">
                         <div>Mean Strokes: <strong>${{a.mean_strokes}}</strong> | Dim: <strong>${{a.mean_width}}x${{a.mean_height}} px</strong></div>
-                        <div style="margin-top:2px; font-size:0.72rem;">Exemplar: <code>${{a.exemplar_id}}</code></div>
+                        <div style="margin-top:2px; font-size:0.70rem;">Exemplar ID: <code>${{a.exemplar_id}}</code></div>
                     </div>
                     <button class="btn-variations" onclick="event.stopPropagation(); openArchetypeVariations('${{a.type_id}}')">
                         View All ${{a.total_instances_count || a.frequency}} Variations Across Pages ➔
@@ -1042,21 +1328,27 @@ def generate_explorer_html(
             document.getElementById('modal-archetype-title').innerText = `Archetype ${{arch.type_id}} — Morphological Variations & Standard Cross-Reference`;
             
             let bannerHtml = `
-                <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; background:#000; padding:10px; border-radius:6px; border:1px solid var(--border);">
-                    <div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:4px;">CANONICAL DUCTUS</div>
-                    ${{arch.exemplar_svg_content}}
+                <div style="display:flex; gap:8px; background:#000; padding:8px; border-radius:6px; border:1px solid var(--border);">
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                        <span style="font-size:0.62rem; color:var(--text-muted);">DUCTUS</span>
+                        <div style="max-height:90px;">${{arch.exemplar_svg_content}}</div>
+                    </div>
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                        <span style="font-size:0.62rem; color:var(--text-muted);">STANDARD REF</span>
+                        <div style="max-height:90px;">${{cm?.reference_svg || ''}}</div>
+                    </div>
                 </div>
-                <div style="display:flex; flex-direction:column; justify-content:center; gap:6px;">
-                    <div style="font-size:1.15rem; font-weight:bold; color:var(--accent);">
+                <div style="display:flex; flex-direction:column; justify-content:center; gap:4px;">
+                    <div style="font-size:1.1rem; font-weight:bold; color:var(--accent);">
                         Type ${{arch.type_id}} (${{arch.frequency}} occurrences across corpus)
                     </div>
                     <div style="font-size:0.85rem; color:#fff;">
                         ${{cm ? (currentMs === 'voynich' ? `<strong>EVA Transliteration:</strong> <span style="color:var(--voynich-color); font-size:1.1rem; font-weight:bold;">'${{cm.eva_equivalent}}'</span> | <strong>Currier:</strong> '${{cm.currier_equivalent}}'` : `<strong>Serafini Typology:</strong> <span style="color:var(--serafini-color); font-weight:bold;">${{cm.serafini_code}}</span> (${{cm.name}})`) : ''}}
                     </div>
-                    <div style="font-size:0.78rem; color:var(--text-muted);">
+                    <div style="font-size:0.75rem; color:var(--text-muted);">
                         <strong>Category:</strong> ${{cm?.category || 'General'}} | <strong>Confidence:</strong> <span style="color:var(--success); font-weight:bold;">${{cm?.confidence_pct || 90}}%</span>
                     </div>
-                    <div style="font-size:0.75rem; color:var(--text-muted);">${{cm?.description || ''}}</div>
+                    <div style="font-size:0.72rem; color:var(--text-muted);">${{cm?.description || ''}}</div>
                 </div>
             `;
             document.getElementById('modal-banner').innerHTML = bannerHtml;
@@ -1070,7 +1362,7 @@ def generate_explorer_html(
                     <img src="${{inst.png_rel}}" alt="${{inst.glyph_id}}">
                     <div class="loc">${{inst.page_id}}</div>
                     <div class="coords">[${{inst.bbox[0]}}, ${{inst.bbox[1]}}]</div>
-                    <div style="font-size:0.65rem; color:var(--text-muted);">${{inst.stroke_count}} stroke(s)</div>
+                    <div style="font-size:0.62rem; color:var(--text-muted);">${{inst.stroke_count}} stroke(s)</div>
                     <button class="btn-locate">📍 Locate on Page</button>
                 </div>
             `).join('');
@@ -1103,7 +1395,7 @@ def generate_explorer_html(
                 const page = msData.pages[pIdx];
                 const g = page.glyphs.find(x => x.glyph_id === glyphId);
                 if (g) {{
-                    selectGlyph(g);
+                    selectGlyph(g, true);
                 }}
             }}
         }}
@@ -1141,7 +1433,6 @@ def main():
     voynich_pages_data = []
     all_voynich_glyphs = []
 
-    # Master archival scans first
     voynich_sources = [("f001r", Path("data/scans/f001r.jpg")), ("f001v", Path("data/scans/f001v.jpg"))]
     for folio_id, vf in voynich_sources:
         if vf.exists():
@@ -1165,7 +1456,7 @@ def main():
     voynich_pdf = Path("data/scans/voynich/VoynichManuscript.pdf")
     if voynich_pdf.exists():
         loader_v = PDFScanLoader(voynich_pdf)
-        for page_idx in [2, 3, 4, 5]:  # folios 2r, 2v, 3r, 3v
+        for page_idx in [2, 3, 4, 5]:
             try:
                 folio_name = f"f{page_idx:03d}"
                 print(f"[*] Extracting all glyphs on Voynich folio '{folio_name}' from PDF...")
