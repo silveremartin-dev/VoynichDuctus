@@ -9,9 +9,11 @@ Provides ground-truth controls for testing computational paleography hypotheses:
 from voynich_ductus.generators.timm_self_citation import TimmSelfCitationGenerator
 from voynich_ductus.generators.rugg_cardan import RuggCardanGenerator
 from voynich_ductus.generators.baselines import BaselineGenerator
+from voynich_ductus.generators.seraphinianus import SeraphinianusEngine
 
 __all__ = [
     "TimmSelfCitationGenerator",
     "RuggCardanGenerator",
     "BaselineGenerator",
+    "SeraphinianusEngine",
 ]
