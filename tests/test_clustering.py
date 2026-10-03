@@ -40,3 +40,22 @@ def test_clustering_and_tokenization():
     tokenizer = StrokeTokenizer(prefix="G")
     word_tok = tokenizer.tokenize_word(labels[:3].tolist())
     assert "G" in word_tok
+
+
+def test_glyph_catalogue():
+    from voynich_ductus.clustering.glyph_catalogue import GlyphCatalogue
+
+    catalogue_builder = GlyphCatalogue(target_alphabet_size=3)
+    
+    mock_glyphs = [
+        {"glyph_id": "G001", "height": 20, "width": 10, "stroke_count": 1, "png_rel": "g1.png", "svg_rel": "g1.svg", "strokes": [{"points": [(0, 0, 1), (10, 0, 1)]}]},
+        {"glyph_id": "G002", "height": 21, "width": 11, "stroke_count": 1, "png_rel": "g2.png", "svg_rel": "g2.svg", "strokes": [{"points": [(0, 0, 1), (11, 0, 1)]}]},
+        {"glyph_id": "G003", "height": 40, "width": 30, "stroke_count": 3, "png_rel": "g3.png", "svg_rel": "g3.svg", "strokes": [{"points": [(0, 0, 2), (0, 20, 2)], "points": [(0, 10, 2), (20, 10, 2)]}]},
+        {"glyph_id": "G004", "height": 42, "width": 31, "stroke_count": 3, "png_rel": "g4.png", "svg_rel": "g4.svg", "strokes": [{"points": [(0, 0, 2), (0, 21, 2)], "points": [(0, 10, 2), (21, 10, 2)]}]},
+    ]
+
+    cat = catalogue_builder.build_catalogue(mock_glyphs)
+    assert cat["total_glyphs"] == 4
+    assert cat["canonical_alphabet_size"] >= 2
+    assert len(cat["alphabet"]) >= 2
+

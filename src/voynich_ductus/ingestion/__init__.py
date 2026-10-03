@@ -6,6 +6,7 @@ from voynich_ductus.ingestion.segmenter import LineSegmenter
 from voynich_ductus.ingestion.pdf_loader import PDFScanLoader
 from voynich_ductus.ingestion.color_normalizer import ColorIlluminationNormalizer
 from voynich_ductus.ingestion.transcription_reference import TranscriptionReference, PaleographyYieldValidator
+from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
 
 __all__ = [
     "IIIFClient",
@@ -14,6 +15,8 @@ __all__ = [
     "PDFScanLoader",
     "ColorIlluminationNormalizer",
     "TranscriptionReference",
-    "PaleographyYieldValidator"
+    "PaleographyYieldValidator",
+    "GlyphSegmenter"
 ]
+
 
