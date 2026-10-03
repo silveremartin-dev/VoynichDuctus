@@ -48,14 +48,43 @@ def test_glyph_catalogue():
     catalogue_builder = GlyphCatalogue(target_alphabet_size=3)
     
     mock_glyphs = [
-        {"glyph_id": "G001", "height": 20, "width": 10, "stroke_count": 1, "png_rel": "g1.png", "svg_rel": "g1.svg", "strokes": [{"points": [(0, 0, 1), (10, 0, 1)]}]},
-        {"glyph_id": "G002", "height": 21, "width": 11, "stroke_count": 1, "png_rel": "g2.png", "svg_rel": "g2.svg", "strokes": [{"points": [(0, 0, 1), (11, 0, 1)]}]},
-        {"glyph_id": "G003", "height": 40, "width": 30, "stroke_count": 3, "png_rel": "g3.png", "svg_rel": "g3.svg", "strokes": [{"points": [(0, 0, 2), (0, 20, 2)], "points": [(0, 10, 2), (20, 10, 2)]}]},
-        {"glyph_id": "G004", "height": 42, "width": 31, "stroke_count": 3, "png_rel": "g4.png", "svg_rel": "g4.svg", "strokes": [{"points": [(0, 0, 2), (0, 21, 2)], "points": [(0, 10, 2), (21, 10, 2)]}]},
+        {"glyph_id": "G001", "page_id": "f001r", "bbox": [10, 10, 30, 20], "height": 20, "width": 10, "stroke_count": 1, "png_rel": "g1.png", "svg_rel": "g1.svg", "strokes": [{"points": [(0, 0, 1), (10, 0, 1)]}]},
+        {"glyph_id": "G002", "page_id": "f001r", "bbox": [12, 10, 33, 21], "height": 21, "width": 11, "stroke_count": 1, "png_rel": "g2.png", "svg_rel": "g2.svg", "strokes": [{"points": [(0, 0, 1), (11, 0, 1)]}]},
+        {"glyph_id": "G003", "page_id": "f001v", "bbox": [50, 40, 90, 70], "height": 40, "width": 30, "stroke_count": 3, "png_rel": "g3.png", "svg_rel": "g3.svg", "strokes": [{"points": [(0, 0, 2), (0, 20, 2)], "points": [(0, 10, 2), (20, 10, 2)]}]},
+        {"glyph_id": "G004", "page_id": "f001v", "bbox": [52, 40, 94, 71], "height": 42, "width": 31, "stroke_count": 3, "png_rel": "g4.png", "svg_rel": "g4.svg", "strokes": [{"points": [(0, 0, 2), (0, 21, 2)], "points": [(0, 10, 2), (21, 10, 2)]}]},
     ]
 
-    cat = catalogue_builder.build_catalogue(mock_glyphs)
+    cat = catalogue_builder.build_catalogue(mock_glyphs, corpus_type="voynich")
     assert cat["total_glyphs"] == 4
     assert cat["canonical_alphabet_size"] >= 2
     assert len(cat["alphabet"]) >= 2
+    for entry in cat["alphabet"]:
+        assert "corpus_match" in entry
+        assert "all_instances" in entry
+        assert len(entry["all_instances"]) == entry["frequency"]
+
+
+def test_corpus_matcher():
+    from voynich_ductus.clustering.corpus_matcher import CorpusCorrespondenceMatcher
+
+    match_v = CorpusCorrespondenceMatcher.match_voynich_archetype(
+        archetype_id="G01",
+        mean_strokes=1.1,
+        mean_width=15,
+        mean_height=18,
+        frequency_rank=1
+    )
+    assert match_v["eva_equivalent"] in ["o", "a", "e", "y"]
+    assert match_v["confidence_pct"] > 50
+
+    match_s = CorpusCorrespondenceMatcher.match_serafini_archetype(
+        archetype_id="G01",
+        mean_strokes=2.0,
+        mean_width=12,
+        mean_height=20,
+        frequency_rank=1
+    )
+    assert "serafini_code" in match_s
+    assert match_s["confidence_pct"] > 50
+
 

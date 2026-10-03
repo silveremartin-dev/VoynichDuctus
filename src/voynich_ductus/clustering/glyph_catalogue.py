@@ -1,6 +1,8 @@
 """
 Glyph Catalogue and Canonical Alphabet Induction Engine.
-Synthesizes unique canonical glyph archetypes from thousands of isolated glyph extractions.
+Synthesizes unique canonical glyph archetypes from thousands of isolated glyph extractions,
+indexes all spatial instances (x, y coordinates across all pages),
+and cross-references each archetype against historical reference transliteration corpora (EVA, Currier, Serafini).
 """
 
 from typing import List, Dict, Any, Tuple, Optional
@@ -12,12 +14,13 @@ from sklearn.metrics import pairwise_distances
 
 from voynich_ductus.embeddings.geometric_features import GeometricFeatureExtractor
 from voynich_ductus.embeddings.stroke_autoencoder import StrokeLatentProjector
+from voynich_ductus.clustering.corpus_matcher import CorpusCorrespondenceMatcher
 
 
 class GlyphCatalogue:
     """
     Groups extracted individual glyphs into an objective canonical alphabet inventory
-    via unsupervised geometric clustering.
+    via unsupervised geometric clustering, preserving all instance occurrences and coordinates.
     """
 
     def __init__(self, target_alphabet_size: int = 28, distance_threshold: Optional[float] = None):
@@ -51,9 +54,10 @@ class GlyphCatalogue:
 
         return np.array(glyph_feature_vectors, dtype=np.float32)
 
-    def build_catalogue(self, glyphs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def build_catalogue(self, glyphs: List[Dict[str, Any]], corpus_type: str = "voynich") -> Dict[str, Any]:
         """
-        Clusters glyphs into canonical alphabet types and identifies exemplar archetypes.
+        Clusters glyphs into canonical alphabet types, indexes all instances with spatial coordinates,
+        and estimates correspondences with standard transcription corpora.
         """
         if not glyphs:
             return {"total_glyphs": 0, "canonical_alphabet_size": 0, "alphabet": []}
@@ -76,11 +80,19 @@ class GlyphCatalogue:
         unique_labels = sorted(list(set(labels)))
         actual_clusters = len(unique_labels)
 
-        # Build canonical glyph entries
-        alphabet_entries = []
+        # Build initial clusters
+        raw_clusters = []
         for cluster_id in unique_labels:
             indices = np.where(labels == cluster_id)[0]
             cluster_glyphs = [glyphs[i] for i in indices]
+            raw_clusters.append((cluster_id, indices, cluster_glyphs))
+
+        # Sort raw clusters by size descending to have clean rank 1..N
+        raw_clusters.sort(key=lambda item: len(item[2]), reverse=True)
+
+        # Build canonical glyph entries
+        alphabet_entries = []
+        for rank, (cluster_id, indices, cluster_glyphs) in enumerate(raw_clusters, start=1):
             cluster_points = X_latent[indices]
 
             # Find medoid (exemplar closest to cluster center)
@@ -89,29 +101,69 @@ class GlyphCatalogue:
             medoid_idx = indices[np.argmin(dists)]
             exemplar_glyph = glyphs[medoid_idx]
 
-            type_name = f"G{cluster_id + 1:02d}"
+            type_name = f"G{rank:02d}"
 
             # Tag all members with canonical type
             for g in cluster_glyphs:
                 g["canonical_type"] = type_name
 
+            mean_strokes = round(float(np.mean([g.get("stroke_count", len(g.get("strokes", []))) for g in cluster_glyphs])), 2)
+            mean_height = round(float(np.mean([g.get("height", 20) for g in cluster_glyphs])), 1)
+            mean_width = round(float(np.mean([g.get("width", 15) for g in cluster_glyphs])), 1)
+
+            # Match with standard historical corpora
+            if corpus_type.lower() == "seraphinianus":
+                corpus_match = CorpusCorrespondenceMatcher.match_serafini_archetype(
+                    archetype_id=type_name,
+                    mean_strokes=mean_strokes,
+                    mean_width=mean_width,
+                    mean_height=mean_height,
+                    frequency_rank=rank
+                )
+            else:
+                corpus_match = CorpusCorrespondenceMatcher.match_voynich_archetype(
+                    archetype_id=type_name,
+                    mean_strokes=mean_strokes,
+                    mean_width=mean_width,
+                    mean_height=mean_height,
+                    frequency_rank=rank,
+                    cluster_glyphs=cluster_glyphs
+                )
+
+            # Collect full occurrences / spatial instances across all pages
+            all_instances = []
+            for g in cluster_glyphs:
+                all_instances.append({
+                    "glyph_id": g.get("glyph_id", ""),
+                    "page_id": g.get("page_id", ""),
+                    "line_id": g.get("line_id", ""),
+                    "word_id": g.get("word_id", ""),
+                    "bbox": [int(x) for x in g.get("bbox", [0, 0, 0, 0])],
+                    "width": int(g.get("width", 0)),
+                    "height": int(g.get("height", 0)),
+                    "stroke_count": int(g.get("stroke_count", len(g.get("strokes", [])))),
+                    "png_rel": g.get("png_rel", ""),
+                    "svg_rel": g.get("svg_rel", "")
+                })
+
             alphabet_entries.append({
                 "type_id": type_name,
+                "rank": rank,
                 "cluster_index": int(cluster_id),
                 "frequency": len(cluster_glyphs),
                 "percentage": round(len(cluster_glyphs) / len(glyphs) * 100, 2),
-                "exemplar_id": exemplar_glyph["glyph_id"],
-                "exemplar_png": exemplar_glyph["png_rel"],
-                "exemplar_svg": exemplar_glyph["svg_rel"],
+                "exemplar_id": exemplar_glyph.get("glyph_id", ""),
+                "exemplar_png": exemplar_glyph.get("png_rel", ""),
+                "exemplar_svg": exemplar_glyph.get("svg_rel", ""),
                 "exemplar_svg_content": exemplar_glyph.get("svg_content", ""),
-                "mean_strokes": round(float(np.mean([g["stroke_count"] for g in cluster_glyphs])), 2),
-                "mean_height": round(float(np.mean([g["height"] for g in cluster_glyphs])), 1),
-                "mean_width": round(float(np.mean([g["width"] for g in cluster_glyphs])), 1),
+                "mean_strokes": mean_strokes,
+                "mean_height": mean_height,
+                "mean_width": mean_width,
+                "corpus_match": corpus_match,
+                "total_instances_count": len(all_instances),
+                "all_instances": all_instances,
                 "sample_instances": [g["glyph_id"] for g in cluster_glyphs[:20]]
             })
-
-        # Sort alphabet by frequency descending
-        alphabet_entries.sort(key=lambda x: x["frequency"], reverse=True)
 
         return {
             "total_glyphs": len(glyphs),
