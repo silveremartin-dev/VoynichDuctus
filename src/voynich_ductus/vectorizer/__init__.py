@@ -8,6 +8,12 @@ from voynich_ductus.vectorizer.stroke_graph import StrokeGraphExtractor
 from voynich_ductus.vectorizer.junction_resolver import JunctionResolver
 from voynich_ductus.vectorizer.inksight_adapter import InkSightAdapter
 from voynich_ductus.vectorizer.export_format import VectorExporter
+from voynich_ductus.vectorizer.comparative_vectorizers import (
+    ComparativeVectorizerBenchmark,
+    GeometricVectorEngine,
+    DINOv2EmbeddingEngine,
+    InkSightVectorEngine
+)
 
 __all__ = [
     "Skeletonizer",
@@ -15,4 +21,8 @@ __all__ = [
     "JunctionResolver",
     "InkSightAdapter",
     "VectorExporter",
+    "ComparativeVectorizerBenchmark",
+    "GeometricVectorEngine",
+    "DINOv2EmbeddingEngine",
+    "InkSightVectorEngine",
 ]

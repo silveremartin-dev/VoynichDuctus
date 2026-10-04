@@ -74,12 +74,29 @@ class VectorExporter:
             if not pts:
                 continue
 
+            # Normalize points format to List[Tuple[y, x, width]]
+            norm_pts = []
+            for p in pts:
+                if isinstance(p, dict):
+                    y_val = float(p.get("y", 0.0))
+                    x_val = float(p.get("x", 0.0))
+                    w_val = float(p.get("pressure_proxy", p.get("w", p.get("width", 1.5))))
+                    norm_pts.append((y_val, x_val, w_val))
+                elif isinstance(p, (tuple, list)):
+                    y_val = float(p[0])
+                    x_val = float(p[1])
+                    w_val = float(p[2]) if len(p) > 2 else 1.5
+                    norm_pts.append((y_val, x_val, w_val))
+
+            if not norm_pts:
+                continue
+
             color = colors[i % len(colors)] if include_order_colors else "#38bdf8"
-            avg_width = sum(p[2] if len(p) > 2 else 1.5 for p in pts) / len(pts)
+            avg_width = sum(p[2] for p in norm_pts) / len(norm_pts)
             stroke_width = max(2.0, min(avg_width * 1.3, 7.0))
 
-            d_str = VectorExporter._points_to_smooth_path_d(pts)
-            start_y, start_x = pts[0][0], pts[0][1]
+            d_str = VectorExporter._points_to_smooth_path_d(norm_pts)
+            start_y, start_x = norm_pts[0][0], norm_pts[0][1]
 
             svg_lines.append(
                 f'    <path id="{stroke.get("stroke_id", f"s{i}")}" d="{d_str}" '

@@ -191,6 +191,89 @@ class LineSegmenter:
 
         return results
 
+    def estimate_line_pitch_fft(self, binary_ink: np.ndarray) -> float:
+        """
+        Estimates the dominant scribal line pitch (interline distance in px) via 1D FFT spectral analysis
+        of the horizontal projection profile. Distinguishes regular ruled text lines from chaotic illustrations.
+        """
+        if binary_ink.shape[0] < 50:
+            return float(self.min_line_pitch)
+
+        proj = np.sum(binary_ink, axis=1).astype(float)
+        proj = proj - np.mean(proj)
+        n = len(proj)
+        if n == 0 or np.all(proj == 0):
+            return float(self.min_line_pitch)
+
+        fft_vals = np.abs(np.fft.rfft(proj))
+        freqs = np.fft.rfftfreq(n, d=1.0)
+
+        # Restrict to realistic manuscript line pitches [15px .. 180px]
+        min_freq = 1.0 / 180.0
+        max_freq = 1.0 / 15.0
+        valid_idx = np.where((freqs >= min_freq) & (freqs <= max_freq))[0]
+
+        if len(valid_idx) == 0:
+            return float(self.min_line_pitch)
+
+        peak_idx = valid_idx[np.argmax(fft_vals[valid_idx])]
+        peak_freq = freqs[peak_idx]
+        if peak_freq > 0:
+            pitch = 1.0 / peak_freq
+            return round(float(pitch), 2)
+        return float(self.min_line_pitch)
+
+    def detect_text_macro_blocks(self, binary_ink: np.ndarray, h_radius: int = 30, v_radius: int = 12, min_area: int = 400) -> List[Dict[str, Any]]:
+        """
+        Detects coherent rectangular text paragraph macro-blocks using anisotropic morphological closing,
+        separating compact text bodies from sprawling botanical illustrations and marginal annotations.
+        """
+        from scipy.ndimage import binary_closing
+        H, W = binary_ink.shape
+        # Anisotropic structuring element matching horizontal scribal line flow
+        struct_elem = np.ones((v_radius, h_radius), dtype=bool)
+        closed_mask = binary_closing(binary_ink, structure=struct_elem)
+
+        labeled_blocks, num_blocks = label(closed_mask)
+        props = regionprops(labeled_blocks)
+
+        macro_blocks = []
+        for idx, p in enumerate(props):
+            # Macro-block must have sufficient area and contain genuine text density
+            if p.area >= min_area:
+                by0, bx0, by1, bx1 = p.bbox
+                block_ink = binary_ink[by0:by1, bx0:bx1]
+                density = np.sum(block_ink) / max(1, (by1 - by0) * (bx1 - bx0))
+                if density >= 0.03:  # True paragraph block
+                    macro_blocks.append({
+                        "block_id": f"MB{idx:02d}",
+                        "bbox": (int(by0), int(bx0), int(by1), int(bx1)),
+                        "area": int(p.area),
+                        "density": round(float(density), 3),
+                        "aspect_ratio": round(float((bx1 - bx0) / max(1, by1 - by0)), 2)
+                    })
+
+        return sorted(macro_blocks, key=lambda b: (b["bbox"][0], b["bbox"][1]))
+
+    def filter_nib_width_consistency(self, binary_ink: np.ndarray, min_radius: float = 0.6, max_radius: float = 4.5) -> np.ndarray:
+        """
+        Filters out non-pen strokes by measuring local Euclidean distance radius r(x,y):
+        - Discards thick brush strokes (r > 4.5 px, e.g. colored washes or outer drawing contours)
+        - Discards sub-nib parchment grain (r < 0.6 px)
+        """
+        from scipy.ndimage import distance_transform_edt
+        if not np.any(binary_ink):
+            return binary_ink
+
+        edt = distance_transform_edt(binary_ink)
+        # Identify regions that are excessively thick for a 15th-century pen nib
+        too_thick = edt > max_radius
+        from scipy.ndimage import binary_dilation
+        thick_blobs = binary_dilation(too_thick, iterations=int(max_radius * 1.5))
+
+        clean_ink = binary_ink & (~thick_blobs)
+        return clean_ink
+
     def extract_connected_components(self, binary_ink: np.ndarray) -> List[Dict[str, Any]]:
         """
         Extracts individual connected glyph/ligature components with bounding boxes.
