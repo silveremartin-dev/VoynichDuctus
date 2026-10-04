@@ -421,6 +421,60 @@ class GlyphSegmenter:
                 })
                 glyph_idx += 1
 
+            # Guarantee that every lexical word contains at least 1 constituent glyph (monoglyph fallback)
+            if glyph_idx == 0 and np.sum(w_img) >= 15:
+                try:
+                    skel, widths = self.skel_engine.extract_skeleton(w_img)
+                    pixel_graph = self.graph_extractor.build_pixel_graph(skel, widths)
+                    raw_strokes = self.graph_extractor.decompose_into_strokes(pixel_graph)
+                    ordered_strokes = self.resolver.resolve_and_order_strokes(raw_strokes) if raw_strokes else []
+                except Exception:
+                    ordered_strokes = []
+
+                glyph_id = f"{page_id}_{line_id}_{word_id}_G00"
+                png_rel, svg_rel, svg_str = "", "", ""
+                wh_m, ww_m = w_img.shape
+                if output_dir:
+                    (output_dir / subfolder / "glyphs" / "png").mkdir(parents=True, exist_ok=True)
+                    (output_dir / subfolder / "glyphs" / "svg").mkdir(parents=True, exist_ok=True)
+
+                    png_filename = f"{glyph_id}.png"
+                    svg_filename = f"{glyph_id}.svg"
+                    png_path = output_dir / subfolder / "glyphs" / "png" / png_filename
+                    svg_path = output_dir / subfolder / "glyphs" / "svg" / svg_filename
+
+                    w_pad = 4
+                    cy0, cx0 = max(0, abs_wy0 - w_pad), max(0, abs_wx0 - w_pad)
+                    cy1, cx1 = min(page_rgb.shape[0], abs_wy1 + w_pad), min(page_rgb.shape[1], abs_wx1 + w_pad)
+                    raw_patch = page_rgb[cy0:cy1, cx0:cx1]
+                    save_patch = self.normalizer.enhance_contrast_and_sharpness(raw_patch, contrast_gain=1.35, unsharp_radius=1.0, unsharp_amount=1.6)
+                    Image.fromarray(save_patch).save(png_path)
+
+                    if ordered_strokes:
+                        svg_str = VectorExporter.to_svg(ordered_strokes, width=ww_m, height=wh_m, output_path=svg_path)
+
+                    png_rel = f"{subfolder}/glyphs/png/{png_filename}"
+                    svg_rel = f"{subfolder}/glyphs/svg/{svg_filename}"
+
+                line_glyphs.append({
+                    "glyph_id": glyph_id,
+                    "page_id": page_id,
+                    "line_id": line_id,
+                    "word_id": word_id,
+                    "word_bbox": (int(abs_wy0), int(abs_wx0), int(abs_wy1), int(abs_wx1)),
+                    "word_png_rel": word_png_rel,
+                    "bbox": (int(abs_wy0), int(abs_wx0), int(abs_wy1), int(abs_wx1)),
+                    "height": int(w_h),
+                    "width": int(w_w),
+                    "area": int(np.sum(w_img)),
+                    "fill_factor": round(float(np.sum(w_img) / max(1, w_h * w_w)), 3),
+                    "stroke_count": len(ordered_strokes),
+                    "strokes": ordered_strokes,
+                    "png_rel": png_rel,
+                    "svg_rel": svg_rel,
+                    "svg_content": svg_str
+                })
+
         return line_glyphs, line_words
 
     def extract_page_glyphs(

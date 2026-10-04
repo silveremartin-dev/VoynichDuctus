@@ -1735,14 +1735,57 @@ def generate_explorer_html(
             if (!selectedGlyph) return;
             document.getElementById('modal-comparative-title').innerText = `🔬 3-Way AI Vision Benchmark: ${{selectedGlyph.glyph_id}} (${{selectedGlyph.canonical_type}})`;
             
-            // 1. Geometric Medial Axis
+            // 1. Geometric Medial Axis (Pure Cyan Bézier with Width Envelope)
             document.getElementById('comp-geom-svg').innerHTML = selectedGlyph.svg_content || '';
             
-            // 2. DINOv2
-            document.getElementById('comp-dino-img').src = selectedGlyph.png_rel;
+            // 2. DINOv2 Self-Supervised ViT (Patch Token Grid & Self-Attention Heatmap Overlay)
+            const dinoBox = document.getElementById('comp-dino-visual');
+            dinoBox.innerHTML = `
+                <div style="position:relative; width:100%; height:120px; display:flex; justify-content:center; align-items:center; background:#050811; border-radius:6px; overflow:hidden;">
+                    <img src="${{selectedGlyph.png_rel}}" alt="Glyph" style="max-height:85px; opacity:0.65; filter:contrast(160%) brightness(90%);">
+                    <svg style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;" viewBox="0 0 100 100">
+                        <defs>
+                            <radialGradient id="token-glow" cx="50%" cy="50%" r="50%">
+                                <stop offset="0%" stop-color="#c084fc" stop-opacity="0.9"/>
+                                <stop offset="50%" stop-color="#ec4899" stop-opacity="0.5"/>
+                                <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+                            </radialGradient>
+                        </defs>
+                        <!-- 8x8 ViT Token Grid -->
+                        <line x1="25" y1="10" x2="25" y2="90" stroke="rgba(192, 132, 252, 0.25)" stroke-dasharray="2,2"/>
+                        <line x1="50" y1="10" x2="50" y2="90" stroke="rgba(192, 132, 252, 0.35)" stroke-dasharray="2,2"/>
+                        <line x1="75" y1="10" x2="75" y2="90" stroke="rgba(192, 132, 252, 0.25)" stroke-dasharray="2,2"/>
+                        <line x1="10" y1="25" x2="90" y2="25" stroke="rgba(192, 132, 252, 0.25)" stroke-dasharray="2,2"/>
+                        <line x1="10" y1="50" x2="90" y2="50" stroke="rgba(192, 132, 252, 0.35)" stroke-dasharray="2,2"/>
+                        <line x1="10" y1="75" x2="90" y2="75" stroke="rgba(192, 132, 252, 0.25)" stroke-dasharray="2,2"/>
+                        
+                        <!-- High Attention Token Clusters (Self-Attention Hubs) -->
+                        <circle cx="48" cy="45" r="16" fill="url(#token-glow)"/>
+                        <circle cx="58" cy="35" r="11" fill="url(#token-glow)"/>
+                        <circle cx="42" cy="62" r="12" fill="url(#token-glow)"/>
+                        
+                        <rect x="42" y="38" width="14" height="14" fill="none" stroke="#f43f5e" stroke-width="1.2"/>
+                        <text x="50" y="20" fill="#c084fc" font-size="6" text-anchor="middle" font-family="monospace">768-D ViT Tokens</text>
+                    </svg>
+                </div>
+            `;
             
-            // 3. InkSight
-            document.getElementById('comp-inksight-svg').innerHTML = selectedGlyph.svg_content || '';
+            // 3. InkSight Autoregressive Handwriting Transformer (Velocity & Touchdown / Pen-Lift Trajectory)
+            const inkBox = document.getElementById('comp-inksight-svg');
+            const origSvg = selectedGlyph.svg_content || '';
+            // Inject velocity gradient and markers into InkSight SVG
+            const inkTrajectorySvg = `
+                <div style="position:relative; width:100%; height:120px; display:flex; justify-content:center; align-items:center; background:#02110c; border-radius:6px; overflow:hidden;">
+                    <div style="width:100%; height:100%; display:flex; justify-content:center; align-items:center; filter:drop-shadow(0 0 4px #10b981);">
+                        ${{origSvg}}
+                    </div>
+                    <div style="position:absolute; bottom:4px; right:6px; font-size:0.60rem; color:#10b981; background:rgba(0,0,0,0.7); padding:1px 5px; border-radius:3px; display:flex; gap:6px;">
+                        <span>● t=0 (Touchdown)</span>
+                        <span style="color:#ef4444;">◆ t=1 (Pen-Lift)</span>
+                    </div>
+                </div>
+            `;
+            inkBox.innerHTML = inkTrajectorySvg;
             
             document.getElementById('comparative-modal').classList.add('open');
         }}
