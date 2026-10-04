@@ -39,8 +39,8 @@ class LineSegmenter:
 
     def segment_lines(self, binary_ink: np.ndarray, auto_isolate: bool = True) -> List[Dict[str, Any]]:
         """
-        Segments manuscript page into distinct, intact text lines using peak-valley
-        analysis of smoothed horizontal projection profiles.
+        Segments manuscript page into distinct, intact text lines using connected component
+        clustering around baseline peaks. Ensures ascenders and descenders are NEVER sliced horizontally.
         """
         if auto_isolate and (binary_ink.shape[0] > 600 and binary_ink.shape[1] > 600):
             work_img, (off_y, off_x, _, _) = self.isolate_text_paragraph(binary_ink)
@@ -56,7 +56,7 @@ class LineSegmenter:
         smooth_profile = gaussian_filter1d(raw_profile, sigma=4.0)
 
         # Detect line baseline centers (peaks)
-        peaks, _ = find_peaks(smooth_profile, distance=self.min_line_pitch, prominence=np.max(smooth_profile) * 0.12)
+        peaks, _ = find_peaks(smooth_profile, distance=self.min_line_pitch, prominence=np.max(smooth_profile) * 0.10)
 
         if len(peaks) == 0:
             return [{
@@ -65,37 +65,60 @@ class LineSegmenter:
                 "image": work_img
             }]
 
-        # Compute valleys between adjacent peaks
-        valleys = [0]
-        for i in range(len(peaks) - 1):
-            p0, p1 = peaks[i], peaks[i + 1]
-            mid_valley = p0 + int(np.argmin(smooth_profile[p0:p1]))
-            valleys.append(mid_valley)
-        valleys.append(len(smooth_profile))
+        # Label all connected components in work_img
+        labeled_block, num_comps = label(work_img)
+        if num_comps == 0:
+            return []
+
+        props = regionprops(labeled_block)
+
+        # Group components by closest baseline peak
+        line_buckets: Dict[int, List[Any]] = {i: [] for i in range(len(peaks))}
+        for p in props:
+            # Filter micro artifacts
+            if p.area < 6:
+                continue
+            cy = p.centroid[0]
+            # Find closest peak
+            distances = [abs(cy - peak_y) for peak_y in peaks]
+            closest_idx = int(np.argmin(distances))
+            # If component is within reasonable distance from peak (< 1.6 * pitch)
+            if distances[closest_idx] <= self.min_line_pitch * 1.8:
+                line_buckets[closest_idx].append(p)
 
         results = []
-        for line_idx in range(len(valleys) - 1):
-            ly0, ly1 = valleys[line_idx], valleys[line_idx + 1]
-            if ly1 - ly0 < self.min_line_height:
+        for line_idx, peak_y in enumerate(peaks):
+            line_comps = line_buckets.get(line_idx, [])
+            if not line_comps:
                 continue
 
-            line_crop = work_img[ly0:ly1, :]
-            col_profile = np.sum(line_crop, axis=0)
-            nonzero_cols = np.where(col_profile > 3)[0]
-            if len(nonzero_cols) == 0:
+            ly0 = min(c.bbox[0] for c in line_comps)
+            ly1 = max(c.bbox[2] for c in line_comps)
+            lx0 = min(c.bbox[1] for c in line_comps)
+            lx1 = max(c.bbox[3] for c in line_comps)
+
+            if (lx1 - lx0) < self.min_word_width or (ly1 - ly0) < 8:
                 continue
 
-            lx0, lx1 = nonzero_cols[0], nonzero_cols[-1] + 1
-            if lx1 - lx0 < self.min_word_width:
-                continue
+            # Construct clean composite mask with ONLY this line's intact components
+            lh = ly1 - ly0
+            lw = lx1 - lx0
+            line_mask = np.zeros((lh, lw), dtype=bool)
+            for c in line_comps:
+                c_mask = (labeled_block[c.bbox[0]:c.bbox[2], c.bbox[1]:c.bbox[3]] == c.label)
+                off_comp_y = c.bbox[0] - ly0
+                off_comp_x = c.bbox[1] - lx0
+                line_mask[off_comp_y:off_comp_y + (c.bbox[2] - c.bbox[0]), off_comp_x:off_comp_x + (c.bbox[3] - c.bbox[1])] |= c_mask
 
-            abs_y0, abs_y1 = off_y + ly0, off_y + ly1
-            abs_x0, abs_x1 = off_x + lx0, off_x + lx1
+            abs_y0 = off_y + ly0
+            abs_y1 = off_y + ly1
+            abs_x0 = off_x + lx0
+            abs_x1 = off_x + lx1
 
             results.append({
                 "line_id": f"L{line_idx:03d}",
                 "bbox": (int(abs_y0), int(abs_x0), int(abs_y1), int(abs_x1)),
-                "image": binary_ink[abs_y0:abs_y1, abs_x0:abs_x1]
+                "image": line_mask
             })
 
         return results

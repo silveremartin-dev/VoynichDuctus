@@ -17,12 +17,11 @@ class VectorExporter:
         """
         Exports strokes to an SVG string/file with embedded kinematic ordering.
         """
-        # Palette for stroke sequence
-        colors = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33", "#a65628", "#f781bf"]
+        # Palette for distinct pen-lift strokes
+        colors = ["#38bdf8", "#10b981", "#f59e0b", "#c084fc", "#f43f5e", "#06b6d4", "#a855f7"]
 
         svg_lines = [
-            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}">',
-            f'  <rect width="100%" height="100%" fill="#fbf8eb"/> <!-- Parchment background -->',
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="100%" height="100%" style="overflow:visible;">',
             '  <g id="voynich_strokes">'
         ]
 
@@ -31,9 +30,9 @@ class VectorExporter:
             if not pts:
                 continue
 
-            color = colors[i % len(colors)] if include_order_colors else "#2c1d11"
-            avg_width = np_mean = sum(p[2] if len(p) > 2 else 1.5 for p in pts) / len(pts)
-            stroke_width = max(1.0, min(avg_width, 6.0))
+            color = colors[i % len(colors)] if include_order_colors else "#38bdf8"
+            avg_width = sum(p[2] if len(p) > 2 else 1.5 for p in pts) / len(pts)
+            stroke_width = max(2.0, min(avg_width * 1.3, 7.0))
 
             # Build path data 'M x y L x y ...'
             start_y, start_x = pts[0][0], pts[0][1]
@@ -46,6 +45,11 @@ class VectorExporter:
                 f'    <path id="{stroke.get("stroke_id", f"s{i}")}" d="{d_str}" '
                 f'fill="none" stroke="{color}" stroke-width="{stroke_width:.2f}" '
                 f'stroke-linecap="round" stroke-linejoin="round" data-order="{stroke.get("order_index", i)}"/>'
+            )
+            # Pen-down touch point indicator (small circle on stroke start)
+            dot_r = max(2.5, min(stroke_width * 0.8, 5.0))
+            svg_lines.append(
+                f'    <circle cx="{start_x:.2f}" cy="{start_y:.2f}" r="{dot_r:.2f}" fill="#10b981" opacity="0.9"/>'
             )
 
         svg_lines.append("  </g>")

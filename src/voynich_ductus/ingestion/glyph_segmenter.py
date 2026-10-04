@@ -29,11 +29,11 @@ class GlyphSegmenter:
     def __init__(
         self,
         min_glyph_height: int = 10,
-        max_glyph_height: int = 95,
+        max_glyph_height: int = 220,
         min_glyph_width: int = 6,
-        max_glyph_width: int = 150,
+        max_glyph_width: int = 220,
         min_glyph_area: int = 15,
-        max_drawing_area: int = 3000
+        max_drawing_area: int = 6000
     ):
         self.min_glyph_height = min_glyph_height
         self.max_glyph_height = max_glyph_height
@@ -92,20 +92,20 @@ class GlyphSegmenter:
         # Subtract colored illustration paints
         ink_mask = sauvola_mask & (~is_illustration_color)
 
-        # 3. Strip page borders & binding margins
+        # 3. Strip page borders & binding margins (Keep right margin wide so letters are NOT cut off)
         if subfolder == "seraphinianus":
-            margin_y = max(8, int(H * 0.025))
-            margin_x = max(8, int(W * 0.025))
+            margin_y = max(8, int(H * 0.020))
+            margin_x = max(6, int(W * 0.015))
             inner_mask = np.zeros_like(ink_mask)
             inner_mask[margin_y:H - margin_y, margin_x:W - margin_x] = True
         else:
-            margin_y = max(15, int(H * 0.045))
-            margin_x = max(15, int(W * 0.045))
+            margin_y = max(10, int(H * 0.020))
+            margin_x = max(6, int(W * 0.008))  # Only 0.8% margin: preserves all right-margin text!
             inner_mask = np.zeros_like(ink_mask)
             inner_mask[margin_y:H - margin_y, margin_x:W - margin_x] = True
-            # Cut off outer 4% corners (tears, binding shadow)
-            corner_y = int(H * 0.04)
-            corner_x = int(W * 0.04)
+            # Cut off outer 2% corners (tears, corner spots)
+            corner_y = int(H * 0.02)
+            corner_x = int(W * 0.02)
             inner_mask[:corner_y, :corner_x] = False
             inner_mask[:corner_y, W - corner_x:] = False
             inner_mask[H - corner_y:, :corner_x] = False
@@ -123,7 +123,7 @@ class GlyphSegmenter:
             pw = p.bbox[3] - p.bbox[1]
             aspect = pw / max(1, ph)
             is_drawing = p.area > self.max_drawing_area or ph > self.max_glyph_height * 2.2 or pw > self.max_glyph_width * 3.0
-            is_line_smear = (aspect > 5.0 and pw > 90) or (aspect < 0.15 and ph > 90)
+            is_line_smear = (aspect > 6.0 and pw > 120) or (aspect < 0.12 and ph > 120)
             if is_drawing or is_line_smear:
                 clean_text_mask[labeled == p.label] = False
 
@@ -177,15 +177,15 @@ class GlyphSegmenter:
             if not merged:
                 clusters.append([comp])
 
-        # 3. Recursive Ligature Splitter
+        # 3. Recursive Ligature Splitter (conservative so full single characters are preserved)
         def split_ligature_mask(mask: np.ndarray, y0: int, x0: int) -> List[Dict[str, Any]]:
             gh, gw = mask.shape
             area = int(np.sum(mask))
             if area < 20 or gh < 12 or gw < 5:
                 return []
 
-            # Check if this mask represents multiple merged characters (e.g. ligature)
-            if gw > 1.25 * gh and gw >= 26:
+            # Only split very wide multi-character ligatures
+            if gw > 1.70 * gh and gw >= 38:
                 col_proj = np.sum(mask, axis=0)
                 mid_start = int(0.22 * gw)
                 mid_end = int(0.78 * gw)
@@ -197,7 +197,7 @@ class GlyphSegmenter:
                     max_right = np.max(col_proj[min_col_idx:]) if min_col_idx < gw else 1
                     max_peak = max(max_left, max_right)
 
-                    if max_peak > 0 and (min_val / max_peak) <= 0.45:
+                    if max_peak > 0 and (min_val / max_peak) <= 0.35:
                         mask1 = mask[:, :min_col_idx]
                         mask2 = mask[:, min_col_idx:]
                         res1 = split_ligature_mask(mask1, y0, x0)

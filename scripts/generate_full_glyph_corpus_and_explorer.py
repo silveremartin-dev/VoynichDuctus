@@ -975,11 +975,15 @@ def generate_explorer_html(
             canvas.width = pageImageObj.naturalWidth;
             canvas.height = pageImageObj.naturalHeight;
 
-            const scaleW = wrapper.clientWidth / canvas.width;
-            const scaleH = wrapper.clientHeight / canvas.height;
-            zoomScale = Math.min(scaleW, scaleH) * 0.96;
-            panX = (wrapper.clientWidth - canvas.width * zoomScale) / 2;
-            panY = (wrapper.clientHeight - canvas.height * zoomScale) / 2;
+            const rect = wrapper.getBoundingClientRect();
+            const wWidth = rect.width > 0 ? rect.width : (wrapper.clientWidth || 700);
+            const wHeight = rect.height > 0 ? rect.height : (wrapper.clientHeight || 700);
+
+            const scaleW = wWidth / canvas.width;
+            const scaleH = wHeight / canvas.height;
+            zoomScale = Math.max(0.05, Math.min(scaleW, scaleH) * 0.95);
+            panX = (wWidth - canvas.width * zoomScale) / 2;
+            panY = (wHeight - canvas.height * zoomScale) / 2;
             applyCanvasTransform();
         }}
 
@@ -1139,9 +1143,13 @@ def generate_explorer_html(
             const centerX = (x0 + x1) / 2;
             const centerY = (y0 + y1) / 2;
 
-            zoomScale = 2.6; // Clear line reading zoom factor
-            panX = wrapper.clientWidth / 2 - centerX * zoomScale;
-            panY = wrapper.clientHeight / 2 - centerY * zoomScale;
+            const rect = wrapper.getBoundingClientRect();
+            const wWidth = rect.width > 0 ? rect.width : (wrapper.clientWidth || 700);
+            const wHeight = rect.height > 0 ? rect.height : (wrapper.clientHeight || 700);
+
+            zoomScale = 2.0; // Clear line reading zoom factor
+            panX = wWidth / 2 - centerX * zoomScale;
+            panY = wHeight / 2 - centerY * zoomScale;
 
             applyCanvasTransform();
         }}
@@ -1175,15 +1183,15 @@ def generate_explorer_html(
                 const mouseX = evt.clientX - rect.left;
                 const mouseY = evt.clientY - rect.top;
 
-                const zoomFactor = evt.deltaY < 0 ? 1.18 : 0.85;
-                const newScale = Math.max(0.2, Math.min(8.0, zoomScale * zoomFactor));
+                const zoomFactor = evt.deltaY < 0 ? 1.15 : 0.87;
+                const newScale = Math.max(0.08, Math.min(8.0, zoomScale * zoomFactor));
 
                 panX = mouseX - (mouseX - panX) * (newScale / zoomScale);
                 panY = mouseY - (mouseY - panY) * (newScale / zoomScale);
                 zoomScale = newScale;
 
                 applyCanvasTransform();
-            }});
+            }}, {{ passive: false }});
 
             wrapper.addEventListener('mousedown', (evt) => {{
                 if (evt.button !== 0) return;
@@ -1201,8 +1209,10 @@ def generate_explorer_html(
             }});
 
             window.addEventListener('mouseup', () => {{
-                isPanning = false;
-                wrapper.classList.remove('grabbing');
+                if (isPanning) {{
+                    isPanning = false;
+                    wrapper.classList.remove('grabbing');
+                }}
             }});
 
             // Click on canvas box
@@ -1213,6 +1223,7 @@ def generate_explorer_html(
                 const clickCanvasY = (evt.clientY - rect.top - panY) / zoomScale;
 
                 const page = data[currentMs].pages[currentPageIdx];
+                if (!page || !page.glyphs) return;
                 const hit = page.glyphs.find(g => {{
                     const [y0, x0, y1, x1] = g.bbox;
                     return clickCanvasX >= x0 - 6 && clickCanvasX <= x1 + 6 && clickCanvasY >= y0 - 6 && clickCanvasY <= y1 + 6;
@@ -1235,16 +1246,21 @@ def generate_explorer_html(
                 const targetX = mX * canvas.width;
                 const targetY = mY * canvas.height;
 
-                panX = wrapper.clientWidth / 2 - targetX * zoomScale;
-                panY = wrapper.clientHeight / 2 - targetY * zoomScale;
+                const wRect = wrapper.getBoundingClientRect();
+                const wWidth = wRect.width > 0 ? wRect.width : (wrapper.clientWidth || 700);
+                const wHeight = wRect.height > 0 ? wRect.height : (wrapper.clientHeight || 700);
+
+                panX = wWidth / 2 - targetX * zoomScale;
+                panY = wHeight / 2 - targetY * zoomScale;
                 applyCanvasTransform();
             }});
         }})();
 
         function zoomIn() {{
             const wrapper = document.getElementById('canvas-wrapper');
-            const centerX = wrapper.clientWidth / 2;
-            const centerY = wrapper.clientHeight / 2;
+            const rect = wrapper.getBoundingClientRect();
+            const centerX = (rect.width || 700) / 2;
+            const centerY = (rect.height || 700) / 2;
             const newScale = Math.min(8.0, zoomScale * 1.3);
             panX = centerX - (centerX - panX) * (newScale / zoomScale);
             panY = centerY - (centerY - panY) * (newScale / zoomScale);
@@ -1254,9 +1270,10 @@ def generate_explorer_html(
 
         function zoomOut() {{
             const wrapper = document.getElementById('canvas-wrapper');
-            const centerX = wrapper.clientWidth / 2;
-            const centerY = wrapper.clientHeight / 2;
-            const newScale = Math.max(0.2, zoomScale / 1.3);
+            const rect = wrapper.getBoundingClientRect();
+            const centerX = (rect.width || 700) / 2;
+            const centerY = (rect.height || 700) / 2;
+            const newScale = Math.max(0.08, zoomScale / 1.3);
             panX = centerX - (centerX - panX) * (newScale / zoomScale);
             panY = centerY - (centerY - panY) * (newScale / zoomScale);
             zoomScale = newScale;
@@ -1269,11 +1286,14 @@ def generate_explorer_html(
 
         function zoomActual() {{
             const wrapper = document.getElementById('canvas-wrapper');
-            const centerX = wrapper.clientWidth / 2;
-            const centerY = wrapper.clientHeight / 2;
-            panX = centerX - (centerX - panX) * (1.0 / zoomScale);
-            panY = centerY - (centerY - panY) * (1.0 / zoomScale);
+            const canvas = document.getElementById('page-canvas');
+            if (!canvas.width) return;
+            const rect = wrapper.getBoundingClientRect();
+            const wWidth = rect.width > 0 ? rect.width : (wrapper.clientWidth || 700);
+            const wHeight = rect.height > 0 ? rect.height : (wrapper.clientHeight || 700);
             zoomScale = 1.0;
+            panX = (wWidth - canvas.width) / 2;
+            panY = (wHeight - canvas.height) / 2;
             applyCanvasTransform();
         }}
 
@@ -1309,7 +1329,7 @@ def generate_explorer_html(
 
             let corpusHtml = '';
             let refSvgBox = '';
-            if (cm) {{
+            if (cm && cm.reference_svg && cm.confidence_pct >= 60) {{
                 if (currentMs === 'voynich') {{
                     corpusHtml = `
                         <div class="corpus-box">
@@ -1345,6 +1365,28 @@ def generate_explorer_html(
                         </div>
                     `;
                 }}
+            }} else {{
+                corpusHtml = `
+                    <div class="corpus-box" style="border-color:#334155;">
+                        <div class="corpus-title">
+                            <span style="color:#38bdf8;">Autonomous Emergent Archetype</span>
+                            <span style="color:var(--text-muted); font-size:0.75rem;">Novel Scribal Form</span>
+                        </div>
+                        <div style="color:var(--text-muted); font-size:0.72rem; margin-top:2px;">
+                            This glyph possesses a distinct ductus topology with no transliteration equivalent in standard transcription schemes (Safeguard against transliteration hallucination).
+                        </div>
+                    </div>
+                `;
+                refSvgBox = `
+                    <div class="preview-box-large">
+                        <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">STANDARD REFERENCE</span>
+                        <div style="color:var(--text-muted); font-size:0.72rem; padding:12px; line-height:1.4;">
+                            <div style="font-size:1.3rem; margin-bottom:4px;">✨</div>
+                            <strong>Distinct Emergent Ductus</strong>
+                            <div style="font-size:0.65rem; opacity:0.75; margin-top:4px;">No standard reference equivalent</div>
+                        </div>
+                    </div>
+                `;
             }}
 
             let wordHtml = '';
@@ -1402,7 +1444,7 @@ def generate_explorer_html(
                 const cm = a.corpus_match;
                 let matchHeader = '';
                 let refSvgElem = '';
-                if (cm) {{
+                if (cm && cm.reference_svg && cm.confidence_pct >= 60) {{
                     if (currentMs === 'voynich') {{
                         matchHeader = `<div style="color:var(--accent); font-size:0.85rem; font-weight:bold;">EVA: '${{cm.eva_equivalent}}' | Currier: '${{cm.currier_equivalent}}' <span style="font-size:0.75rem; color:var(--success); font-weight:normal;">(${{cm.confidence_pct}}% match)</span></div>`;
                     }} else {{
@@ -1412,6 +1454,14 @@ def generate_explorer_html(
                         <div class="c-box">
                             <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">STANDARD REF</span>
                             ${{cm.reference_svg || ''}}
+                        </div>
+                    `;
+                }} else {{
+                    matchHeader = `<div style="color:#38bdf8; font-size:0.85rem; font-weight:bold;">Distinct Emergent Ductus <span style="font-size:0.75rem; color:var(--text-muted); font-weight:normal;">(Autonomous)</span></div>`;
+                    refSvgElem = `
+                        <div class="c-box" style="display:flex; flex-direction:column; justify-content:center; align-items:center; color:var(--text-muted); font-size:0.68rem; padding:4px;">
+                            <span>✨ Emergent</span>
+                            <span style="font-size:0.58rem; opacity:0.7;">No Transliteration</span>
                         </div>
                     `;
                 }}
