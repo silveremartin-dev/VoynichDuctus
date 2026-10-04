@@ -39,8 +39,9 @@ class LineSegmenter:
 
     def segment_lines(self, binary_ink: np.ndarray, auto_isolate: bool = True) -> List[Dict[str, Any]]:
         """
-        Segments manuscript page into distinct, intact text lines using connected component
-        clustering around baseline peaks. Ensures ascenders and descenders are NEVER sliced horizontally.
+        Segments manuscript page into distinct, intact text lines using adaptive peak detection
+        and connected component clustering around baseline peaks. Ensures every line from top to bottom
+        is captured without dropping short/indented lines or slicing ascenders.
         """
         if auto_isolate and (binary_ink.shape[0] > 600 and binary_ink.shape[1] > 600):
             work_img, (off_y, off_x, _, _) = self.isolate_text_paragraph(binary_ink)
@@ -53,10 +54,13 @@ class LineSegmenter:
         from scipy.ndimage import gaussian_filter1d
         from scipy.signal import find_peaks
 
-        smooth_profile = gaussian_filter1d(raw_profile, sigma=4.0)
+        smooth_profile = gaussian_filter1d(raw_profile, sigma=3.5)
 
-        # Detect line baseline centers (peaks)
-        peaks, _ = find_peaks(smooth_profile, distance=self.min_line_pitch, prominence=np.max(smooth_profile) * 0.10)
+        # Detect line baseline centers with sensitive relative prominence
+        max_p = np.max(smooth_profile) if len(smooth_profile) > 0 else 0
+        min_prom = max(2.0, max_p * 0.02)
+        min_dist = max(14, int(self.min_line_pitch * 0.65))
+        peaks, _ = find_peaks(smooth_profile, distance=min_dist, prominence=min_prom)
 
         if len(peaks) == 0:
             return [{
@@ -72,18 +76,16 @@ class LineSegmenter:
 
         props = regionprops(labeled_block)
 
-        # Group components by closest baseline peak
+        # Group components by closest baseline peak within bounding band
         line_buckets: Dict[int, List[Any]] = {i: [] for i in range(len(peaks))}
         for p in props:
-            # Filter micro artifacts
             if p.area < 6:
                 continue
             cy = p.centroid[0]
             # Find closest peak
             distances = [abs(cy - peak_y) for peak_y in peaks]
             closest_idx = int(np.argmin(distances))
-            # If component is within reasonable distance from peak (< 1.6 * pitch)
-            if distances[closest_idx] <= self.min_line_pitch * 1.8:
+            if distances[closest_idx] <= self.min_line_pitch * 1.2:
                 line_buckets[closest_idx].append(p)
 
         results = []
@@ -97,7 +99,7 @@ class LineSegmenter:
             lx0 = min(c.bbox[1] for c in line_comps)
             lx1 = max(c.bbox[3] for c in line_comps)
 
-            if (lx1 - lx0) < self.min_word_width or (ly1 - ly0) < 8:
+            if (lx1 - lx0) < 10 or (ly1 - ly0) < 8:
                 continue
 
             # Construct clean composite mask with ONLY this line's intact components
@@ -123,63 +125,68 @@ class LineSegmenter:
 
         return results
 
-    def segment_words(self, line_ink: np.ndarray, line_offset: Tuple[int, int] = (0, 0), space_gap_min: int = 14, space_threshold: Optional[int] = None) -> List[Dict[str, Any]]:
+    def segment_words(self, line_ink: np.ndarray, line_offset: Tuple[int, int] = (0, 0), space_gap_min: int = 12, space_threshold: Optional[int] = None) -> List[Dict[str, Any]]:
         """
-        Segments a text line into clean, intact words using smoothed vertical projection gaps
-        and morphological area filtering to reject parchment grain specks.
+        Segments a text line into clean, intact words using connected component horizontal grouping
+        and vertical whitespace gap detection.
         """
         if space_threshold is not None:
             space_gap_min = space_threshold
         y_off, x_off = line_offset
-        from scipy.ndimage import gaussian_filter1d
-        
-        col_counts = np.sum(line_ink, axis=0).astype(float)
-        smooth_cols = gaussian_filter1d(col_counts, sigma=2.0)
 
-        in_word = False
-        start_x = 0
-        word_spans = []
-        gap = 0
+        labeled_l, num_l = label(line_ink)
+        if num_l == 0:
+            return []
 
-        for x, val in enumerate(smooth_cols):
-            if val > 1.8:
-                if not in_word:
-                    in_word = True
-                    start_x = x
-                gap = 0
+        props = sorted(regionprops(labeled_l), key=lambda p: p.bbox[1])
+        valid_comps = [p for p in props if p.area >= 8]
+        if not valid_comps:
+            return []
+
+        # Cluster components horizontally by inter-character space threshold
+        word_clusters: List[List[Any]] = []
+        current_cluster = [valid_comps[0]]
+
+        for i in range(1, len(valid_comps)):
+            curr_comp = valid_comps[i]
+            prev_x1 = max(c.bbox[3] for c in current_cluster)
+            curr_x0 = curr_comp.bbox[1]
+
+            gap = curr_x0 - prev_x1
+            if gap <= space_gap_min:
+                current_cluster.append(curr_comp)
             else:
-                if in_word:
-                    gap += 1
-                    if gap >= space_gap_min:
-                        in_word = False
-                        end_x = x - gap + 1
-                        if end_x - start_x >= self.min_word_width:
-                            word_spans.append((start_x, end_x))
+                word_clusters.append(current_cluster)
+                current_cluster = [curr_comp]
 
-        if in_word and line_ink.shape[1] - start_x >= self.min_word_width:
-            word_spans.append((start_x, line_ink.shape[1]))
+        if current_cluster:
+            word_clusters.append(current_cluster)
 
         results = []
-        for word_idx, (wx0, wx1) in enumerate(word_spans):
-            word_crop = line_ink[:, wx0:wx1]
-            # Area and dimension verification
-            ink_area = int(np.sum(word_crop))
-            if ink_area < self.min_word_area:
+        for word_idx, cl in enumerate(word_clusters):
+            wy0 = min(c.bbox[0] for c in cl)
+            wy1 = max(c.bbox[2] for c in cl)
+            wx0 = min(c.bbox[1] for c in cl)
+            wx1 = max(c.bbox[3] for c in cl)
+
+            wh = wy1 - wy0
+            ww = wx1 - wx0
+            if ww < 8 or wh < 8:
                 continue
 
-            row_profile = np.sum(word_crop, axis=1)
-            nonzero_rows = np.where(row_profile > 0)[0]
-            if len(nonzero_rows) == 0:
-                continue
-            wy0, wy1 = nonzero_rows[0], nonzero_rows[-1] + 1
-            if wy1 - wy0 < 12:
-                continue
+            w_crop = np.zeros((wh, ww), dtype=bool)
+            for c in cl:
+                c_mask = (labeled_l[c.bbox[0]:c.bbox[2], c.bbox[1]:c.bbox[3]] == c.label)
+                off_cy = c.bbox[0] - wy0
+                off_cx = c.bbox[1] - wx0
+                w_crop[off_cy:off_cy + (c.bbox[2] - c.bbox[0]), off_cx:off_cx + (c.bbox[3] - c.bbox[1])] |= c_mask
 
+            ink_area = int(np.sum(w_crop))
             results.append({
                 "word_id": f"W{word_idx:03d}",
                 "bbox": (int(y_off + wy0), int(x_off + wx0), int(y_off + wy1), int(x_off + wx1)),
                 "area": ink_area,
-                "image": line_ink[wy0:wy1, wx0:wx1]
+                "image": w_crop
             })
 
         return results

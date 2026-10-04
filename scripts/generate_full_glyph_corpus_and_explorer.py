@@ -725,16 +725,23 @@ def generate_explorer_html(
 
             <!-- 2. High-Res Canvas Overlay with Zoom & Minimap -->
             <div class="panel" style="padding: 4px;">
-                <h3>
-                    <span>Interactive Folio Canvas</span>
-                    <span id="canvas-status" style="font-size:0.72rem; color:var(--text-muted); display:flex; gap:8px;">
-                        <span><strong style="color:#a855f7;">🟣 Lines</strong></span>
-                        <span><strong style="color:#10b981;">🟢 Words</strong></span>
-                        <span><strong style="color:#38bdf8;">🔵 Glyphs</strong></span>
-                        <span><strong style="color:#00e5ff;">⚡ Active</strong></span>
-                    </span>
-                </h3>
-                <div class="canvas-wrapper" id="canvas-wrapper">
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 8px; border-bottom:1px solid var(--border); margin-bottom:4px;">
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span style="font-size:0.85rem; font-weight:bold; color:var(--accent);">Folio Canvas</span>
+                        <select id="canvas-filter-select" class="select-filter" onchange="setCanvasFilter(this.value)" style="font-size:0.70rem; padding:1px 5px;">
+                            <option value="crisp">✨ Ink Boost</option>
+                            <option value="sharp">🔥 High-Pass</option>
+                            <option value="pure">📜 Pure Ink</option>
+                            <option value="raw">📷 Natural</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; gap:4px;">
+                        <button id="btn-toggle-lines" class="btn-tool" onclick="toggleLayer('lines')" style="width:auto; padding:2px 6px; font-size:0.68rem; background:#581c87; border-color:#a855f7;" title="Toggle Lines (L)">🟣 Lines</button>
+                        <button id="btn-toggle-words" class="btn-tool" onclick="toggleLayer('words')" style="width:auto; padding:2px 6px; font-size:0.68rem; background:#064e3b; border-color:#10b981;" title="Toggle Words (W)">🟢 Words</button>
+                        <button id="btn-toggle-glyphs" class="btn-tool" onclick="toggleLayer('glyphs')" style="width:auto; padding:2px 6px; font-size:0.68rem; background:#075985; border-color:#38bdf8;" title="Toggle Glyphs (G)">🔵 Glyphs</button>
+                    </div>
+                </div>
+                <div class="canvas-wrapper" id="canvas-wrapper" title="Scroll to Zoom | Drag to Pan | Double-Click to Fit">
                     <canvas id="page-canvas"></canvas>
 
                     <!-- Minimap Mini-vue Overlay -->
@@ -743,23 +750,13 @@ def generate_explorer_html(
                         <div class="minimap-viewport-box" id="minimap-viewport"></div>
                     </div>
 
-                    <!-- Zoom Controls & Layer Toggles Toolbar -->
+                    <!-- Compact Zoom Controls Toolbar -->
                     <div class="canvas-toolbar">
-                        <button id="btn-toggle-lines" class="btn-tool" onclick="toggleLayer('lines')" style="width:auto; padding:0 8px; font-size:0.72rem; background:#581c87; border-color:#a855f7;" title="Toggle Lines Layer (L)">🟣 Lines</button>
-                        <button id="btn-toggle-words" class="btn-tool" onclick="toggleLayer('words')" style="width:auto; padding:0 8px; font-size:0.72rem; background:#064e3b; border-color:#10b981;" title="Toggle Words Layer (W)">🟢 Words</button>
-                        <button id="btn-toggle-glyphs" class="btn-tool" onclick="toggleLayer('glyphs')" style="width:auto; padding:0 8px; font-size:0.72rem; background:#075985; border-color:#38bdf8;" title="Toggle Glyphs Layer (G)">🔵 Glyphs</button>
-                        <div style="width:1px; height:18px; background:var(--border); margin:0 2px;"></div>
-                        <select id="canvas-filter-select" class="select-filter" onchange="setCanvasFilter(this.value)" style="font-size:0.72rem; padding:2px 6px;">
-                            <option value="crisp">✨ Ink Boost</option>
-                            <option value="sharp">🔥 High-Pass Sharp</option>
-                            <option value="pure">📜 Pure Ink</option>
-                            <option value="raw">📷 Natural Scan</option>
-                        </select>
-                        <div style="width:1px; height:18px; background:var(--border); margin:0 2px;"></div>
                         <button class="btn-tool" onclick="zoomIn()" title="Zoom In">+</button>
                         <button class="btn-tool" onclick="zoomOut()" title="Zoom Out">-</button>
-                        <button class="btn-tool" onclick="resetZoom()" title="Reset Zoom / Fit Page" style="font-size:0.7rem; width:34px;">Fit</button>
-                        <button class="btn-tool" onclick="zoomActual()" title="100% Scale" style="font-size:0.7rem; width:34px;">1:1</button>
+                        <button class="btn-tool" onclick="fitCanvasToWrapper()" title="Fit Page in View (Double-click canvas)" style="font-size:0.72rem; width:34px; font-weight:bold;">Fit</button>
+                        <button class="btn-tool" onclick="zoomActual()" title="100% Native Resolution" style="font-size:0.72rem; width:34px; font-weight:bold;">1:1</button>
+                        <button class="btn-tool" onclick="resetZoom()" title="Reset to Fit" style="font-size:0.70rem; width:44px;">Reset</button>
                         <span class="zoom-level-text" id="zoom-text">100%</span>
                     </div>
                 </div>
@@ -1234,6 +1231,12 @@ def generate_explorer_html(
                 }}
             }});
 
+            // Double click canvas to reset / fit page
+            wrapper.addEventListener('dblclick', (evt) => {{
+                evt.preventDefault();
+                fitCanvasToWrapper();
+            }});
+
             // Minimap click to pan
             const minimap = document.getElementById('minimap-container');
             minimap.addEventListener('click', (evt) => {{
@@ -1418,6 +1421,21 @@ def generate_explorer_html(
                         ${{selectedGlyph.svg_content}}
                     </div>
                     ${{refSvgBox}}
+                </div>
+
+                <!-- Ductus Kinematic Color Legend -->
+                <div style="background:#0b1329; border:1px solid #1e293b; border-radius:6px; padding:6px 10px; font-size:0.68rem; margin-top:2px;">
+                    <div style="color:var(--accent); font-weight:bold; margin-bottom:3px; display:flex; justify-content:space-between;">
+                        <span>🖋️ Kinematic Ductus Legend</span>
+                        <span style="color:var(--text-muted); font-size:0.62rem;">Stroke Order: 1 ➔ 2 ➔ 3 ➔ 4</span>
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; line-height:1.3; color:var(--text-muted);">
+                        <span><strong style="color:#10b981;">● Green Dot:</strong> Pen Touchdown</span>
+                        <span><strong style="color:#38bdf8;">— Cyan:</strong> Stroke 1 (Primary)</span>
+                        <span><strong style="color:#10b981;">— Emerald:</strong> Stroke 2 (Post Pen-Lift)</span>
+                        <span><strong style="color:#f59e0b;">— Amber:</strong> Stroke 3</span>
+                        <span><strong style="color:#c084fc;">— Violet:</strong> Stroke 4+</span>
+                    </div>
                 </div>
 
                 ${{corpusHtml}}
