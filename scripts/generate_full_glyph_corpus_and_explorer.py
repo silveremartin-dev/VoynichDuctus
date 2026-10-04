@@ -976,11 +976,14 @@ def generate_explorer_html(
             const wWidth = rect.width > 0 ? rect.width : (wrapper.clientWidth || 700);
             const wHeight = rect.height > 0 ? rect.height : (wrapper.clientHeight || 700);
 
-            const scaleW = wWidth / canvas.width;
-            const scaleH = wHeight / canvas.height;
+            const scaleW = wWidth / (canvas.width || 1);
+            const scaleH = wHeight / (canvas.height || 1);
             zoomScale = Math.max(0.05, Math.min(scaleW, scaleH) * 0.95);
+            if (!isFinite(zoomScale) || zoomScale <= 0.01) zoomScale = 0.5;
             panX = (wWidth - canvas.width * zoomScale) / 2;
             panY = (wHeight - canvas.height * zoomScale) / 2;
+            if (!isFinite(panX)) panX = 0;
+            if (!isFinite(panY)) panY = 0;
             applyCanvasTransform();
         }}
 
@@ -998,6 +1001,9 @@ def generate_explorer_html(
         }}
 
         function applyCanvasTransform() {{
+            if (!isFinite(zoomScale) || zoomScale <= 0.01) zoomScale = 0.5;
+            if (!isFinite(panX)) panX = 0;
+            if (!isFinite(panY)) panY = 0;
             const canvas = document.getElementById('page-canvas');
             canvas.style.transform = `translate(${{panX}}px, ${{panY}}px) scale(${{zoomScale}})`;
             canvas.style.filter = canvasFilterPresets[currentCanvasFilter] || 'none';
@@ -1674,6 +1680,10 @@ def main():
                 page_id = f"serafini_p{p_idx:03d}"
                 print(f"[*] Extracting all glyphs on Seraphinianus page {p_idx} (with x1.5 upscale)...")
                 p_img = loader_s.get_page_image(p_idx, target_min_dim=2000)
+                # Auto-orient landscape plates if width significantly exceeds height
+                if p_img.width > p_img.height * 1.15:
+                    print(f"  [i] Auto-orienting landscape page {p_idx} by 270°...")
+                    p_img = p_img.rotate(270, expand=True)
                 # Lanczos 1.5x upscaling for razor-sharp pen contours
                 p_img_hd = p_img.resize((int(p_img.width * 1.5), int(p_img.height * 1.5)), Image.Resampling.LANCZOS)
                 res_s = segmenter.extract_page_glyphs(page_id, p_img_hd, output_dir=base_out, subfolder="seraphinianus")

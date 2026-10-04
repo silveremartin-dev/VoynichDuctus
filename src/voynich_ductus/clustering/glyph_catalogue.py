@@ -130,38 +130,110 @@ class GlyphCatalogue:
         X_scaled = scaler.fit_transform(X_raw)
         return X_scaled
 
+    @staticmethod
+    def classify_glyph_topology(g: Dict[str, Any]) -> str:
+        """
+        Deterministically classifies a glyph into an invariant topological family:
+        - LOOP (closed loop o, a, d, q)
+        - OPEN_C (open right-facing cavity c, e)
+        - MINIM (vertical single minim i, r, n)
+        - GALLOWS (tall ascender or gallows crossbar k, t, p, f)
+        - OTHER (flourishes, complex ligatures)
+        """
+        strokes = g.get("strokes", [])
+        gw = max(1.0, float(g.get("width", 20)))
+        gh = max(1.0, float(g.get("height", 20)))
+        aspect = gw / gh
+        stroke_count = len(strokes)
+
+        all_pts = []
+        for s in strokes:
+            all_pts.extend(s.get("points", []))
+
+        if not all_pts:
+            return "OTHER"
+
+        pts_arr = np.array([[p[0], p[1]] for p in all_pts], dtype=np.float32)
+        min_y, min_x = np.min(pts_arr, axis=0)
+
+        longest_s = max(strokes, key=lambda s: len(s.get("points", [])))
+        l_pts = longest_s.get("points", [])
+
+        # 1. Check for closed loop:
+        if len(l_pts) >= 5:
+            p0 = np.array(l_pts[0][:2])
+            p_end = np.array(l_pts[-1][:2])
+            dist_ends = float(np.linalg.norm(p0 - p_end))
+            if dist_ends <= 8.0 or dist_ends <= 0.32 * max(gw, gh):
+                return "LOOP"
+
+        # 2. Check for Open C vs Minim:
+        if stroke_count == 1:
+            if len(l_pts) >= 4:
+                mid_idx = len(l_pts) // 2
+                x_start = l_pts[0][1]
+                x_end = l_pts[-1][1]
+                x_mid = l_pts[mid_idx][1]
+                if x_mid < min(x_start, x_end) - 1.5:
+                    return "OPEN_C"
+            if aspect <= 0.65:
+                return "MINIM"
+
+        # 3. Gallows / crossbars
+        if stroke_count >= 2 or gh > 1.35 * gw:
+            return "GALLOWS"
+
+        return "OTHER"
+
     def build_catalogue(self, glyphs: List[Dict[str, Any]], corpus_type: str = "voynich") -> Dict[str, Any]:
         """
-        Clusters glyphs into canonical alphabet types, indexes all instances with spatial coordinates,
-        and estimates correspondences with standard transcription corpora.
+        Clusters glyphs into canonical alphabet types using topological partitioning and
+        spatial density grid descriptors, ensuring loops, crescents, minims, and gallows never mix.
         """
         if not glyphs:
             return {"total_glyphs": 0, "canonical_alphabet_size": 0, "alphabet": []}
 
+        # Tag each glyph with its topological group
+        for g in glyphs:
+            g["topology_group"] = self.classify_glyph_topology(g)
+
+        topo_groups = {}
+        for idx, g in enumerate(glyphs):
+            tg = g["topology_group"]
+            if tg not in topo_groups:
+                topo_groups[tg] = []
+            topo_groups[tg].append(idx)
+
         X_scaled = self.extract_glyph_features(glyphs)
-        
-        # Fit latent projector (preserve true manifold dimensions)
-        latent_dim = min(12, X_scaled.shape[1], max(3, X_scaled.shape[0] // 2))
-        self.projector = StrokeLatentProjector(latent_dim=latent_dim)
-        X_latent = self.projector.fit_transform(X_scaled)
 
-        # Cluster into unique canonical glyph types
-        n_clusters = min(self.target_alphabet_size, len(glyphs))
-        if self.distance_threshold is not None:
-            clusterer = AgglomerativeClustering(n_clusters=None, distance_threshold=self.distance_threshold, metric="euclidean", linkage="ward")
-        else:
-            clusterer = AgglomerativeClustering(n_clusters=n_clusters, metric="euclidean", linkage="ward")
-
-        labels = clusterer.fit_predict(X_latent)
-        unique_labels = sorted(list(set(labels)))
-        actual_clusters = len(unique_labels)
-
-        # Build initial clusters
         raw_clusters = []
-        for cluster_id in unique_labels:
-            indices = np.where(labels == cluster_id)[0]
-            cluster_glyphs = [glyphs[i] for i in indices]
-            raw_clusters.append((cluster_id, indices, cluster_glyphs))
+        cluster_id_counter = 0
+
+        # Cluster within each topological partition
+        for tg, indices in topo_groups.items():
+            if len(indices) <= 2:
+                # Group small partitions directly
+                cluster_glyphs = [glyphs[i] for i in indices]
+                raw_clusters.append((cluster_id_counter, indices, cluster_glyphs))
+                cluster_id_counter += 1
+                continue
+
+            sub_X = X_scaled[indices]
+            # Determine partition sub-clusters proportional to population
+            k_sub = max(1, min(int(round(self.target_alphabet_size * (len(indices) / len(glyphs)))), len(indices)))
+            
+            if k_sub == 1:
+                cluster_glyphs = [glyphs[i] for i in indices]
+                raw_clusters.append((cluster_id_counter, indices, cluster_glyphs))
+                cluster_id_counter += 1
+            else:
+                clusterer = AgglomerativeClustering(n_clusters=k_sub, metric="euclidean", linkage="ward")
+                sub_labels = clusterer.fit_predict(sub_X)
+                for sl in set(sub_labels):
+                    sub_idx = [indices[i] for i in np.where(sub_labels == sl)[0]]
+                    cluster_glyphs = [glyphs[i] for i in sub_idx]
+                    raw_clusters.append((cluster_id_counter, sub_idx, cluster_glyphs))
+                    cluster_id_counter += 1
 
         # Sort raw clusters by size descending to have clean rank 1..N
         raw_clusters.sort(key=lambda item: len(item[2]), reverse=True)
@@ -169,7 +241,7 @@ class GlyphCatalogue:
         # Build canonical glyph entries
         alphabet_entries = []
         for rank, (cluster_id, indices, cluster_glyphs) in enumerate(raw_clusters, start=1):
-            cluster_points = X_latent[indices]
+            cluster_points = X_scaled[indices]
 
             # Find medoid (exemplar closest to cluster center)
             centroid = np.mean(cluster_points, axis=0, keepdims=True)
@@ -244,7 +316,7 @@ class GlyphCatalogue:
 
         return {
             "total_glyphs": len(glyphs),
-            "canonical_alphabet_size": actual_clusters,
+            "canonical_alphabet_size": len(alphabet_entries),
             "alphabet": alphabet_entries
         }
 

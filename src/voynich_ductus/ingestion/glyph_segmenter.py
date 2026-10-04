@@ -77,13 +77,13 @@ class GlyphSegmenter:
             is_blue = (hue >= 0.50) & (hue <= 0.78) & (sat > 0.15) & (val > 0.18)
             is_red = ((hue >= 0.85) | (hue <= 0.06)) & (sat > 0.22) & (val > 0.22)
             is_yellow_ochre = (hue >= 0.08) & (hue <= 0.16) & (sat > 0.30) & (val > 0.40)
-            is_illustration_color = is_green | is_blue | is_red | is_yellow_ochre | ((chroma > 0.28) & (val > 0.32))
-            is_illustration_color = binary_dilation(is_illustration_color, iterations=4)
+            is_illustration_color = is_green | is_blue | is_red | is_yellow_ochre | ((chroma > 0.26) & (val > 0.30))
+            is_illustration_color = binary_dilation(is_illustration_color, iterations=5)
         else:
             # Codex Seraphinianus / Printed paper:
-            # Text ink is strictly achromatic (chroma < 0.06). All colored pixels are illustrations!
-            is_illustration_color = (chroma > 0.06)
-            is_illustration_color = binary_dilation(is_illustration_color, iterations=4)
+            # Text ink is strictly achromatic (chroma < 0.035, sat < 0.04). All colored pixels are illustrations!
+            is_illustration_color = (chroma > 0.035) | (sat > 0.04)
+            is_illustration_color = binary_dilation(is_illustration_color, iterations=6)
 
         # 2. Local adaptive Sauvola thresholding for ink
         sauvola_mask = self.binarizer.binarize(image)
@@ -317,8 +317,8 @@ class GlyphSegmenter:
                 if aspect > 3.2 or aspect < 0.18:
                     continue
 
-                # 2. Filamentary 1D fractal stroke check (rejects solid textures, fur, blobs)
-                if fill_factor < 0.05 or fill_factor > 0.62:
+                # 2. Filamentary 1D stroke check (rejects solid textures, blobs, and dark areas)
+                if fill_factor < 0.05 or fill_factor > 0.40:
                     continue
 
                 gy0 = y_off + wy0 + bbox_loc[0]
@@ -326,18 +326,26 @@ class GlyphSegmenter:
                 gy1 = y_off + wy0 + bbox_loc[2]
                 gx1 = x_off + wx0 + bbox_loc[3]
 
-                # 3. Strict Chromatic Pigment Discrimination (rejects colored illustration pixels)
+                # 3. Strict Chromatic Pigment Discrimination & Brightness Verification
                 crop_pad = 6  # Generous padding around the stroke
                 cy0, cx0 = max(0, gy0 - crop_pad), max(0, gx0 - crop_pad)
                 cy1, cx1 = min(page_rgb.shape[0], gy1 + crop_pad), min(page_rgb.shape[1], gx1 + crop_pad)
                 
+                raw_patch = page_rgb[cy0:cy1, cx0:cx1]
+                if raw_patch.shape[0] < 8 or raw_patch.shape[1] < 6:
+                    continue
+
+                # Reject mostly black/dark blobs (authentic parchment is bright, >115/255)
+                if np.mean(raw_patch) < 115:
+                    continue
+
                 crop_patch_rgb = page_rgb[gy0:gy1, gx0:gx1].astype(np.float32) / 255.0
                 if crop_patch_rgb.shape[0] == g_mask.shape[0] and crop_patch_rgb.shape[1] == g_mask.shape[1]:
                     ink_pixels = crop_patch_rgb[g_mask]
                     if ink_pixels.shape[0] > 0:
                         if subfolder == "seraphinianus":
                             chroma_ink = np.max(ink_pixels, axis=1) - np.min(ink_pixels, axis=1)
-                            if np.mean(chroma_ink) > 0.08:
+                            if np.mean(chroma_ink) > 0.06:
                                 continue
                         else:
                             from skimage.color import rgb2hsv
@@ -367,7 +375,8 @@ class GlyphSegmenter:
                 if total_stroke_len < 10:
                     continue
 
-                glyph_id = f"{page_id}_{word_id}_G{glyph_idx:02d}"
+                # Unique hierarchical glyph identifier: Page_Line_Word_G##
+                glyph_id = f"{page_id}_{line_id}_{word_id}_G{glyph_idx:02d}"
 
                 # Save crops and SVGs if output_dir provided
                 png_rel, svg_rel, svg_str = "", "", ""
@@ -381,7 +390,6 @@ class GlyphSegmenter:
                     svg_path = output_dir / subfolder / "glyphs" / "svg" / svg_filename
 
                     # Save crop patch with sharp stroke contrast and generous padding
-                    raw_patch = page_rgb[cy0:cy1, cx0:cx1]
                     save_patch = self.normalizer.enhance_contrast_and_sharpness(raw_patch, contrast_gain=1.35, unsharp_radius=1.0, unsharp_amount=1.6)
                     Image.fromarray(save_patch).save(png_path)
 
