@@ -426,21 +426,22 @@ def generate_explorer_html(
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 250px;
-            min-height: 250px;
+            height: 260px;
+            min-height: 260px;
             text-align: center;
             overflow: hidden;
         }}
         .preview-box-large img {{
             width: 100%;
-            height: 200px;
+            height: 215px;
             object-fit: contain;
+            filter: contrast(140%) brightness(102%) saturate(90%);
             image-rendering: -webkit-optimize-contrast;
             image-rendering: crisp-edges;
         }}
         .preview-box-large svg {{
             width: 100%;
-            height: 200px;
+            height: 215px;
         }}
         .meta-list {{
             background: var(--card-bg);
@@ -721,13 +722,19 @@ def generate_explorer_html(
                         <div class="minimap-viewport-box" id="minimap-viewport"></div>
                     </div>
 
-                    <!-- Zoom Controls Toolbar -->
+                    <!-- Zoom Controls & Image Enhancement Toolbar -->
                     <div class="canvas-toolbar">
                         <button class="btn-tool" onclick="zoomIn()" title="Zoom In">+</button>
                         <button class="btn-tool" onclick="zoomOut()" title="Zoom Out">-</button>
                         <button class="btn-tool" onclick="resetZoom()" title="Reset Zoom / Fit Page" style="font-size:0.7rem; width:34px;">Fit</button>
                         <button class="btn-tool" onclick="zoomActual()" title="100% Scale" style="font-size:0.7rem; width:34px;">1:1</button>
                         <span class="zoom-level-text" id="zoom-text">100%</span>
+                        <select id="canvas-filter-select" class="select-filter" onchange="setCanvasFilter(this.value)" style="margin-left:4px; font-size:0.72rem; padding:2px 6px;">
+                            <option value="crisp">✨ Ink Boost (Crisp)</option>
+                            <option value="sharp">🔥 High-Pass Sharp</option>
+                            <option value="pure">📜 Pure Ink (Binarized)</option>
+                            <option value="raw">📷 Natural Scan (Raw)</option>
+                        </select>
                     </div>
                 </div>
             </div>
@@ -950,9 +957,23 @@ def generate_explorer_html(
             applyCanvasTransform();
         }}
 
+        let currentCanvasFilter = 'crisp';
+        const canvasFilterPresets = {{
+            crisp: 'contrast(145%) brightness(102%) saturate(90%)',
+            sharp: 'contrast(180%) brightness(108%) saturate(75%) drop-shadow(0 0 1px rgba(0,0,0,0.6))',
+            pure: 'grayscale(100%) contrast(240%) brightness(92%)',
+            raw: 'none'
+        }};
+
+        function setCanvasFilter(mode) {{
+            currentCanvasFilter = mode;
+            applyCanvasTransform();
+        }}
+
         function applyCanvasTransform() {{
             const canvas = document.getElementById('page-canvas');
             canvas.style.transform = `translate(${{panX}}px, ${{panY}}px) scale(${{zoomScale}})`;
+            canvas.style.filter = canvasFilterPresets[currentCanvasFilter] || 'none';
             document.getElementById('zoom-text').innerText = `${{Math.round(zoomScale * 100)}}%`;
             updateMinimapViewport();
         }}

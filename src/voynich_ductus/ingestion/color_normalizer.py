@@ -102,3 +102,39 @@ class ColorIlluminationNormalizer:
 
         return pure_ink_mask, gray
 
+    def enhance_contrast_and_sharpness(
+        self,
+        image: Union[np.ndarray, Image.Image],
+        contrast_gain: float = 1.35,
+        unsharp_radius: float = 1.2,
+        unsharp_amount: float = 1.5
+    ) -> np.ndarray:
+        """
+        Enhances ink stroke definition against background parchment using:
+        1. High-pass unsharp masking to sharpen fine ink ductus and pen stroke boundaries.
+        2. Local contrast expansion (deepening dark ink while whitening parchment background).
+        
+        Returns:
+            uint8 RGB numpy array (H, W, 3).
+        """
+        rgb = self.to_rgb_array(image)
+        
+        # 1. Unsharp masking for crisp stroke edges
+        blurred = np.zeros_like(rgb)
+        for c in range(3):
+            blurred[:, :, c] = gaussian_filter(rgb[:, :, c], sigma=unsharp_radius)
+        
+        high_pass = rgb - blurred
+        sharpened = np.clip(rgb + unsharp_amount * high_pass, 0.0, 1.0)
+        
+        # 2. S-curve contrast enhancement to separate ink from background
+        # Normalize around midpoint
+        enhanced = np.clip(1.0 / (1.0 + np.exp(-contrast_gain * 6.0 * (sharpened - 0.48))), 0.0, 1.0)
+        
+        # Blend 70% enhanced with 30% sharpened to preserve authentic color nuances
+        final_rgb = 0.65 * enhanced + 0.35 * sharpened
+        final_rgb = np.clip(final_rgb, 0.0, 1.0)
+        
+        return (final_rgb * 255.0).astype(np.uint8)
+
+

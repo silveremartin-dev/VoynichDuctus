@@ -276,8 +276,9 @@ class GlyphSegmenter:
                     png_path = output_dir / subfolder / "glyphs" / "png" / png_filename
                     svg_path = output_dir / subfolder / "glyphs" / "svg" / svg_filename
 
-                    # Save crop patch
-                    save_patch = page_rgb[cy0:cy1, cx0:cx1]
+                    # Save crop patch with sharp stroke contrast
+                    raw_patch = page_rgb[cy0:cy1, cx0:cx1]
+                    save_patch = self.normalizer.enhance_contrast_and_sharpness(raw_patch, contrast_gain=1.35, unsharp_radius=1.0, unsharp_amount=1.6)
                     Image.fromarray(save_patch).save(png_path)
 
                     gh_m, gw_m = g_mask.shape
