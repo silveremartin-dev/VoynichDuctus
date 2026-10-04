@@ -19,7 +19,7 @@ class IIIFClient:
     BEINECKE_BASE_URL = "https://collections.library.yale.edu/iiif/2"
 
     def __init__(self, cache_dir: Optional[str] = None):
-        self.cache_dir = Path(cache_dir) if cache_dir else Path("./data/scans")
+        self.cache_dir = Path(cache_dir) if cache_dir else Path("./data/scans/voynich/yale")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._manifest_cache: Optional[Dict] = None
 

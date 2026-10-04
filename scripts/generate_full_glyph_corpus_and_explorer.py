@@ -1927,7 +1927,7 @@ def main():
     voynich_pages_data = []
     all_voynich_glyphs = []
 
-    iiif_client = IIIFClient(cache_dir="data/yale_hd_scans")
+    iiif_client = IIIFClient(cache_dir="data/scans/voynich/yale")
     voynich_folios = ["f001r", "f001v", "f002r", "f002v", "f003r", "f003v", "f004r", "f004v"]
 
     for folio_id in voynich_folios:

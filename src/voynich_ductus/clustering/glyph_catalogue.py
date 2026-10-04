@@ -15,12 +15,14 @@ from sklearn.metrics import pairwise_distances
 from voynich_ductus.embeddings.geometric_features import GeometricFeatureExtractor
 from voynich_ductus.embeddings.stroke_autoencoder import StrokeLatentProjector
 from voynich_ductus.clustering.corpus_matcher import CorpusCorrespondenceMatcher
+from voynich_ductus.vectorizer.comparative_vectorizers import DINOv2EmbeddingEngine
 
 
 class GlyphCatalogue:
     """
     Groups extracted individual glyphs into an objective canonical alphabet inventory
-    via unsupervised geometric clustering, preserving all instance occurrences and coordinates.
+    via unsupervised geometric clustering and DINOv2 self-supervised visual features,
+    preserving all instance occurrences and coordinates.
     """
 
     def __init__(self, target_alphabet_size: int = 28, distance_threshold: Optional[float] = None):
@@ -28,11 +30,11 @@ class GlyphCatalogue:
         self.distance_threshold = distance_threshold
         self.feature_extractor = GeometricFeatureExtractor()
         self.projector = StrokeLatentProjector(latent_dim=8)
+        self.dinov2_engine = DINOv2EmbeddingEngine()
 
     def extract_glyph_features(self, glyphs: List[Dict[str, Any]]) -> np.ndarray:
         """
-        Extracts composite 32-D spatial-geometric descriptors for each glyph based on its strokes,
-        aspect ratio, loop topology, and normalized 4x4 spatial density grid.
+        Extracts composite deep visual (DINOv2) + spatial-geometric descriptors for each glyph.
         """
         from sklearn.preprocessing import StandardScaler
 
@@ -52,7 +54,7 @@ class GlyphCatalogue:
                 all_pts.extend(s.get("points", []))
 
             if not all_pts:
-                glyph_feature_vectors.append(np.zeros(32, dtype=np.float32))
+                glyph_feature_vectors.append(np.zeros(48, dtype=np.float32))
                 continue
 
             pts_arr = np.array([[p[0], p[1]] for p in all_pts], dtype=np.float32)
@@ -61,16 +63,16 @@ class GlyphCatalogue:
             norm_h = max(1.0, max_y - min_y)
             norm_w = max(1.0, max_x - min_x)
 
-            # 4x4 Spatial Density Grid (16 descriptors)
-            grid_4x4 = np.zeros((4, 4), dtype=np.float32)
+            # 6x6 Spatial Density Grid (36 descriptors)
+            grid_6x6 = np.zeros((6, 6), dtype=np.float32)
             rel_y = np.clip((pts_arr[:, 0] - min_y) / norm_h, 0.0, 0.999)
             rel_x = np.clip((pts_arr[:, 1] - min_x) / norm_w, 0.0, 0.999)
-            grid_rows = (rel_y * 4).astype(int)
-            grid_cols = (rel_x * 4).astype(int)
+            grid_rows = (rel_y * 6).astype(int)
+            grid_cols = (rel_x * 6).astype(int)
             for r, c in zip(grid_rows, grid_cols):
-                grid_4x4[r, c] += 1.0
+                grid_6x6[r, c] += 1.0
             if len(all_pts) > 0:
-                grid_4x4 /= len(all_pts)
+                grid_6x6 /= len(all_pts)
 
             # Tangents
             entry_s = strokes[0].get("points", [])
@@ -103,11 +105,21 @@ class GlyphCatalogue:
             s_feats = self.feature_extractor.extract_batch(strokes)
             mean_f = np.mean(s_feats, axis=0) if len(s_feats) > 0 else np.zeros(16, dtype=np.float32)
 
+            # Rasterize mini patch for DINOv2 / deep embedding
+            patch_dim = 32
+            mini_patch = np.zeros((patch_dim, patch_dim), dtype=np.uint8)
+            py = np.clip((rel_y * (patch_dim - 1)).astype(int), 0, patch_dim - 1)
+            px = np.clip((rel_x * (patch_dim - 1)).astype(int), 0, patch_dim - 1)
+            mini_patch[py, px] = 255
+            dino_emb = self.dinov2_engine.extract_embedding(mini_patch)
+            # Take top 16 principal components of DINOv2
+            dino_top = dino_emb[:16] if len(dino_emb) >= 16 else np.pad(dino_emb, (0, 16 - len(dino_emb)))
+
             vec = [
-                stroke_count,
-                aspect,
-                fill_factor,
-                is_loop,
+                stroke_count * 2.0,
+                aspect * 2.5,
+                fill_factor * 1.5,
+                is_loop * 3.0,
                 np.sin(entry_angle),
                 np.cos(entry_angle),
                 np.sin(exit_angle),
@@ -117,15 +129,14 @@ class GlyphCatalogue:
                 float(mean_f[7]),  # mean_width
                 float(mean_f[8]),  # std_width
             ]
-            # Add 16 spatial grid features
-            vec.extend(grid_4x4.flatten().tolist())
-            # Add 4 direction bins
-            vec.extend(mean_f[11:15].tolist())
+            # Add 36 spatial density grid features
+            vec.extend(grid_6x6.flatten().tolist())
+            # Add DINOv2 deep visual tokens
+            vec.extend((dino_top * 2.0).tolist())
 
             glyph_feature_vectors.append(np.array(vec, dtype=np.float32))
 
         X_raw = np.array(glyph_feature_vectors, dtype=np.float32)
-        # Standardize features
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X_raw)
         return X_scaled
@@ -134,11 +145,12 @@ class GlyphCatalogue:
     def classify_glyph_topology(g: Dict[str, Any]) -> str:
         """
         Deterministically classifies a glyph into an invariant topological family:
-        - LOOP (closed loop o, a, d, q)
-        - OPEN_C (open right-facing cavity c, e)
-        - MINIM (vertical single minim i, r, n)
-        - GALLOWS (tall ascender or gallows crossbar k, t, p, f)
-        - OTHER (flourishes, complex ligatures)
+        - CLOSED_LOOP (circular/oval closed shapes like o, a bowl)
+        - VERTICAL_MINIM (single vertical upright stroke like i, r)
+        - OPEN_C_CRESCENT (crescent or open curve like c, e)
+        - TALL_GALLOWS (tall ascenders, loops with tall stems like k, t, p, f)
+        - BENCH_HORIZONTAL (wide horizontal structures)
+        - COMPOSITE_LIGATURE (complex multi-stroke conjoined glyphs)
         """
         strokes = g.get("strokes", [])
         gw = max(1.0, float(g.get("width", 20)))
@@ -151,39 +163,43 @@ class GlyphCatalogue:
             all_pts.extend(s.get("points", []))
 
         if not all_pts:
-            return "OTHER"
-
-        pts_arr = np.array([[p[0], p[1]] for p in all_pts], dtype=np.float32)
-        min_y, min_x = np.min(pts_arr, axis=0)
+            return "VERTICAL_MINIM"
 
         longest_s = max(strokes, key=lambda s: len(s.get("points", [])))
         l_pts = longest_s.get("points", [])
 
-        # 1. Check for closed loop:
+        # 1. Closed loop check
         if len(l_pts) >= 5:
             p0 = np.array(l_pts[0][:2])
             p_end = np.array(l_pts[-1][:2])
             dist_ends = float(np.linalg.norm(p0 - p_end))
-            if dist_ends <= 8.0 or dist_ends <= 0.32 * max(gw, gh):
-                return "LOOP"
+            if dist_ends <= 7.0 or dist_ends <= 0.28 * max(gw, gh):
+                return "CLOSED_LOOP"
 
-        # 2. Check for Open C vs Minim:
+        # 2. Tall ascender or Gallows
+        if gh >= 1.45 * gw or (stroke_count >= 2 and gh >= 28):
+            return "TALL_GALLOWS"
+
+        # 3. Wide horizontal bench
+        if aspect >= 1.4 and gw >= 30:
+            return "BENCH_HORIZONTAL"
+
+        # 4. Single-stroke open curves vs minims
         if stroke_count == 1:
             if len(l_pts) >= 4:
                 mid_idx = len(l_pts) // 2
                 x_start = l_pts[0][1]
                 x_end = l_pts[-1][1]
                 x_mid = l_pts[mid_idx][1]
-                if x_mid < min(x_start, x_end) - 1.5:
-                    return "OPEN_C"
-            if aspect <= 0.65:
-                return "MINIM"
+                if x_mid < min(x_start, x_end) - 2.0:
+                    return "OPEN_C_CRESCENT"
+            if aspect <= 0.75:
+                return "VERTICAL_MINIM"
 
-        # 3. Gallows / crossbars
-        if stroke_count >= 2 or gh > 1.35 * gw:
-            return "GALLOWS"
+        if stroke_count >= 2:
+            return "COMPOSITE_LIGATURE"
 
-        return "OTHER"
+        return "VERTICAL_MINIM"
 
     def build_catalogue(self, glyphs: List[Dict[str, Any]], corpus_type: str = "voynich") -> Dict[str, Any]:
         """

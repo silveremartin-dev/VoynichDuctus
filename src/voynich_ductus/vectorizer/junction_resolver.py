@@ -63,10 +63,30 @@ class JunctionResolver:
 
         return stroke
 
+    @staticmethod
+    def _tangent_cosine(pts1: List[Tuple[float, float, float]], pts2: List[Tuple[float, float, float]], k: int = 4) -> float:
+        """
+        Computes the cosine of the angle between the exit tangent of stroke 1 and entry tangent of stroke 2.
+        Values >= 0.0 indicate smooth forward continuity; values < 0.0 indicate sharp hairpins.
+        """
+        if len(pts1) < 2 or len(pts2) < 2:
+            return 1.0
+        # Exit vector of pts1
+        idx1 = max(0, len(pts1) - 1 - k)
+        v1 = np.array(pts1[-1][:2]) - np.array(pts1[idx1][:2])
+        # Entry vector of pts2
+        idx2 = min(len(pts2) - 1, k)
+        v2 = np.array(pts2[idx2][:2]) - np.array(pts2[0][:2])
+
+        n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
+        if n1 < 1e-4 or n2 < 1e-4:
+            return 1.0
+        return float(np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0))
+
     def chain_collinear_strokes(self, strokes: List[Dict[str, Any]], max_gap: float = 8.0) -> List[Dict[str, Any]]:
         """
         Merges adjacent stroke segments meeting at junctions or corners into continuous, unified strokes.
-        Prunes spurious skeleton branches to prevent breaking single glyph strokes into fragments.
+        Enforces tangent continuity (cos theta >= -0.1) to prevent unnatural hairpin reversals.
         """
         if len(strokes) <= 1:
             return strokes
@@ -76,7 +96,6 @@ class JunctionResolver:
         valid = []
         for s in strokes:
             s_len = s.get("length", len(s.get("points", [])))
-            # Keep stroke if it has meaningful length or if it represents the only stroke
             if s_len >= 5.0 or len(s.get("points", [])) >= 5 or len(strokes) <= 2:
                 valid.append(s)
 
@@ -88,6 +107,9 @@ class JunctionResolver:
 
         while merged:
             merged = False
+            best_merge = None
+            best_cos = -2.0
+
             for i in range(len(current_strokes)):
                 s1 = current_strokes[i]
                 p1_start = np.array(s1["points"][0][:2])
@@ -100,69 +122,49 @@ class JunctionResolver:
                     p2_start = np.array(s2["points"][0][:2])
                     p2_end = np.array(s2["points"][-1][:2])
 
-                    # 1. Check s1 end -> s2 start
+                    # Option 1: s1 end -> s2 start
                     if np.linalg.norm(p1_end - p2_start) <= max_gap:
-                        combined_pts = s1["points"] + s2["points"]
-                        current_strokes[i] = {
-                            "stroke_id": s1["stroke_id"],
-                            "type": s1.get("type", "segment"),
-                            "points": combined_pts,
-                            "length": float(len(combined_pts)),
-                            "start": s1["start"],
-                            "end": s2["end"]
-                        }
-                        current_strokes.pop(j)
-                        merged = True
-                        break
+                        cos_sim = self._tangent_cosine(s1["points"], s2["points"])
+                        if cos_sim >= -0.1 and cos_sim > best_cos:
+                            best_cos = cos_sim
+                            best_merge = (i, j, s1["points"] + s2["points"], s1["start"], s2["end"])
 
-                    # 2. Check s1 end -> s2 end (s2 reversed)
+                    # Option 2: s1 end -> s2 end (s2 reversed)
                     if np.linalg.norm(p1_end - p2_end) <= max_gap:
                         rev_s2 = list(reversed(s2["points"]))
-                        combined_pts = s1["points"] + rev_s2
-                        current_strokes[i] = {
-                            "stroke_id": s1["stroke_id"],
-                            "type": s1.get("type", "segment"),
-                            "points": combined_pts,
-                            "length": float(len(combined_pts)),
-                            "start": s1["start"],
-                            "end": s2["start"]
-                        }
-                        current_strokes.pop(j)
-                        merged = True
-                        break
+                        cos_sim = self._tangent_cosine(s1["points"], rev_s2)
+                        if cos_sim >= -0.1 and cos_sim > best_cos:
+                            best_cos = cos_sim
+                            best_merge = (i, j, s1["points"] + rev_s2, s1["start"], s2["start"])
 
-                    # 3. Check s2 end -> s1 start
+                    # Option 3: s2 end -> s1 start
                     if np.linalg.norm(p2_end - p1_start) <= max_gap:
-                        combined_pts = s2["points"] + s1["points"]
-                        current_strokes[i] = {
-                            "stroke_id": s2["stroke_id"],
-                            "type": s2.get("type", "segment"),
-                            "points": combined_pts,
-                            "length": float(len(combined_pts)),
-                            "start": s2["start"],
-                            "end": s1["end"]
-                        }
-                        current_strokes.pop(j)
-                        merged = True
-                        break
+                        cos_sim = self._tangent_cosine(s2["points"], s1["points"])
+                        if cos_sim >= -0.1 and cos_sim > best_cos:
+                            best_cos = cos_sim
+                            best_merge = (i, j, s2["points"] + s1["points"], s2["start"], s1["end"])
 
-                    # 4. Check s1 start -> s2 start (s1 reversed)
+                    # Option 4: s1 start -> s2 start (s1 reversed)
                     if np.linalg.norm(p1_start - p2_start) <= max_gap:
-                        combined_pts = list(reversed(s1["points"])) + s2["points"]
-                        current_strokes[i] = {
-                            "stroke_id": s1["stroke_id"],
-                            "type": s1.get("type", "segment"),
-                            "points": combined_pts,
-                            "length": float(len(combined_pts)),
-                            "start": s1["end"],
-                            "end": s2["end"]
-                        }
-                        current_strokes.pop(j)
-                        merged = True
-                        break
+                        rev_s1 = list(reversed(s1["points"]))
+                        cos_sim = self._tangent_cosine(rev_s1, s2["points"])
+                        if cos_sim >= -0.1 and cos_sim > best_cos:
+                            best_cos = cos_sim
+                            best_merge = (i, j, rev_s1 + s2["points"], s1["end"], s2["end"])
 
-                if merged:
-                    break
+            if best_merge:
+                i, j, combined_pts, start_pt, end_pt = best_merge
+                s_base = current_strokes[i]
+                current_strokes[i] = {
+                    "stroke_id": s_base["stroke_id"],
+                    "type": s_base.get("type", "segment"),
+                    "points": combined_pts,
+                    "length": float(len(combined_pts)),
+                    "start": start_pt,
+                    "end": end_pt
+                }
+                current_strokes.pop(j)
+                merged = True
 
         return current_strokes
 

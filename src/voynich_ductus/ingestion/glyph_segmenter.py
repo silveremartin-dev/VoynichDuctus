@@ -153,7 +153,7 @@ class GlyphSegmenter:
         if not valid_comps:
             return []
 
-        # 2. Cluster components that belong to the same character
+        # 2. Cluster components that belong to the same character (e.g. loops, crossbars, accents)
         clusters: List[List[Any]] = []
         for comp in valid_comps:
             cy0, cx0, cy1, cx1 = comp.bbox
@@ -170,26 +170,26 @@ class GlyphSegmenter:
                 comb_w = max(cl_x1, cx1) - min(cl_x0, cx0)
                 comb_h = max(cl_y1, cy1) - min(cl_y0, cy0)
 
-                # Merge if overlapping or tight horizontal gap <= 4px
-                if (overlap > 0 or gap <= 4) and comb_w <= max(45, int(comb_h * 1.35)):
+                # Merge if overlapping or tight horizontal gap <= 6px (preserving characters up to 65px)
+                if (overlap > 0 or gap <= 6) and comb_w <= max(65, int(comb_h * 1.6)):
                     cl.append(comp)
                     merged = True
                     break
             if not merged:
                 clusters.append([comp])
 
-        # 3. Recursive Ligature Splitter (conservative so full single characters are preserved)
+        # 3. Ligature Splitter (strictly preserves single intact characters)
         def split_ligature_mask(mask: np.ndarray, y0: int, x0: int) -> List[Dict[str, Any]]:
             gh, gw = mask.shape
             area = int(np.sum(mask))
             if area < 20 or gh < 12 or gw < 5:
                 return []
 
-            # Only split very wide multi-character ligatures
-            if gw > 1.70 * gh and gw >= 38:
+            # Only split extraordinarily wide multi-character ligatures
+            if gw > 2.2 * gh and gw >= 60:
                 col_proj = np.sum(mask, axis=0)
-                mid_start = int(0.22 * gw)
-                mid_end = int(0.78 * gw)
+                mid_start = int(0.25 * gw)
+                mid_end = int(0.75 * gw)
                 if mid_end > mid_start:
                     min_col_rel = int(np.argmin(col_proj[mid_start:mid_end]))
                     min_col_idx = mid_start + min_col_rel
@@ -198,7 +198,8 @@ class GlyphSegmenter:
                     max_right = np.max(col_proj[min_col_idx:]) if min_col_idx < gw else 1
                     max_peak = max(max_left, max_right)
 
-                    if max_peak > 0 and (min_val / max_peak) <= 0.35:
+                    # Only split if there is an almost complete ink disconnection (<= 25% peak)
+                    if max_peak > 0 and (min_val / max_peak) <= 0.25:
                         mask1 = mask[:, :min_col_idx]
                         mask2 = mask[:, min_col_idx:]
                         res1 = split_ligature_mask(mask1, y0, x0)
