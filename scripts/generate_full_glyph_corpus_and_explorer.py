@@ -35,7 +35,9 @@ def clean_page_data_for_json(pages_data: List[Dict[str, Any]]) -> List[Dict[str,
                 "glyph_id": g["glyph_id"],
                 "page_id": g["page_id"],
                 "line_id": g["line_id"],
-                "word_id": g["word_id"],
+                "word_id": g.get("word_id", ""),
+                "word_bbox": [int(x) for x in g.get("word_bbox", g["bbox"])],
+                "word_png_rel": g.get("word_png_rel", ""),
                 "bbox": [int(x) for x in g["bbox"]],
                 "height": int(g["height"]),
                 "width": int(g["width"]),
@@ -1260,7 +1262,24 @@ def generate_explorer_html(
                 }}
             }}
 
+            let wordHtml = '';
+            if (selectedGlyph.word_png_rel) {{
+                wordHtml = `
+                    <div style="background:#0b1329; border:1px solid #1e3a8a; border-radius:8px; padding:8px 10px; margin-bottom:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <span style="font-size:0.68rem; color:var(--accent); font-weight:bold; text-transform:uppercase;">Parent Word Context (${{selectedGlyph.word_id}})</span>
+                            <span style="font-size:0.65rem; color:var(--text-muted);">Word BBox: [${{selectedGlyph.word_bbox ? selectedGlyph.word_bbox.join(', ') : ''}}]</span>
+                        </div>
+                        <div style="text-align:center; background:#000; border-radius:6px; padding:6px; border:1px solid var(--border);">
+                            <img src="${{selectedGlyph.word_png_rel}}" alt="${{selectedGlyph.word_id}}" style="max-height:60px; max-width:100%; object-fit:contain;">
+                        </div>
+                    </div>
+                `;
+            }}
+
             ins.innerHTML = `
+                ${{wordHtml}}
+
                 <!-- 3-Way Side-by-Side Large Comparison -->
                 <div class="inspector-trio">
                     <div class="preview-box-large">
@@ -1278,7 +1297,7 @@ def generate_explorer_html(
 
                 <div class="meta-list">
                     <div><strong>Glyph ID:</strong> ${{selectedGlyph.glyph_id}}</div>
-                    <div><strong>Page / Line:</strong> ${{selectedGlyph.page_id}} / Line ${{selectedGlyph.line_id}}</div>
+                    <div><strong>Page / Line / Word:</strong> ${{selectedGlyph.page_id}} / Line ${{selectedGlyph.line_id}} / ${{selectedGlyph.word_id}}</div>
                     <div><strong>Coordinates (y0, x0, y1, x1):</strong> [${{selectedGlyph.bbox.join(', ')}}]</div>
                     <div><strong>Dimensions:</strong> ${{selectedGlyph.width}}x${{selectedGlyph.height}} px (Area: ${{selectedGlyph.area}} px²)</div>
                     <div><strong>Fill Factor:</strong> ${{selectedGlyph.fill_factor}} (1D Filiform)</div>

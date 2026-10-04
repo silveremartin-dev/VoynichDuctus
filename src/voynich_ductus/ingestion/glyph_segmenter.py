@@ -127,6 +127,114 @@ class GlyphSegmenter:
 
         return clean_text_mask, rgb_arr
 
+    def assemble_word_into_glyphs(self, w_img: np.ndarray) -> List[Dict[str, Any]]:
+        """
+        Assembles connected components within a word into intact multi-stroke glyphs.
+        Groups vertically overlapping or tightly adjacent sub-strokes (e.g., bowl + ascender,
+        gallows bar + leg, diacritic + minim) and splits wide cursive ligatures.
+        """
+        labeled_w, num_w = label(w_img)
+        if num_w == 0:
+            return []
+
+        props = sorted(regionprops(labeled_w), key=lambda p: (p.bbox[1] + p.bbox[3]) / 2.0)
+        
+        # 1. Filter out micro noise specks
+        valid_comps = []
+        for p in props:
+            if p.area >= 10 and (p.bbox[2] - p.bbox[0]) >= 6 and (p.bbox[3] - p.bbox[1]) >= 4:
+                valid_comps.append(p)
+
+        if not valid_comps:
+            return []
+
+        # 2. Cluster components that belong to the same character
+        # Components are merged if they have horizontal overlap or horizontal gap <= 2px
+        # and their combined bounding box maintains valid character proportions.
+        clusters: List[List[Any]] = []
+        for comp in valid_comps:
+            cy0, cx0, cy1, cx1 = comp.bbox
+            merged = False
+            for cl in clusters:
+                # Check bounding box of existing cluster
+                cl_x0 = min(c.bbox[1] for c in cl)
+                cl_x1 = max(c.bbox[3] for c in cl)
+                cl_y0 = min(c.bbox[0] for c in cl)
+                cl_y1 = max(c.bbox[2] for c in cl)
+
+                # Horizontal overlap or tiny gap <= 3px
+                overlap = max(0, min(cl_x1, cx1) - max(cl_x0, cx0))
+                gap = max(0, max(cx0 - cl_x1, cl_x0 - cx1))
+                
+                comb_w = max(cl_x1, cx1) - min(cl_x0, cx0)
+                comb_h = max(cl_y1, cy1) - min(cl_y0, cy0)
+
+                # If overlapping or close, and combined width is reasonable for a single glyph
+                if (overlap > 0 or gap <= 3) and comb_w <= max(45, int(comb_h * 1.45)):
+                    cl.append(comp)
+                    merged = True
+                    break
+            if not merged:
+                clusters.append([comp])
+
+        # 3. Create composite masks for each cluster
+        assembled_glyphs = []
+        for cl in clusters:
+            gy0 = min(c.bbox[0] for c in cl)
+            gy1 = max(c.bbox[2] for c in cl)
+            gx0 = min(c.bbox[1] for c in cl)
+            gx1 = max(c.bbox[3] for c in cl)
+            
+            gh = gy1 - gy0
+            gw = gx1 - gx0
+            
+            # Build combined mask
+            g_mask = np.zeros((gh, gw), dtype=bool)
+            for c in cl:
+                c_mask = (labeled_w[c.bbox[0]:c.bbox[2], c.bbox[1]:c.bbox[3]] == c.label)
+                off_y = c.bbox[0] - gy0
+                off_x = c.bbox[1] - gx0
+                g_mask[off_y:off_y + (c.bbox[2] - c.bbox[0]), off_x:off_x + (c.bbox[3] - c.bbox[1])] |= c_mask
+
+            area = int(np.sum(g_mask))
+            if area < self.min_glyph_area or gh < self.min_glyph_height or gw < self.min_glyph_width:
+                continue
+
+            # Check if cluster is a wide cursive ligature that should be split
+            if gw > 1.40 * gh and gw >= 34:
+                col_proj = np.sum(g_mask, axis=0)
+                mid_start = int(0.25 * gw)
+                mid_end = int(0.75 * gw)
+                if mid_end > mid_start:
+                    min_col_idx = mid_start + int(np.argmin(col_proj[mid_start:mid_end]))
+                    min_val = col_proj[min_col_idx]
+                    max_val = max(np.max(col_proj[:min_col_idx]), np.max(col_proj[min_col_idx:]))
+                    if max_val > 0 and (min_val / max_val) <= 0.38:
+                        mask1 = g_mask[:, :min_col_idx]
+                        mask2 = g_mask[:, min_col_idx:]
+                        if np.sum(mask1) >= 16 and mask1.shape[1] >= 5:
+                            assembled_glyphs.append({
+                                "mask": mask1,
+                                "bbox_local": (gy0, gx0, gy1, gx0 + min_col_idx),
+                                "area": int(np.sum(mask1))
+                            })
+                        if np.sum(mask2) >= 16 and mask2.shape[1] >= 5:
+                            assembled_glyphs.append({
+                                "mask": mask2,
+                                "bbox_local": (gy0, gx0 + min_col_idx, gy1, gx1),
+                                "area": int(np.sum(mask2))
+                            })
+                        continue
+
+            assembled_glyphs.append({
+                "mask": g_mask,
+                "bbox_local": (gy0, gx0, gy1, gx1),
+                "area": area
+            })
+
+        # Return sorted in reading order (left to right)
+        return sorted(assembled_glyphs, key=lambda g: g["bbox_local"][1])
+
     def extract_glyphs_from_line(
         self,
         line_mask: np.ndarray,
@@ -138,7 +246,7 @@ class GlyphSegmenter:
         subfolder: str = "voynich"
     ) -> List[Dict[str, Any]]:
         """
-        Segments a single text line into words, and words into individual glyphs with SVG ductus.
+        Segments a single text line into verified words, and words into intact assembled glyphs with SVG ductus.
         Enforces strict color neutrality (grayscale ink) and filamentary 1D stroke topology.
         """
         y_off, x_off = line_offset
@@ -150,54 +258,39 @@ class GlyphSegmenter:
             wy0, wx0, wy1, wx1 = w["bbox"]
             word_id = f"{line_id}_W{word_idx:02d}"
 
-            # Extract connected components in the word
-            labeled_w, num_w = label(w_img)
-            w_props = sorted(regionprops(labeled_w), key=lambda p: p.bbox[1])  # Left-to-right order
+            # Word absolute coordinates on page
+            abs_wy0 = y_off + wy0
+            abs_wx0 = x_off + wx0
+            abs_wy1 = y_off + wy1
+            abs_wx1 = x_off + wx1
 
-            candidate_components = []
-            for p in w_props:
-                gh = p.bbox[2] - p.bbox[0]
-                gw = p.bbox[3] - p.bbox[1]
-                g_mask = (labeled_w[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] == p.label)
+            # Validate word lexical sanity
+            w_w = abs_wx1 - abs_wx0
+            w_h = abs_wy1 - abs_wy0
+            if w_w < 14 or w_h < 10 or np.sum(w_img) < 25:
+                continue
 
-                # Check if component is a composite pair of glyphs (e.g. '40' ligature or connected minims)
-                if gw > 1.35 * gh and gw >= 32:
-                    col_proj = np.sum(g_mask, axis=0)
-                    mid_start = int(0.25 * gw)
-                    mid_end = int(0.75 * gw)
-                    if mid_end > mid_start:
-                        min_col_idx = mid_start + int(np.argmin(col_proj[mid_start:mid_end]))
-                        min_val = col_proj[min_col_idx]
-                        max_val = max(np.max(col_proj[:min_col_idx]), np.max(col_proj[min_col_idx:]))
-                        if max_val > 0 and (min_val / max_val) <= 0.40:
-                            # Split into two sub-components
-                            mask1 = np.zeros_like(g_mask)
-                            mask1[:, :min_col_idx] = g_mask[:, :min_col_idx]
-                            mask2 = np.zeros_like(g_mask)
-                            mask2[:, min_col_idx:] = g_mask[:, min_col_idx:]
+            # Save word crop if output directory is provided
+            word_png_rel = ""
+            if output_dir:
+                (output_dir / subfolder / "words" / "png").mkdir(parents=True, exist_ok=True)
+                w_pad = 3
+                cwy0, cwx0 = max(0, abs_wy0 - w_pad), max(0, abs_wx0 - w_pad)
+                cwy1, cwx1 = min(page_rgb.shape[0], abs_wy1 + w_pad), min(page_rgb.shape[1], abs_wx1 + w_pad)
+                word_patch = page_rgb[cwy0:cwy1, cwx0:cwx1]
+                word_enhanced = self.normalizer.enhance_contrast_and_sharpness(
+                    word_patch, contrast_gain=1.35, unsharp_radius=1.0, unsharp_amount=1.6
+                )
+                word_png_filename = f"{page_id}_{word_id}.png"
+                word_png_path = output_dir / subfolder / "words" / "png" / word_png_filename
+                Image.fromarray(word_enhanced).save(word_png_path)
+                word_png_rel = f"{subfolder}/words/png/{word_png_filename}"
 
-                            if np.sum(mask1) >= 16:
-                                candidate_components.append({
-                                    "mask": mask1[:, :min_col_idx],
-                                    "bbox_local": (p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[1] + min_col_idx),
-                                    "area": int(np.sum(mask1))
-                                })
-                            if np.sum(mask2) >= 16:
-                                candidate_components.append({
-                                    "mask": mask2[:, min_col_idx:],
-                                    "bbox_local": (p.bbox[0], p.bbox[1] + min_col_idx, p.bbox[2], p.bbox[3]),
-                                    "area": int(np.sum(mask2))
-                                })
-                            continue
-
-                candidate_components.append({
-                    "mask": g_mask,
-                    "bbox_local": p.bbox,
-                    "area": int(p.area)
-                })
+            # Assemble intact glyphs from word
+            assembled_components = self.assemble_word_into_glyphs(w_img)
 
             glyph_idx = 0
-            for item in candidate_components:
+            for item in assembled_components:
                 g_mask = item["mask"]
                 gh, gw = g_mask.shape
                 bbox_loc = item["bbox_local"]
@@ -213,7 +306,7 @@ class GlyphSegmenter:
                     continue
 
                 # 2. Filamentary 1D fractal stroke check (rejects solid textures, fur, ink blobs)
-                if fill_factor < 0.06 or fill_factor > 0.58:
+                if fill_factor < 0.05 or fill_factor > 0.60:
                     continue
 
                 gy0 = y_off + wy0 + bbox_loc[0]
@@ -260,7 +353,7 @@ class GlyphSegmenter:
                     continue
 
                 total_stroke_len = sum(len(s.get("points", [])) for s in ordered_strokes)
-                if total_stroke_len < 12:
+                if total_stroke_len < 10:
                     continue  # Reject micro-speck noise
 
                 glyph_id = f"{page_id}_{word_id}_G{glyph_idx:02d}"
@@ -292,6 +385,8 @@ class GlyphSegmenter:
                     "page_id": page_id,
                     "line_id": line_id,
                     "word_id": word_id,
+                    "word_bbox": (int(abs_wy0), int(abs_wx0), int(abs_wy1), int(abs_wx1)),
+                    "word_png_rel": word_png_rel,
                     "bbox": (int(gy0), int(gx0), int(gy1), int(gx1)),
                     "height": int(gh),
                     "width": int(gw),
