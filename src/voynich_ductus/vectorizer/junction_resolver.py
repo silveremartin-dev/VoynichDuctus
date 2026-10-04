@@ -63,16 +63,23 @@ class JunctionResolver:
 
         return stroke
 
-    def chain_collinear_strokes(self, strokes: List[Dict[str, Any]], max_gap: float = 6.0) -> List[Dict[str, Any]]:
+    def chain_collinear_strokes(self, strokes: List[Dict[str, Any]], max_gap: float = 8.0) -> List[Dict[str, Any]]:
         """
         Merges adjacent stroke segments meeting at junctions or corners into continuous, unified strokes.
-        Prevents breaking continuous lines into tiny fragments.
+        Prunes spurious skeleton branches to prevent breaking single glyph strokes into fragments.
         """
         if len(strokes) <= 1:
             return strokes
 
-        # Filter out micro-noise strokes (< 3 points with tiny length)
-        valid = [s for s in strokes if len(s.get("points", [])) >= 3 or s.get("length", 0) >= 3.5]
+        # Filter out micro-spur artifacts (< 5 points or < 5px length when substantial strokes exist)
+        total_len = sum(s.get("length", len(s.get("points", []))) for s in strokes)
+        valid = []
+        for s in strokes:
+            s_len = s.get("length", len(s.get("points", [])))
+            # Keep stroke if it has meaningful length or if it represents the only stroke
+            if s_len >= 5.0 or len(s.get("points", [])) >= 5 or len(strokes) <= 2:
+                valid.append(s)
+
         if not valid:
             valid = strokes
 

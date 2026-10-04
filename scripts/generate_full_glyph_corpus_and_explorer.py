@@ -969,21 +969,19 @@ def generate_explorer_html(
             const canvas = document.getElementById('page-canvas');
             if (!pageImageObj || !pageImageObj.naturalWidth) return;
 
-            canvas.width = pageImageObj.naturalWidth;
-            canvas.height = pageImageObj.naturalHeight;
-
             const rect = wrapper.getBoundingClientRect();
             const wWidth = rect.width > 0 ? rect.width : (wrapper.clientWidth || 700);
             const wHeight = rect.height > 0 ? rect.height : (wrapper.clientHeight || 700);
 
-            const scaleW = wWidth / (canvas.width || 1);
-            const scaleH = wHeight / (canvas.height || 1);
+            const scaleW = wWidth / (pageImageObj.naturalWidth || 1);
+            const scaleH = wHeight / (pageImageObj.naturalHeight || 1);
             zoomScale = Math.max(0.05, Math.min(scaleW, scaleH) * 0.95);
             if (!isFinite(zoomScale) || zoomScale <= 0.01) zoomScale = 0.5;
-            panX = (wWidth - canvas.width * zoomScale) / 2;
-            panY = (wHeight - canvas.height * zoomScale) / 2;
+            panX = (wWidth - pageImageObj.naturalWidth * zoomScale) / 2;
+            panY = (wHeight - pageImageObj.naturalHeight * zoomScale) / 2;
             if (!isFinite(panX)) panX = 0;
             if (!isFinite(panY)) panY = 0;
+            drawCanvasOverlay();
             applyCanvasTransform();
         }}
 
@@ -1296,13 +1294,16 @@ def generate_explorer_html(
         function zoomActual() {{
             const wrapper = document.getElementById('canvas-wrapper');
             const canvas = document.getElementById('page-canvas');
-            if (!canvas.width) return;
+            if (!pageImageObj || !pageImageObj.naturalWidth) return;
             const rect = wrapper.getBoundingClientRect();
             const wWidth = rect.width > 0 ? rect.width : (wrapper.clientWidth || 700);
             const wHeight = rect.height > 0 ? rect.height : (wrapper.clientHeight || 700);
             zoomScale = 1.0;
-            panX = (wWidth - canvas.width) / 2;
-            panY = (wHeight - canvas.height) / 2;
+            panX = (wWidth - pageImageObj.naturalWidth) / 2;
+            panY = (wHeight - pageImageObj.naturalHeight) / 2;
+            if (!isFinite(panX)) panX = 0;
+            if (!isFinite(panY)) panY = 0;
+            drawCanvasOverlay();
             applyCanvasTransform();
         }}
 

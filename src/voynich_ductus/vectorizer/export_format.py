@@ -13,9 +13,53 @@ class VectorExporter:
     """
 
     @staticmethod
+    def _points_to_smooth_path_d(pts: List[Tuple[float, float, float]]) -> str:
+        """
+        Converts discrete pixel stroke points into a smooth cubic Bézier path.
+        Eliminates discrete pixel staircase jitter, producing calligraphic cursive strokes.
+        """
+        if not pts:
+            return ""
+        if len(pts) == 1:
+            return f"M {pts[0][1]:.2f} {pts[0][0]:.2f}"
+        if len(pts) == 2:
+            return f"M {pts[0][1]:.2f} {pts[0][0]:.2f} L {pts[1][1]:.2f} {pts[1][0]:.2f}"
+
+        # Subsample / simplify points slightly so cubic spline doesn't wobble
+        coords = [(float(p[1]), float(p[0])) for p in pts]  # (x, y)
+        simplified = [coords[0]]
+        for p in coords[1:-1]:
+            dx = p[0] - simplified[-1][0]
+            dy = p[1] - simplified[-1][1]
+            if (dx * dx + dy * dy) >= 2.25:  # min 1.5px step
+                simplified.append(p)
+        simplified.append(coords[-1])
+
+        if len(simplified) < 3:
+            return " ".join([f"M {simplified[0][0]:.2f} {simplified[0][1]:.2f}"] + [f"L {p[0]:.2f} {p[1]:.2f}" for p in simplified[1:]])
+
+        # Catmull-Rom to Cubic Bézier spline
+        d_tokens = [f"M {simplified[0][0]:.2f} {simplified[0][1]:.2f}"]
+        n = len(simplified)
+        for i in range(n - 1):
+            p0 = simplified[max(0, i - 1)]
+            p1 = simplified[i]
+            p2 = simplified[i + 1]
+            p3 = simplified[min(n - 1, i + 2)]
+
+            cp1x = p1[0] + (p2[0] - p0[0]) / 6.0
+            cp1y = p1[1] + (p2[1] - p0[1]) / 6.0
+            cp2x = p2[0] - (p3[0] - p1[0]) / 6.0
+            cp2y = p2[1] - (p3[1] - p1[1]) / 6.0
+
+            d_tokens.append(f"C {cp1x:.2f} {cp1y:.2f}, {cp2x:.2f} {cp2y:.2f}, {p2[0]:.2f} {p2[1]:.2f}")
+
+        return " ".join(d_tokens)
+
+    @staticmethod
     def to_svg(strokes: List[Dict[str, Any]], width: int, height: int, output_path: Union[str, Path], include_order_colors: bool = True) -> str:
         """
-        Exports strokes to an SVG string/file with embedded kinematic ordering.
+        Exports strokes to an SVG string/file with embedded kinematic ordering and smooth cubic curves.
         """
         # Palette for distinct pen-lift strokes
         colors = ["#38bdf8", "#10b981", "#f59e0b", "#c084fc", "#f43f5e", "#06b6d4", "#a855f7"]
@@ -34,13 +78,9 @@ class VectorExporter:
             avg_width = sum(p[2] if len(p) > 2 else 1.5 for p in pts) / len(pts)
             stroke_width = max(2.0, min(avg_width * 1.3, 7.0))
 
-            # Build path data 'M x y L x y ...'
+            d_str = VectorExporter._points_to_smooth_path_d(pts)
             start_y, start_x = pts[0][0], pts[0][1]
-            path_d = [f"M {start_x:.2f} {start_y:.2f}"]
-            for pt in pts[1:]:
-                path_d.append(f"L {pt[1]:.2f} {pt[0]:.2f}")
 
-            d_str = " ".join(path_d)
             svg_lines.append(
                 f'    <path id="{stroke.get("stroke_id", f"s{i}")}" d="{d_str}" '
                 f'fill="none" stroke="{color}" stroke-width="{stroke_width:.2f}" '

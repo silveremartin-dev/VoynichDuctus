@@ -176,7 +176,9 @@ Running the formal diagnostic suite (`VoynichDuctus benchmark`) produces the fol
 ## 8. Project Structure
 
 ```
-VoynichDuctus/
+├── docs/
+│   ├── PALEOGRAPHIC_CLUES_AND_DUCTUS_GUIDE.md # Comprehensive paleographic clues & ductus principles
+│   └── PALEOGRAPHY_SYNTHESIS_REPORT.md        # Synthesis report and census validation
 ├── AGENTS.md                  # Comprehensive AI agent developer guide & architectural specs
 ├── pyproject.toml             # Package setup and build specification
 ├── requirements.txt           # Core dependencies

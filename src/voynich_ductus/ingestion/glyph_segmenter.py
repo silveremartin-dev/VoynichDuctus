@@ -73,17 +73,18 @@ class GlyphSegmenter:
         if subfolder == "voynich":
             # Voynich / Medieval parchment:
             # Text ink is dark iron-gall. Illustrations are green foliage, blue water, or vivid red/yellow paint.
-            is_green = (hue >= 0.14) & (hue <= 0.50) & (sat > 0.15) & (val > 0.18)
-            is_blue = (hue >= 0.50) & (hue <= 0.78) & (sat > 0.15) & (val > 0.18)
-            is_red = ((hue >= 0.85) | (hue <= 0.06)) & (sat > 0.22) & (val > 0.22)
-            is_yellow_ochre = (hue >= 0.08) & (hue <= 0.16) & (sat > 0.30) & (val > 0.40)
-            is_illustration_color = is_green | is_blue | is_red | is_yellow_ochre | ((chroma > 0.26) & (val > 0.30))
-            is_illustration_color = binary_dilation(is_illustration_color, iterations=5)
+            is_green = (hue >= 0.14) & (hue <= 0.50) & (sat > 0.14) & (val > 0.18)
+            is_blue = (hue >= 0.50) & (hue <= 0.78) & (sat > 0.14) & (val > 0.18)
+            is_red = ((hue >= 0.85) | (hue <= 0.06)) & (sat > 0.20) & (val > 0.20)
+            is_yellow_ochre = (hue >= 0.08) & (hue <= 0.16) & (sat > 0.28) & (val > 0.35)
+            is_illustration_color = is_green | is_blue | is_red | is_yellow_ochre | ((chroma > 0.24) & (val > 0.28))
+            is_illustration_color = binary_dilation(is_illustration_color, iterations=3)
         else:
             # Codex Seraphinianus / Printed paper:
-            # Text ink is strictly achromatic (chroma < 0.035, sat < 0.04). All colored pixels are illustrations!
-            is_illustration_color = (chroma > 0.035) | (sat > 0.04)
-            is_illustration_color = binary_dilation(is_illustration_color, iterations=6)
+            # Text ink is strictly achromatic (low sat < 0.20, dark val < 0.45).
+            # Illustrations are colored pigments with vivid saturation / chroma:
+            is_illustration_color = ((sat > 0.18) & (chroma > 0.09) & (val < 0.92)) | (sat > 0.30) | (chroma > 0.18)
+            is_illustration_color = binary_dilation(is_illustration_color, iterations=2)
 
         # 2. Local adaptive Sauvola thresholding for ink
         sauvola_mask = self.binarizer.binarize(image)
