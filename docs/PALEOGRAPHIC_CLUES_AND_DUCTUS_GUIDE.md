@@ -129,6 +129,25 @@ To prevent clustering open crescents (`C`) with closed loops (`O`):
 
 ---
 
+### G. Alphabet Parsimony Priors & Historical Census Calibration
+1. **Parsimony of Human Alphabetic Systems**:
+   - Natural human alphabets and scribal scripts (e.g. Latin, Gothic cursive, Italian humanistic, Cyrillic, Greek, Serafinian) consistently operate with **a compact set of a few dozen canonical archetypes** (typically 20 to 35 core letters), each exhibiting continuous allographic variations (different ink flow, pen angle, ligature attachments).
+   - The induction algorithm uses a target alphabet capacity $K \approx 25-30$ to ensure we induce an authentic canonical inventory rather than treating every subtle stroke variation as a distinct letter.
+2. **Page-by-Page Calibration Against Historical Censuses**:
+   - The algorithm's line/word/glyph counts are systematically calibrated against established historical transcriptions (e.g., Takahashi, Landini-Stolfi, Currier for Voynich; Serafini typology for Codex Seraphinianus).
+   - If manual census yields 30 lines and ~200 words on folio `f001v`, our automated line projection prominence and word gap thresholds are calibrated so that detected counts match historical ground truth ($\pm 10\%$).
+
+---
+
+### H. Deep Learning & Vision Transformers (ViT / InkSight / DINOv2)
+1. **Offline-to-Online Handwriting Transformers (InkSight / ViT)**:
+   - Modern vision-language transformers (such as Google's *InkSight* architecture) learn deep spatial representations of pen dynamics directly from static 2D bitmap patches.
+   - The codebase provides the `InkSightAdapter` interface (`voynich_ductus.vectorizer.inksight_adapter`) enabling deep transformer checkpoints to replace or supplement geometric medial axis skeletonization when GPU backends are available.
+2. **Self-Supervised Feature Embeddings (DINOv2 / CLIP)**:
+   - Self-supervised Vision Transformers (e.g., Meta's DINOv2) trained without human labels capture rich paleographic stroke textures, ligature joints, and pen pressure dynamics, serving as deep 768-D feature extractors for unsupervised clustering.
+
+---
+
 ## 3. Summary of Visual Encoding & Ductus Kinematics Legend
 
 | Visual Element | Representation | Kinematic Meaning |
@@ -141,3 +160,4 @@ To prevent clustering open crescents (`C`) with closed loops (`O`):
 | **Violet Dotted Box** | `rgba(168, 85, 247, 0.65)` | Detected text line baseline span |
 | **Green Box** | `rgba(16, 185, 129, 0.45)` | Lexical parent word bounding box |
 | **Cyan Solid Box** | `rgba(56, 189, 248, 0.50)` | Isolated, verified single glyph bounding box |
+
