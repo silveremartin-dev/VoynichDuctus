@@ -155,14 +155,17 @@ class CorpusCorrespondenceMatcher:
 </svg>""",
     }
 
-    # Voynich Standard Paleographic Profiles
+    # Voynich Standard Paleographic Profiles with Strict Topological Constraints
     VOYNICH_STANDARD_PROFILES = [
         {
             "eva": "o",
             "currier": "O",
             "name": "Single Loop Oval",
             "category": "Oval / Minim",
-            "strokes": 1.1,
+            "strokes": 1.0,
+            "min_strokes": 1,
+            "max_strokes": 2,
+            "has_loop": True,
             "aspect_ratio": 0.85,
             "relative_freq_rank": 1,
             "description": "Closed circular or oval minim loop, highest frequency base vowel"
@@ -172,7 +175,10 @@ class CorpusCorrespondenceMatcher:
             "currier": "A",
             "name": "Loop with Vertical Stem",
             "category": "Oval / Minim",
-            "strokes": 1.9,
+            "strokes": 2.0,
+            "min_strokes": 2,
+            "max_strokes": 3,
+            "has_loop": True,
             "aspect_ratio": 0.95,
             "relative_freq_rank": 3,
             "description": "Minim loop with attached downward right vertical stroke"
@@ -182,7 +188,10 @@ class CorpusCorrespondenceMatcher:
             "currier": "Y",
             "name": "Terminal Tail Descender",
             "category": "Descender",
-            "strokes": 1.8,
+            "strokes": 2.0,
+            "min_strokes": 1,
+            "max_strokes": 3,
+            "has_loop": False,
             "aspect_ratio": 0.70,
             "relative_freq_rank": 2,
             "description": "Rightward stem with sweeping lower-left descender stroke"
@@ -193,6 +202,9 @@ class CorpusCorrespondenceMatcher:
             "name": "Benched Loop Ascender",
             "category": "Ascender",
             "strokes": 2.0,
+            "min_strokes": 2,
+            "max_strokes": 3,
+            "has_loop": True,
             "aspect_ratio": 0.65,
             "relative_freq_rank": 4,
             "description": "Minim bowl with tall straight upright vertical ascender shaft"
@@ -203,6 +215,9 @@ class CorpusCorrespondenceMatcher:
             "name": "C-Curve Minim",
             "category": "Minim",
             "strokes": 1.0,
+            "min_strokes": 1,
+            "max_strokes": 2,
+            "has_loop": False,
             "aspect_ratio": 0.75,
             "relative_freq_rank": 5,
             "description": "Open crescent or short horizontal stroke, frequent in sequences (ee, eee)"
@@ -212,7 +227,10 @@ class CorpusCorrespondenceMatcher:
             "currier": "S",
             "name": "S-Curve Terminal",
             "category": "Terminal",
-            "strokes": 1.2,
+            "strokes": 1.0,
+            "min_strokes": 1,
+            "max_strokes": 2,
+            "has_loop": False,
             "aspect_ratio": 0.60,
             "relative_freq_rank": 8,
             "description": "S-shaped curved stroke, frequently in word-final position"
@@ -222,7 +240,10 @@ class CorpusCorrespondenceMatcher:
             "currier": "L",
             "name": "Looping Tall Ascender",
             "category": "Ascender",
-            "strokes": 1.7,
+            "strokes": 2.0,
+            "min_strokes": 1,
+            "max_strokes": 2,
+            "has_loop": True,
             "aspect_ratio": 0.55,
             "relative_freq_rank": 6,
             "description": "Tall ascender with top loop or benched ligature"
@@ -232,7 +253,10 @@ class CorpusCorrespondenceMatcher:
             "currier": "R",
             "name": "Shouldered Arch / Hook",
             "category": "Minim",
-            "strokes": 1.5,
+            "strokes": 2.0,
+            "min_strokes": 1,
+            "max_strokes": 2,
+            "has_loop": False,
             "aspect_ratio": 0.78,
             "relative_freq_rank": 7,
             "description": "Short vertical stroke with rightward arched shoulder"
@@ -242,7 +266,10 @@ class CorpusCorrespondenceMatcher:
             "currier": "C",
             "name": "Single Correa Ligature",
             "category": "Ligature / Correa",
-            "strokes": 2.2,
+            "strokes": 2.0,
+            "min_strokes": 2,
+            "max_strokes": 3,
+            "has_loop": False,
             "aspect_ratio": 1.25,
             "relative_freq_rank": 9,
             "description": "Horizontal bench 'c' connecting to a vertical upright 'h' stem"
@@ -252,7 +279,10 @@ class CorpusCorrespondenceMatcher:
             "currier": "H",
             "name": "Double-Loop Correa Ligature",
             "category": "Ligature / Correa",
-            "strokes": 2.8,
+            "strokes": 3.0,
+            "min_strokes": 3,
+            "max_strokes": 4,
+            "has_loop": False,
             "aspect_ratio": 1.45,
             "relative_freq_rank": 10,
             "description": "Double-nested correa arches with an upright right ascender stem"
@@ -262,7 +292,10 @@ class CorpusCorrespondenceMatcher:
             "currier": "K",
             "name": "Benched Gallows (High Crossbar)",
             "category": "Gallows",
-            "strokes": 2.7,
+            "strokes": 3.0,
+            "min_strokes": 3,
+            "max_strokes": 5,
+            "has_loop": False,
             "aspect_ratio": 1.10,
             "relative_freq_rank": 11,
             "description": "Tall benched gallows glyph with horizontal overhead beam and twin legs"
@@ -272,7 +305,10 @@ class CorpusCorrespondenceMatcher:
             "currier": "T",
             "name": "Pedestal Crossed Gallows",
             "category": "Gallows",
-            "strokes": 2.5,
+            "strokes": 3.0,
+            "min_strokes": 2,
+            "max_strokes": 4,
+            "has_loop": False,
             "aspect_ratio": 0.95,
             "relative_freq_rank": 12,
             "description": "Central tall ascender staff with intersected mid-level crossbar"
@@ -282,7 +318,10 @@ class CorpusCorrespondenceMatcher:
             "currier": "P",
             "name": "Double-Benched Split Gallows",
             "category": "Gallows",
-            "strokes": 3.2,
+            "strokes": 4.0,
+            "min_strokes": 3,
+            "max_strokes": 6,
+            "has_loop": True,
             "aspect_ratio": 1.30,
             "relative_freq_rank": 14,
             "description": "Elaborate gallows with twin loops and center cross ties"
@@ -293,6 +332,9 @@ class CorpusCorrespondenceMatcher:
             "name": "Looped Flag Gallows",
             "category": "Gallows",
             "strokes": 3.0,
+            "min_strokes": 3,
+            "max_strokes": 5,
+            "has_loop": True,
             "aspect_ratio": 1.20,
             "relative_freq_rank": 15,
             "description": "Gallows structure with looped flag ornament on horizontal crossbar"
@@ -302,7 +344,10 @@ class CorpusCorrespondenceMatcher:
             "currier": "Q",
             "name": "Initial 4-Like Descender Hook",
             "category": "Initial / Descender",
-            "strokes": 2.1,
+            "strokes": 2.0,
+            "min_strokes": 2,
+            "max_strokes": 3,
+            "has_loop": True,
             "aspect_ratio": 0.85,
             "relative_freq_rank": 13,
             "description": "Word-initial closed loop with descending leftward stem"
@@ -313,6 +358,9 @@ class CorpusCorrespondenceMatcher:
             "name": "Triple Minim Wave",
             "category": "Minim Sequence",
             "strokes": 3.0,
+            "min_strokes": 3,
+            "max_strokes": 4,
+            "has_loop": False,
             "aspect_ratio": 1.60,
             "relative_freq_rank": 16,
             "description": "Three consecutive downstrokes with upper rounded arches"
@@ -323,6 +371,9 @@ class CorpusCorrespondenceMatcher:
             "name": "Double Minim Wave",
             "category": "Minim Sequence",
             "strokes": 2.0,
+            "min_strokes": 2,
+            "max_strokes": 3,
+            "has_loop": False,
             "aspect_ratio": 1.20,
             "relative_freq_rank": 17,
             "description": "Twin vertical minims with linking upper arch"
@@ -333,6 +384,9 @@ class CorpusCorrespondenceMatcher:
             "name": "Single Vertical Minim",
             "category": "Minim",
             "strokes": 1.0,
+            "min_strokes": 1,
+            "max_strokes": 1,
+            "has_loop": False,
             "aspect_ratio": 0.40,
             "relative_freq_rank": 18,
             "description": "Single upright vertical stroke"
@@ -345,6 +399,9 @@ class CorpusCorrespondenceMatcher:
             "name": "Loop-Stem Ascender",
             "category": "Syllabic Initial",
             "strokes": 2.0,
+            "min_strokes": 2,
+            "max_strokes": 3,
+            "has_loop": True,
             "aspect_ratio": 0.60,
             "description": "Initial left-handed oval loop with a high right ascender staff"
         },
@@ -352,7 +409,10 @@ class CorpusCorrespondenceMatcher:
             "code": "S-C02",
             "name": "Crescent-Bar Connector",
             "category": "Medial Connector",
-            "strokes": 1.5,
+            "strokes": 2.0,
+            "min_strokes": 1,
+            "max_strokes": 2,
+            "has_loop": False,
             "aspect_ratio": 1.10,
             "description": "Horizontal connecting bar carrying an open upward crescent"
         },
@@ -360,7 +420,10 @@ class CorpusCorrespondenceMatcher:
             "code": "S-H03",
             "name": "Double-Hook Ligature",
             "category": "Rhythmic Arch",
-            "strokes": 2.4,
+            "strokes": 2.0,
+            "min_strokes": 2,
+            "max_strokes": 3,
+            "has_loop": False,
             "aspect_ratio": 1.35,
             "description": "Twin symmetrical curved hooks on a common baseline"
         },
@@ -368,7 +431,10 @@ class CorpusCorrespondenceMatcher:
             "code": "S-W04",
             "name": "Wave-Descender",
             "category": "Terminal Descender",
-            "strokes": 1.8,
+            "strokes": 2.0,
+            "min_strokes": 1,
+            "max_strokes": 2,
+            "has_loop": False,
             "aspect_ratio": 0.80,
             "description": "Undulating sinusoidal tail plunging below the baseline"
         },
@@ -376,7 +442,10 @@ class CorpusCorrespondenceMatcher:
             "code": "S-B05",
             "name": "Benched Arch",
             "category": "Roof / Arch",
-            "strokes": 2.1,
+            "strokes": 2.0,
+            "min_strokes": 2,
+            "max_strokes": 3,
+            "has_loop": False,
             "aspect_ratio": 1.15,
             "description": "Square-topped horizontal canopy with a single vertical leg"
         },
@@ -384,7 +453,10 @@ class CorpusCorrespondenceMatcher:
             "code": "S-K06",
             "name": "Circle-Knot Glyphe",
             "category": "Complex Loop",
-            "strokes": 2.6,
+            "strokes": 3.0,
+            "min_strokes": 2,
+            "max_strokes": 4,
+            "has_loop": True,
             "aspect_ratio": 0.90,
             "description": "Closed circular center with crossing horizontal flourish"
         },
@@ -392,7 +464,10 @@ class CorpusCorrespondenceMatcher:
             "code": "S-S07",
             "name": "Serpentine-S Ligature",
             "category": "Vertical Ligature",
-            "strokes": 1.4,
+            "strokes": 1.0,
+            "min_strokes": 1,
+            "max_strokes": 2,
+            "has_loop": False,
             "aspect_ratio": 0.50,
             "description": "Elongated vertical s-curve spanning ascender and descender zones"
         },
@@ -400,7 +475,10 @@ class CorpusCorrespondenceMatcher:
             "code": "S-M08",
             "name": "Twin-Tooth Comb",
             "category": "Minim Wave",
-            "strokes": 2.0,
+            "strokes": 3.0,
+            "min_strokes": 2,
+            "max_strokes": 4,
+            "has_loop": False,
             "aspect_ratio": 1.05,
             "description": "Two parallel vertical teeth with an upper connecting cross-tie"
         },
@@ -408,7 +486,10 @@ class CorpusCorrespondenceMatcher:
             "code": "S-T09",
             "name": "Triple-Crown Comb",
             "category": "Comb / Crest",
-            "strokes": 3.0,
+            "strokes": 4.0,
+            "min_strokes": 3,
+            "max_strokes": 5,
+            "has_loop": False,
             "aspect_ratio": 1.55,
             "description": "Three vertical strokes surmounted by a wavy horizontal ridge"
         },
@@ -416,7 +497,10 @@ class CorpusCorrespondenceMatcher:
             "code": "S-P10",
             "name": "Spiral Terminal Dot",
             "category": "Punctuation / Marker",
-            "strokes": 1.2,
+            "strokes": 1.0,
+            "min_strokes": 1,
+            "max_strokes": 2,
+            "has_loop": True,
             "aspect_ratio": 0.85,
             "description": "Curled terminal dot indicating clause or number boundary"
         },
@@ -433,28 +517,72 @@ class CorpusCorrespondenceMatcher:
         cluster_glyphs: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
-        Estimates the closest standard corpus match (EVA / Currier) for an induced Voynich archetype.
+        Estimates the closest standard corpus match (EVA / Currier) for an induced Voynich archetype
+        using strict topological constraints (stroke count bounds, aspect ratio, and loop compatibility).
         """
         aspect_ratio = mean_width / max(1.0, mean_height)
+
+        # Detect if the archetype features closed loops
+        archetype_has_loop = False
+        if cluster_glyphs:
+            loop_scores = []
+            for g in cluster_glyphs[:12]:
+                ff = g.get("fill_factor", 0.25)
+                # Loop graphemes typically have higher hollow fill or aspect > 0.7 with 1-2 strokes
+                if 0.18 <= ff <= 0.48 and len(g.get("strokes", [])) <= 3:
+                    loop_scores.append(True)
+                else:
+                    loop_scores.append(False)
+            archetype_has_loop = np.mean(loop_scores) >= 0.50 if loop_scores else False
 
         best_match = None
         best_distance = float("inf")
 
         for prof in cls.VOYNICH_STANDARD_PROFILES:
-            stroke_diff = abs(prof["strokes"] - mean_strokes) / 2.0
-            aspect_diff = abs(prof["aspect_ratio"] - aspect_ratio) / 1.0
-            rank_diff = abs(prof["relative_freq_rank"] - frequency_rank) / 15.0
+            # 1. Stroke count penalty (heavy penalty if archetype stroke count is outside valid bounds)
+            if round(mean_strokes) < prof["min_strokes"]:
+                stroke_pen = 4.0 * (prof["min_strokes"] - mean_strokes)
+            elif round(mean_strokes) > prof["max_strokes"]:
+                stroke_pen = 4.0 * (mean_strokes - prof["max_strokes"])
+            else:
+                stroke_pen = abs(prof["strokes"] - mean_strokes) * 1.2
 
-            dist = 0.45 * stroke_diff + 0.35 * aspect_diff + 0.20 * rank_diff
+            # 2. Aspect ratio difference
+            aspect_diff = abs(prof["aspect_ratio"] - aspect_ratio) * 1.8
 
-            if dist < best_distance:
-                best_distance = dist
+            # 3. Frequency rank compatibility
+            rank_diff = abs(prof["relative_freq_rank"] - frequency_rank) / 20.0
+
+            # 4. Topological Loop Compatibility
+            loop_pen = 0.0
+            if prof["has_loop"] and not archetype_has_loop and mean_strokes < 1.8:
+                loop_pen = 3.5  # Heavy penalty matching a straight line with a loop
+            elif not prof["has_loop"] and archetype_has_loop and prof["strokes"] <= 1.2:
+                loop_pen = 3.0
+
+            total_dist = stroke_pen + aspect_diff + rank_diff + loop_pen
+
+            if total_dist < best_distance:
+                best_distance = total_dist
                 best_match = prof
 
-        confidence = max(0.68, min(0.97, 1.0 - (best_distance * 0.45)))
+        # If topological distance is too high (discordance between ductus and reference), suppress false match
+        if best_distance > 4.2:
+            return {
+                "system": "EVA / Currier / Takahashi",
+                "eva_equivalent": "—",
+                "currier_equivalent": "—",
+                "name": "Distinct Emergent Ductus",
+                "category": "Unclassified Scribal Form",
+                "confidence_pct": round(max(30.0, 100.0 - best_distance * 15.0), 1),
+                "description": "Emergent scribal grapheme with distinct topology; no isomorphic match in EVA scheme (anti-hallucination safeguard).",
+                "reference_svg": ""
+            }
+
+        confidence = max(0.55, min(0.96, 1.0 - (best_distance * 0.16)))
 
         eva_char = best_match["eva"] if best_match else "o"
-        ref_svg = cls.EVA_REFERENCE_SVGS.get(eva_char, cls.EVA_REFERENCE_SVGS["o"])
+        ref_svg = cls.EVA_REFERENCE_SVGS.get(eva_char, "")
 
         return {
             "system": "EVA / Currier / Takahashi",
@@ -474,23 +602,52 @@ class CorpusCorrespondenceMatcher:
         mean_strokes: float,
         mean_width: float,
         mean_height: float,
-        frequency_rank: int
+        frequency_rank: int,
+        cluster_glyphs: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
-        Estimates the closest Serafinian standard typology match for an induced archetype.
+        Estimates the closest Serafinian standard typology match using topological constraints.
         """
-        idx = (frequency_rank - 1) % len(cls.SERAFINI_STANDARD_PROFILES)
-        prof = cls.SERAFINI_STANDARD_PROFILES[idx]
+        aspect_ratio = mean_width / max(1.0, mean_height)
 
-        confidence = max(72.0, min(96.0, 94.0 - abs(prof["strokes"] - mean_strokes) * 8.0))
-        ref_svg = cls.SERAFINI_REFERENCE_SVGS.get(prof["code"], cls.SERAFINI_REFERENCE_SVGS["S-L01"])
+        best_match = None
+        best_distance = float("inf")
+
+        for prof in cls.SERAFINI_STANDARD_PROFILES:
+            if round(mean_strokes) < prof["min_strokes"]:
+                stroke_pen = 3.5 * (prof["min_strokes"] - mean_strokes)
+            elif round(mean_strokes) > prof["max_strokes"]:
+                stroke_pen = 3.5 * (mean_strokes - prof["max_strokes"])
+            else:
+                stroke_pen = abs(prof["strokes"] - mean_strokes) * 1.0
+
+            aspect_diff = abs(prof["aspect_ratio"] - aspect_ratio) * 1.6
+            total_dist = stroke_pen + aspect_diff
+
+            if total_dist < best_distance:
+                best_distance = total_dist
+                best_match = prof
+
+        if best_distance > 3.8:
+            return {
+                "system": "Serafini Typology (Stolfi / Derksen)",
+                "serafini_code": "S-EMERGENT",
+                "name": "Emergent Serafinian Ductus",
+                "category": "Unclassified Cursive Glyph",
+                "confidence_pct": round(max(30.0, 100.0 - best_distance * 15.0), 1),
+                "description": "Distinct cursive character with no direct archetype equivalent in standard 10-class typology.",
+                "reference_svg": ""
+            }
+
+        confidence = max(0.55, min(0.96, 1.0 - (best_distance * 0.18)))
+        ref_svg = cls.SERAFINI_REFERENCE_SVGS.get(best_match["code"], "")
 
         return {
             "system": "Serafini Typology (Stolfi / Derksen)",
-            "serafini_code": prof["code"],
-            "name": prof["name"],
-            "category": prof["category"],
-            "confidence_pct": round(confidence, 1),
-            "description": prof["description"],
+            "serafini_code": best_match["code"],
+            "name": best_match["name"],
+            "category": best_match["category"],
+            "confidence_pct": round(confidence * 100, 1),
+            "description": best_match["description"],
             "reference_svg": ref_svg
         }

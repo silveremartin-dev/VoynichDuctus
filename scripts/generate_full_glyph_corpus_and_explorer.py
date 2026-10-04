@@ -16,6 +16,7 @@ import numpy as np
 
 from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
 from voynich_ductus.ingestion.pdf_loader import PDFScanLoader
+from voynich_ductus.ingestion.iiif_client import IIIFClient
 from voynich_ductus.clustering.glyph_catalogue import GlyphCatalogue
 from voynich_ductus.ingestion.transcription_reference import PaleographyYieldValidator
 
@@ -28,6 +29,14 @@ def clean_page_data_for_json(pages_data: List[Dict[str, Any]]) -> List[Dict[str,
             clean_lines.append({
                 "line_id": l["line_id"],
                 "bbox": [int(x) for x in l["bbox"]]
+            })
+        clean_words = []
+        for w in p.get("words", []):
+            clean_words.append({
+                "word_id": w["word_id"],
+                "line_id": w.get("line_id", ""),
+                "bbox": [int(x) for x in w["bbox"]],
+                "word_png_rel": w.get("word_png_rel", "")
             })
         clean_glyphs = []
         for g in p.get("glyphs", []):
@@ -55,9 +64,11 @@ def clean_page_data_for_json(pages_data: List[Dict[str, Any]]) -> List[Dict[str,
             "image_width": p.get("image_width", 1500),
             "image_height": p.get("image_height", 2000),
             "line_count": p["line_count"],
+            "word_count": p.get("word_count", len(clean_words)),
             "glyph_count": p["glyph_count"],
             "yield_report": p.get("yield_report", {}),
             "lines": clean_lines,
+            "words": clean_words,
             "glyphs": clean_glyphs
         })
     return clean_pages
@@ -475,26 +486,26 @@ def generate_explorer_html(
         /* Catalogue Tab */
         .catalogue-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-            gap: 14px;
+            grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+            gap: 16px;
             overflow-y: auto;
             max-height: calc(100vh - 170px);
         }}
         .catalogue-card {{
             background: var(--panel-bg);
             border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 12px;
+            border-radius: 12px;
+            padding: 14px;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 10px;
             cursor: pointer;
             transition: all 0.2s;
         }}
         .catalogue-card:hover {{
             border-color: var(--accent);
             transform: translateY(-2px);
-            box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.6);
         }}
         .catalogue-header {{
             display: flex;
@@ -502,46 +513,49 @@ def generate_explorer_html(
             align-items: center;
         }}
         .catalogue-header h3 {{
-            font-size: 1.05rem;
+            font-size: 1.15rem;
             color: var(--accent);
         }}
         .badge-freq {{
             background: #1e293b;
             color: #38bdf8;
             border: 1px solid #38bdf8;
-            padding: 2px 7px;
-            border-radius: 12px;
-            font-size: 0.72rem;
+            padding: 3px 9px;
+            border-radius: 14px;
+            font-size: 0.76rem;
             font-weight: 600;
         }}
         .catalogue-trio {{
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
-            gap: 6px;
+            gap: 8px;
         }}
         .c-box {{
             background: #000;
             border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 4px;
+            border-radius: 8px;
+            padding: 6px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 85px;
+            min-height: 170px;
+            height: 170px;
         }}
         .c-box img, .c-box svg {{
             max-width: 100%;
-            max-height: 70px;
+            max-height: 140px;
+            height: 140px;
             object-fit: contain;
+            filter: contrast(130%) brightness(105%);
         }}
         .btn-variations {{
             background: #1e3a8a;
             color: #fff;
             border: 1px solid var(--accent);
-            padding: 6px 10px;
+            padding: 8px 12px;
             border-radius: 6px;
-            font-size: 0.78rem;
+            font-size: 0.82rem;
             cursor: pointer;
             text-align: center;
             font-weight: 600;
@@ -713,7 +727,12 @@ def generate_explorer_html(
             <div class="panel" style="padding: 4px;">
                 <h3>
                     <span>Interactive Folio Canvas</span>
-                    <span id="canvas-status" style="font-size:0.72rem; color:var(--text-muted);">Scroll to Zoom • Drag to Pan • Click box to inspect</span>
+                    <span id="canvas-status" style="font-size:0.72rem; color:var(--text-muted); display:flex; gap:8px;">
+                        <span><strong style="color:#a855f7;">🟣 Ligne</strong></span>
+                        <span><strong style="color:#10b981;">🟢 Mot</strong></span>
+                        <span><strong style="color:#38bdf8;">🔵 Glyphe</strong></span>
+                        <span><strong style="color:#00e5ff;">⚡ Actif</strong></span>
+                    </span>
                 </h3>
                 <div class="canvas-wrapper" id="canvas-wrapper">
                     <canvas id="page-canvas"></canvas>
@@ -724,19 +743,24 @@ def generate_explorer_html(
                         <div class="minimap-viewport-box" id="minimap-viewport"></div>
                     </div>
 
-                    <!-- Zoom Controls & Image Enhancement Toolbar -->
+                    <!-- Zoom Controls & Layer Toggles Toolbar -->
                     <div class="canvas-toolbar">
+                        <button id="btn-toggle-lines" class="btn-tool" onclick="toggleLayer('lines')" style="width:auto; padding:0 8px; font-size:0.72rem; background:#581c87; border-color:#a855f7;" title="Afficher/Masquer Lignes (L)">🟣 Lignes</button>
+                        <button id="btn-toggle-words" class="btn-tool" onclick="toggleLayer('words')" style="width:auto; padding:0 8px; font-size:0.72rem; background:#064e3b; border-color:#10b981;" title="Afficher/Masquer Mots (W)">🟢 Mots</button>
+                        <button id="btn-toggle-glyphs" class="btn-tool" onclick="toggleLayer('glyphs')" style="width:auto; padding:0 8px; font-size:0.72rem; background:#075985; border-color:#38bdf8;" title="Afficher/Masquer Glyphes (G)">🔵 Glyphes</button>
+                        <div style="width:1px; height:18px; background:var(--border); margin:0 2px;"></div>
+                        <select id="canvas-filter-select" class="select-filter" onchange="setCanvasFilter(this.value)" style="font-size:0.72rem; padding:2px 6px;">
+                            <option value="crisp">✨ Ink Boost</option>
+                            <option value="sharp">🔥 High-Pass Sharp</option>
+                            <option value="pure">📜 Pure Ink</option>
+                            <option value="raw">📷 Natural Scan</option>
+                        </select>
+                        <div style="width:1px; height:18px; background:var(--border); margin:0 2px;"></div>
                         <button class="btn-tool" onclick="zoomIn()" title="Zoom In">+</button>
                         <button class="btn-tool" onclick="zoomOut()" title="Zoom Out">-</button>
                         <button class="btn-tool" onclick="resetZoom()" title="Reset Zoom / Fit Page" style="font-size:0.7rem; width:34px;">Fit</button>
                         <button class="btn-tool" onclick="zoomActual()" title="100% Scale" style="font-size:0.7rem; width:34px;">1:1</button>
                         <span class="zoom-level-text" id="zoom-text">100%</span>
-                        <select id="canvas-filter-select" class="select-filter" onchange="setCanvasFilter(this.value)" style="margin-left:4px; font-size:0.72rem; padding:2px 6px;">
-                            <option value="crisp">✨ Ink Boost (Crisp)</option>
-                            <option value="sharp">🔥 High-Pass Sharp</option>
-                            <option value="pure">📜 Pure Ink (Binarized)</option>
-                            <option value="raw">📷 Natural Scan (Raw)</option>
-                        </select>
                     </div>
                 </div>
             </div>
@@ -980,6 +1004,34 @@ def generate_explorer_html(
             updateMinimapViewport();
         }}
 
+        let showLines = true;
+        let showWords = true;
+        let showGlyphs = true;
+
+        function toggleLayer(layer) {{
+            if (layer === 'lines') {{
+                showLines = !showLines;
+                const btn = document.getElementById('btn-toggle-lines');
+                btn.style.opacity = showLines ? '1.0' : '0.4';
+            }} else if (layer === 'words') {{
+                showWords = !showWords;
+                const btn = document.getElementById('btn-toggle-words');
+                btn.style.opacity = showWords ? '1.0' : '0.4';
+            }} else if (layer === 'glyphs') {{
+                showGlyphs = !showGlyphs;
+                const btn = document.getElementById('btn-toggle-glyphs');
+                btn.style.opacity = showGlyphs ? '1.0' : '0.4';
+            }}
+            drawCanvasOverlay();
+        }}
+
+        window.addEventListener('keydown', (e) => {{
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+            if (e.key === 'l' || e.key === 'L') toggleLayer('lines');
+            if (e.key === 'w' || e.key === 'W') toggleLayer('words');
+            if (e.key === 'g' || e.key === 'G') toggleLayer('glyphs');
+        }});
+
         function drawCanvasOverlay() {{
             const canvas = document.getElementById('page-canvas');
             const page = data[currentMs].pages[currentPageIdx];
@@ -990,31 +1042,64 @@ def generate_explorer_html(
             const ctx = canvas.getContext('2d');
             ctx.drawImage(pageImageObj, 0, 0);
 
-            // Draw discrete and elegant bounding boxes
-            page.glyphs.forEach(g => {{
-                if (archetypeFilterVal !== 'ALL' && g.canonical_type !== archetypeFilterVal) {{
-                    return;
-                }}
-
-                const [y0, x0, y1, x1] = g.bbox;
-                const isSelected = selectedGlyph && selectedGlyph.glyph_id === g.glyph_id;
-
-                if (isSelected) {{
-                    // Selected box: crisp glowing cyan rectangular frame (NO distracting circles!)
-                    ctx.strokeStyle = '#00e5ff';
-                    ctx.lineWidth = 3.5;
-                    ctx.fillStyle = 'rgba(0, 229, 255, 0.25)';
-                    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
-                    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-                }} else {{
-                    // Default box: subtle, elegant semi-transparent frame
-                    ctx.strokeStyle = 'rgba(56, 189, 248, 0.40)';
+            // 1. Layer 1: Text Lines (🟣 Violet)
+            if (showLines && page.lines) {{
+                page.lines.forEach(l => {{
+                    const [ly0, lx0, ly1, lx1] = l.bbox;
+                    ctx.strokeStyle = 'rgba(168, 85, 247, 0.65)';
                     ctx.lineWidth = 1.5;
-                    ctx.fillStyle = 'rgba(56, 189, 248, 0.04)';
-                    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
-                    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-                }}
-            }});
+                    ctx.setLineDash([6, 4]);
+                    ctx.strokeRect(lx0, ly0, lx1 - lx0, ly1 - ly0);
+                    ctx.fillStyle = 'rgba(168, 85, 247, 0.035)';
+                    ctx.fillRect(lx0, ly0, lx1 - lx0, ly1 - ly0);
+                    ctx.setLineDash([]);
+                }});
+            }}
+
+            // 2. Layer 2: Lexical Words (🟢 Emerald Green)
+            if (showWords && page.words) {{
+                page.words.forEach(w => {{
+                    const [wy0, wx0, wy1, wx1] = w.bbox;
+                    const isParentWord = selectedGlyph && selectedGlyph.word_id === w.word_id;
+                    if (isParentWord) {{
+                        ctx.strokeStyle = '#10b981';
+                        ctx.lineWidth = 2.8;
+                        ctx.fillStyle = 'rgba(16, 185, 129, 0.18)';
+                    }} else {{
+                        ctx.strokeStyle = 'rgba(16, 185, 129, 0.45)';
+                        ctx.lineWidth = 1.2;
+                        ctx.fillStyle = 'rgba(16, 185, 129, 0.04)';
+                    }}
+                    ctx.fillRect(wx0, wy0, wx1 - wx0, wy1 - wy0);
+                    ctx.strokeRect(wx0, wy0, wx1 - wx0, wy1 - wy0);
+                }});
+            }}
+
+            // 3. Layer 3: Extracted Glyphs (🔵 Cyan / ⚡ Glowing Active)
+            if (showGlyphs && page.glyphs) {{
+                page.glyphs.forEach(g => {{
+                    if (archetypeFilterVal !== 'ALL' && g.canonical_type !== archetypeFilterVal) {{
+                        return;
+                    }}
+
+                    const [y0, x0, y1, x1] = g.bbox;
+                    const isSelected = selectedGlyph && selectedGlyph.glyph_id === g.glyph_id;
+
+                    if (isSelected) {{
+                        ctx.strokeStyle = '#00e5ff';
+                        ctx.lineWidth = 3.5;
+                        ctx.fillStyle = 'rgba(0, 229, 255, 0.30)';
+                        ctx.fillRect(x0 - 2, y0 - 2, (x1 - x0) + 4, (y1 - y0) + 4);
+                        ctx.strokeRect(x0 - 2, y0 - 2, (x1 - x0) + 4, (y1 - y0) + 4);
+                    }} else {{
+                        ctx.strokeStyle = 'rgba(56, 189, 248, 0.50)';
+                        ctx.lineWidth = 1.2;
+                        ctx.fillStyle = 'rgba(56, 189, 248, 0.04)';
+                        ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+                        ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+                    }}
+                }});
+            }}
         }}
 
         function drawMinimap() {{
@@ -1469,18 +1554,22 @@ def main():
     segmenter = GlyphSegmenter()
     catalogue_builder = GlyphCatalogue(target_alphabet_size=28)
 
-    # 1. Process Voynich Manuscript Pages
+    # 1. Process Voynich Manuscript Pages (Yale Beinecke HD IIIF)
     print("\n=======================================================")
-    print(" 1. FULL GLYPH EXTRACTION: VOYNICH MANUSCRIPT")
+    print(" 1. FULL GLYPH EXTRACTION: VOYNICH MANUSCRIPT (YALE BEINECKE HD)")
     print("=======================================================")
     voynich_pages_data = []
     all_voynich_glyphs = []
 
-    voynich_sources = [("f001r", Path("data/scans/f001r.jpg")), ("f001v", Path("data/scans/f001v.jpg"))]
-    for folio_id, vf in voynich_sources:
-        if vf.exists():
-            img = Image.open(vf)
-            print(f"[*] Extracting all glyphs on Voynich master '{folio_id}'...")
+    iiif_client = IIIFClient(cache_dir="data/yale_hd_scans")
+    voynich_folios = ["f001r", "f001v", "f002r", "f002v", "f003r", "f003v", "f004r", "f004v"]
+
+    for folio_id in voynich_folios:
+        try:
+            print(f"[*] Downloading / Loading Yale Beinecke HD scan for '{folio_id}' (2400px)...")
+            f_path = iiif_client.download_folio(folio_id, max_width=2400)
+            img = Image.open(f_path)
+            print(f"[*] Extracting all glyphs on Voynich HD '{folio_id}' ({img.width}x{img.height} px)...")
             res = segmenter.extract_page_glyphs(folio_id, img, output_dir=base_out, subfolder="voynich")
             
             # Census yield validation
@@ -1491,32 +1580,11 @@ def main():
                 extracted_strokes=sum(len(g["strokes"]) for g in res["glyphs"])
             )
             res["yield_report"] = yr
-            print(f"  [+] Identified {res['line_count']}/{yr.get('expected_lines', 28)} lines ({yr.get('line_yield_pct', 0)}%), extracted {res['glyph_count']}/{yr.get('expected_glyphs', 1100)} glyphs ({yr.get('glyph_yield_pct', 0)}%).")
+            print(f"  [+] Identified {res['line_count']} lines, {res['word_count']} words, extracted {res['glyph_count']} intact glyphs.")
             voynich_pages_data.append(res)
             all_voynich_glyphs.extend(res["glyphs"])
-
-    # Load additional folios from Voynich PDF
-    voynich_pdf = Path("data/scans/voynich/VoynichManuscript.pdf")
-    if voynich_pdf.exists():
-        loader_v = PDFScanLoader(voynich_pdf)
-        for page_idx in [2, 3, 4, 5]:
-            try:
-                folio_name = f"f{page_idx:03d}"
-                print(f"[*] Extracting all glyphs on Voynich folio '{folio_name}' from PDF...")
-                p_img = loader_v.get_page_image(page_idx, target_min_dim=1500)
-                res_v = segmenter.extract_page_glyphs(folio_name, p_img, output_dir=base_out, subfolder="voynich")
-                yr_v = PaleographyYieldValidator.evaluate_yield(
-                    folio_id=folio_name,
-                    detected_lines=res_v["line_count"],
-                    detected_glyphs=res_v["glyph_count"],
-                    extracted_strokes=sum(len(g["strokes"]) for g in res_v["glyphs"])
-                )
-                res_v["yield_report"] = yr_v
-                print(f"  [+] Identified {res_v['line_count']}/{yr_v.get('expected_lines', 20)} lines ({yr_v.get('line_yield_pct', 0)}%), extracted {res_v['glyph_count']}/{yr_v.get('expected_glyphs', 750)} glyphs ({yr_v.get('glyph_yield_pct', 0)}%).")
-                voynich_pages_data.append(res_v)
-                all_voynich_glyphs.extend(res_v["glyphs"])
-            except Exception as e:
-                print(f"[-] Error on Voynich PDF page {page_idx}: {e}")
+        except Exception as e:
+            print(f"[-] Error on Yale folio {folio_id}: {e}")
 
     print(f"\n[*] Inducing Voynich Canonical Alphabet & Matching Standard Corpora (EVA/Currier)...")
     voynich_catalogue = catalogue_builder.build_catalogue(all_voynich_glyphs, corpus_type="voynich")
@@ -1536,10 +1604,12 @@ def main():
         for p_idx in [15, 20, 25, 30, 35, 40]:
             try:
                 page_id = f"serafini_p{p_idx:03d}"
-                print(f"[*] Extracting all glyphs on Seraphinianus page {p_idx}...")
-                p_img = loader_s.get_page_image(p_idx, target_min_dim=1500)
-                res_s = segmenter.extract_page_glyphs(page_id, p_img, output_dir=base_out, subfolder="seraphinianus")
-                print(f"  [+] Identified {res_s['line_count']} lines, extracted {res_s['glyph_count']} pure isolated glyphs.")
+                print(f"[*] Extracting all glyphs on Seraphinianus page {p_idx} (with x1.5 upscale)...")
+                p_img = loader_s.get_page_image(p_idx, target_min_dim=2000)
+                # Lanczos 1.5x upscaling for razor-sharp pen contours
+                p_img_hd = p_img.resize((int(p_img.width * 1.5), int(p_img.height * 1.5)), Image.Resampling.LANCZOS)
+                res_s = segmenter.extract_page_glyphs(page_id, p_img_hd, output_dir=base_out, subfolder="seraphinianus")
+                print(f"  [+] Identified {res_s['line_count']} lines, {res_s['word_count']} words, extracted {res_s['glyph_count']} pure isolated glyphs.")
                 serafini_pages_data.append(res_s)
                 all_serafini_glyphs.extend(res_s["glyphs"])
             except Exception as e:

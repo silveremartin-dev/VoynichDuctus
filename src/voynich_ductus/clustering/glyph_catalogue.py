@@ -118,7 +118,8 @@ class GlyphCatalogue:
                     mean_strokes=mean_strokes,
                     mean_width=mean_width,
                     mean_height=mean_height,
-                    frequency_rank=rank
+                    frequency_rank=rank,
+                    cluster_glyphs=cluster_glyphs
                 )
             else:
                 corpus_match = CorpusCorrespondenceMatcher.match_voynich_archetype(
