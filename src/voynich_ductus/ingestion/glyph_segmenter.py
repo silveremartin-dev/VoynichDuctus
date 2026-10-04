@@ -68,24 +68,21 @@ class GlyphSegmenter:
         sat = hsv[:, :, 1]
         val = hsv[:, :, 2]
 
-        # 1. Detect background type and colored illustration pigments
-        mean_page_sat = float(np.mean(sat))
-        is_warm_parchment = mean_page_sat >= 0.18 or subfolder == "voynich"
-
         from scipy.ndimage import binary_dilation
 
-        if is_warm_parchment:
+        if subfolder == "voynich":
             # Voynich / Medieval parchment:
-            # Text ink is dark iron-gall. Illustrations are green foliage, blue water, or vivid red paint.
-            is_green = (hue >= 0.15) & (hue <= 0.48) & (sat > 0.18) & (val > 0.20)
-            is_blue = (hue >= 0.48) & (hue <= 0.78) & (sat > 0.18) & (val > 0.20)
-            is_red = ((hue >= 0.85) | (hue <= 0.05)) & (sat > 0.28) & (val > 0.25)
-            is_illustration_color = is_green | is_blue | is_red | ((chroma > 0.30) & (val > 0.35))
+            # Text ink is dark iron-gall. Illustrations are green foliage, blue water, or vivid red/yellow paint.
+            is_green = (hue >= 0.14) & (hue <= 0.50) & (sat > 0.15) & (val > 0.18)
+            is_blue = (hue >= 0.50) & (hue <= 0.78) & (sat > 0.15) & (val > 0.18)
+            is_red = ((hue >= 0.85) | (hue <= 0.06)) & (sat > 0.22) & (val > 0.22)
+            is_yellow_ochre = (hue >= 0.08) & (hue <= 0.16) & (sat > 0.30) & (val > 0.40)
+            is_illustration_color = is_green | is_blue | is_red | is_yellow_ochre | ((chroma > 0.28) & (val > 0.32))
             is_illustration_color = binary_dilation(is_illustration_color, iterations=4)
         else:
             # Codex Seraphinianus / Printed paper:
-            # Text ink is strictly achromatic (chroma < 0.08). All colored pixels are illustrations!
-            is_illustration_color = (chroma > 0.08)
+            # Text ink is strictly achromatic (chroma < 0.06). All colored pixels are illustrations!
+            is_illustration_color = (chroma > 0.06)
             is_illustration_color = binary_dilation(is_illustration_color, iterations=4)
 
         # 2. Local adaptive Sauvola thresholding for ink
@@ -136,7 +133,7 @@ class GlyphSegmenter:
         """
         Assembles connected components within a word into intact multi-stroke glyphs.
         Groups vertically overlapping or tightly adjacent sub-strokes (e.g., bowl + ascender,
-        gallows bar + leg, diacritic + minim) and splits wide cursive ligatures.
+        gallows bar + leg, diacritic + minim) and recursively splits wide cursive ligatures.
         """
         labeled_w, num_w = label(w_img)
         if num_w == 0:
@@ -144,10 +141,12 @@ class GlyphSegmenter:
 
         props = sorted(regionprops(labeled_w), key=lambda p: (p.bbox[1] + p.bbox[3]) / 2.0)
         
-        # 1. Filter out micro noise specks below quill nib thickness (minimum ~1.5mm / 10px)
+        # 1. Filter out micro noise specks below quill nib thickness (minimum ~1.5mm / 8px)
         valid_comps = []
         for p in props:
-            if p.area >= 12 and (p.bbox[2] - p.bbox[0]) >= 8 and (p.bbox[3] - p.bbox[1]) >= 4:
+            ph = p.bbox[2] - p.bbox[0]
+            pw = p.bbox[3] - p.bbox[1]
+            if p.area >= 10 and ph >= 6 and pw >= 3:
                 valid_comps.append(p)
 
         if not valid_comps:
@@ -171,14 +170,52 @@ class GlyphSegmenter:
                 comb_h = max(cl_y1, cy1) - min(cl_y0, cy0)
 
                 # Merge if overlapping or tight horizontal gap <= 4px
-                if (overlap > 0 or gap <= 4) and comb_w <= max(48, int(comb_h * 1.40)):
+                if (overlap > 0 or gap <= 4) and comb_w <= max(45, int(comb_h * 1.35)):
                     cl.append(comp)
                     merged = True
                     break
             if not merged:
                 clusters.append([comp])
 
-        # 3. Create composite masks for each cluster
+        # 3. Recursive Ligature Splitter
+        def split_ligature_mask(mask: np.ndarray, y0: int, x0: int) -> List[Dict[str, Any]]:
+            gh, gw = mask.shape
+            area = int(np.sum(mask))
+            if area < 20 or gh < 12 or gw < 5:
+                return []
+
+            # Check if this mask represents multiple merged characters (e.g. ligature)
+            if gw > 1.25 * gh and gw >= 26:
+                col_proj = np.sum(mask, axis=0)
+                mid_start = int(0.22 * gw)
+                mid_end = int(0.78 * gw)
+                if mid_end > mid_start:
+                    min_col_rel = int(np.argmin(col_proj[mid_start:mid_end]))
+                    min_col_idx = mid_start + min_col_rel
+                    min_val = col_proj[min_col_idx]
+                    max_left = np.max(col_proj[:min_col_idx]) if min_col_idx > 0 else 1
+                    max_right = np.max(col_proj[min_col_idx:]) if min_col_idx < gw else 1
+                    max_peak = max(max_left, max_right)
+
+                    if max_peak > 0 and (min_val / max_peak) <= 0.45:
+                        mask1 = mask[:, :min_col_idx]
+                        mask2 = mask[:, min_col_idx:]
+                        res1 = split_ligature_mask(mask1, y0, x0)
+                        res2 = split_ligature_mask(mask2, y0, x0 + min_col_idx)
+                        if res1 and res2:
+                            return res1 + res2
+                        elif res1:
+                            return res1
+                        elif res2:
+                            return res2
+
+            return [{
+                "mask": mask,
+                "bbox_local": (y0, x0, y0 + gh, x0 + gw),
+                "area": area
+            }]
+
+        # 4. Create composite masks for each cluster and split ligatures
         assembled_glyphs = []
         for cl in clusters:
             gy0 = min(c.bbox[0] for c in cl)
@@ -197,42 +234,8 @@ class GlyphSegmenter:
                 off_x = c.bbox[1] - gx0
                 g_mask[off_y:off_y + (c.bbox[2] - c.bbox[0]), off_x:off_x + (c.bbox[3] - c.bbox[1])] |= c_mask
 
-            area = int(np.sum(g_mask))
-            # Strict minimum physical character size: height >= 14px, width >= 6px, area >= 25px²
-            if area < 25 or gh < 14 or gw < 6:
-                continue
-
-            # Check if cluster is a wide cursive ligature that should be split
-            if gw > 1.35 * gh and gw >= 32:
-                col_proj = np.sum(g_mask, axis=0)
-                mid_start = int(0.25 * gw)
-                mid_end = int(0.75 * gw)
-                if mid_end > mid_start:
-                    min_col_idx = mid_start + int(np.argmin(col_proj[mid_start:mid_end]))
-                    min_val = col_proj[min_col_idx]
-                    max_val = max(np.max(col_proj[:min_col_idx]), np.max(col_proj[min_col_idx:]))
-                    if max_val > 0 and (min_val / max_val) <= 0.40:
-                        mask1 = g_mask[:, :min_col_idx]
-                        mask2 = g_mask[:, min_col_idx:]
-                        if np.sum(mask1) >= 20 and mask1.shape[1] >= 6:
-                            assembled_glyphs.append({
-                                "mask": mask1,
-                                "bbox_local": (gy0, gx0, gy1, gx0 + min_col_idx),
-                                "area": int(np.sum(mask1))
-                            })
-                        if np.sum(mask2) >= 20 and mask2.shape[1] >= 6:
-                            assembled_glyphs.append({
-                                "mask": mask2,
-                                "bbox_local": (gy0, gx0 + min_col_idx, gy1, gx1),
-                                "area": int(np.sum(mask2))
-                            })
-                        continue
-
-            assembled_glyphs.append({
-                "mask": g_mask,
-                "bbox_local": (gy0, gx0, gy1, gx1),
-                "area": area
-            })
+            split_res = split_ligature_mask(g_mask, gy0, gx0)
+            assembled_glyphs.extend(split_res)
 
         return sorted(assembled_glyphs, key=lambda g: g["bbox_local"][1])
 
@@ -334,17 +337,18 @@ class GlyphSegmenter:
                     if ink_pixels.shape[0] > 0:
                         if subfolder == "seraphinianus":
                             chroma_ink = np.max(ink_pixels, axis=1) - np.min(ink_pixels, axis=1)
-                            if np.mean(chroma_ink) > 0.11:
+                            if np.mean(chroma_ink) > 0.08:
                                 continue
                         else:
                             from skimage.color import rgb2hsv
                             ink_hsv = rgb2hsv(ink_pixels.reshape(-1, 1, 3))
                             is_paint_stroke = (
-                                ((ink_hsv[:, 0, 0] >= 0.15) & (ink_hsv[:, 0, 0] <= 0.48) & (ink_hsv[:, 0, 1] > 0.16)) |
-                                ((ink_hsv[:, 0, 0] >= 0.48) & (ink_hsv[:, 0, 0] <= 0.78) & (ink_hsv[:, 0, 1] > 0.16)) |
-                                (((ink_hsv[:, 0, 0] >= 0.85) | (ink_hsv[:, 0, 0] <= 0.05)) & (ink_hsv[:, 0, 1] > 0.28) & (ink_hsv[:, 0, 2] > 0.35))
+                                ((ink_hsv[:, 0, 0] >= 0.14) & (ink_hsv[:, 0, 0] <= 0.50) & (ink_hsv[:, 0, 1] > 0.14)) |
+                                ((ink_hsv[:, 0, 0] >= 0.50) & (ink_hsv[:, 0, 0] <= 0.78) & (ink_hsv[:, 0, 1] > 0.14)) |
+                                (((ink_hsv[:, 0, 0] >= 0.85) | (ink_hsv[:, 0, 0] <= 0.06)) & (ink_hsv[:, 0, 1] > 0.20) & (ink_hsv[:, 0, 2] > 0.25)) |
+                                ((ink_hsv[:, 0, 0] >= 0.08) & (ink_hsv[:, 0, 0] <= 0.16) & (ink_hsv[:, 0, 1] > 0.28))
                             )
-                            if np.mean(is_paint_stroke) > 0.15:
+                            if np.mean(is_paint_stroke) > 0.08:
                                 continue
 
                 # Vectorize glyph ductus

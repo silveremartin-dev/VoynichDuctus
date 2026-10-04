@@ -50,50 +50,51 @@ class IIIFClient:
         self._manifest_cache = resp.json()
         return self._manifest_cache
 
-    def get_folio_image_url(self, folio_id: str, max_width: int = 1600) -> Optional[str]:
+    def get_folio_image_url(self, folio_id: str, max_width: Optional[int] = None) -> Optional[str]:
         """
         Finds the IIIF image URL for a given folio identifier (e.g. '1r', 'f001r', 'f026v').
+        If max_width is None, returns the native full master resolution URL.
         """
         norm = self.normalize_folio_name(folio_id)
-        # Match label without leading 'f0' (e.g. '1r', '26v')
         short_num = norm.lstrip("f").lstrip("0")
         if not short_num:
             short_num = "1r"
         
+        size_spec = f"{max_width}," if max_width else "full"
+
         manifest = self.fetch_manifest()
         for item in manifest.get("items", []):
             labels = item.get("label", {}).get("none", [])
             for lbl in labels:
                 clean_lbl = lbl.strip().lower().lstrip("f").lstrip("0")
                 if clean_lbl == short_num or lbl.strip().lower() == norm or lbl.strip().lower() == folio_id.strip().lower():
-                    # Extract body service
                     try:
                         body = item["items"][0]["items"][0]["body"]
                         service_id = body.get("service", [{}])[0].get("@id")
                         if service_id:
-                            return f"{service_id}/full/{max_width},/0/default.jpg"
+                            return f"{service_id}/full/{size_spec}/0/default.jpg"
                         return body.get("id")
                     except (KeyError, IndexError):
                         pass
         return None
 
-    def download_folio(self, folio_id: str, output_path: Optional[str] = None, max_width: int = 1600) -> Path:
+    def download_folio(self, folio_id: str, output_path: Optional[str] = None, max_width: Optional[int] = None) -> Path:
         """
-        Downloads a specific folio image from Yale Beinecke archives.
+        Downloads a specific folio image from Yale Beinecke archives at native master resolution.
         """
         norm_folio = self.normalize_folio_name(folio_id)
         out_file = Path(output_path) if output_path else self.cache_dir / f"{norm_folio}.jpg"
 
-        if out_file.exists():
+        if out_file.exists() and out_file.stat().st_size > 50000:
             return out_file
 
         url = self.get_folio_image_url(folio_id, max_width=max_width)
+        size_spec = f"{max_width}," if max_width else "full"
         if not url:
-            # Fallback to direct Yale item 2 for f001r if search misses
-            url = f"https://collections.library.yale.edu/iiif/2/1006076/full/{max_width},/0/default.jpg"
+            url = f"https://collections.library.yale.edu/iiif/2/1006076/full/{size_spec}/0/default.jpg"
 
         headers = {"User-Agent": "VoynichDuctus-Research/0.1"}
-        resp = requests.get(url, headers=headers, timeout=60, stream=True)
+        resp = requests.get(url, headers=headers, timeout=90, stream=True)
         if resp.status_code == 200:
             out_file.parent.mkdir(parents=True, exist_ok=True)
             with open(out_file, "wb") as f:

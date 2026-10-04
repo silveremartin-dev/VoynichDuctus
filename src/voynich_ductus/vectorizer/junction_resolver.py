@@ -63,17 +63,134 @@ class JunctionResolver:
 
         return stroke
 
+    def chain_collinear_strokes(self, strokes: List[Dict[str, Any]], max_gap: float = 6.0) -> List[Dict[str, Any]]:
+        """
+        Merges adjacent stroke segments meeting at junctions or corners into continuous, unified strokes.
+        Prevents breaking continuous lines into tiny fragments.
+        """
+        if len(strokes) <= 1:
+            return strokes
+
+        # Filter out micro-noise strokes (< 3 points with tiny length)
+        valid = [s for s in strokes if len(s.get("points", [])) >= 3 or s.get("length", 0) >= 3.5]
+        if not valid:
+            valid = strokes
+
+        merged = True
+        current_strokes = list(valid)
+
+        while merged:
+            merged = False
+            for i in range(len(current_strokes)):
+                s1 = current_strokes[i]
+                p1_start = np.array(s1["points"][0][:2])
+                p1_end = np.array(s1["points"][-1][:2])
+
+                for j in range(len(current_strokes)):
+                    if i == j:
+                        continue
+                    s2 = current_strokes[j]
+                    p2_start = np.array(s2["points"][0][:2])
+                    p2_end = np.array(s2["points"][-1][:2])
+
+                    # 1. Check s1 end -> s2 start
+                    if np.linalg.norm(p1_end - p2_start) <= max_gap:
+                        combined_pts = s1["points"] + s2["points"]
+                        current_strokes[i] = {
+                            "stroke_id": s1["stroke_id"],
+                            "type": s1.get("type", "segment"),
+                            "points": combined_pts,
+                            "length": float(len(combined_pts)),
+                            "start": s1["start"],
+                            "end": s2["end"]
+                        }
+                        current_strokes.pop(j)
+                        merged = True
+                        break
+
+                    # 2. Check s1 end -> s2 end (s2 reversed)
+                    if np.linalg.norm(p1_end - p2_end) <= max_gap:
+                        rev_s2 = list(reversed(s2["points"]))
+                        combined_pts = s1["points"] + rev_s2
+                        current_strokes[i] = {
+                            "stroke_id": s1["stroke_id"],
+                            "type": s1.get("type", "segment"),
+                            "points": combined_pts,
+                            "length": float(len(combined_pts)),
+                            "start": s1["start"],
+                            "end": s2["start"]
+                        }
+                        current_strokes.pop(j)
+                        merged = True
+                        break
+
+                    # 3. Check s2 end -> s1 start
+                    if np.linalg.norm(p2_end - p1_start) <= max_gap:
+                        combined_pts = s2["points"] + s1["points"]
+                        current_strokes[i] = {
+                            "stroke_id": s2["stroke_id"],
+                            "type": s2.get("type", "segment"),
+                            "points": combined_pts,
+                            "length": float(len(combined_pts)),
+                            "start": s2["start"],
+                            "end": s1["end"]
+                        }
+                        current_strokes.pop(j)
+                        merged = True
+                        break
+
+                    # 4. Check s1 start -> s2 start (s1 reversed)
+                    if np.linalg.norm(p1_start - p2_start) <= max_gap:
+                        combined_pts = list(reversed(s1["points"])) + s2["points"]
+                        current_strokes[i] = {
+                            "stroke_id": s1["stroke_id"],
+                            "type": s1.get("type", "segment"),
+                            "points": combined_pts,
+                            "length": float(len(combined_pts)),
+                            "start": s1["end"],
+                            "end": s2["end"]
+                        }
+                        current_strokes.pop(j)
+                        merged = True
+                        break
+
+                if merged:
+                    break
+
+        return current_strokes
+
+    @staticmethod
+    def smooth_stroke_points(points: List[Tuple[float, float, float]], window: int = 3) -> List[Tuple[float, float, float]]:
+        """
+        Applies a moving average smoothing filter to stroke coordinates to simulate natural fluid pen trajectories.
+        """
+        if len(points) <= window:
+            return points
+        smoothed = []
+        n = len(points)
+        for i in range(n):
+            w_start = max(0, i - window // 2)
+            w_end = min(n, i + window // 2 + 1)
+            pts_slice = points[w_start:w_end]
+            avg_y = sum(p[0] for p in pts_slice) / len(pts_slice)
+            avg_x = sum(p[1] for p in pts_slice) / len(pts_slice)
+            avg_w = sum(p[2] for p in pts_slice) / len(pts_slice)
+            smoothed.append((round(avg_y, 2), round(avg_x, 2), round(avg_w, 2)))
+        return smoothed
+
     def resolve_and_order_strokes(self, strokes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Sorts strokes into a probable chronological sequence (ductus order):
-        Strokes that start higher and more to the left precede subsequent strokes.
+        Chains adjacent collinear segments, orients, smooths, and sorts strokes into a chronological sequence.
         """
-        oriented = [self.orient_stroke(s) for s in strokes]
+        chained = self.chain_collinear_strokes(strokes)
+        oriented = [self.orient_stroke(s) for s in chained]
+
+        for s in oriented:
+            s["points"] = self.smooth_stroke_points(s["points"])
 
         # Chronological sort: Primary key = min_x / start_x, secondary = start_y
         def sort_key(s):
             start = s["points"][0]
-            # Scribes write left-to-right across word, top-to-bottom within glyph
             return (start[1], start[0])
 
         ordered = sorted(oriented, key=sort_key)

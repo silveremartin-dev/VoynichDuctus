@@ -30,7 +30,10 @@ def test_skeleton_and_graph():
 
     resolver = JunctionResolver()
     ordered = resolver.resolve_and_order_strokes(strokes)
-    assert len(ordered) == len(strokes)
+    assert len(ordered) >= 1
+    assert len(ordered) <= len(strokes)
+    # A "T" glyph is composed of 2 continuous strokes (horizontal crossbar + vertical stem)
+    assert len(ordered) == 2
 
 
 def test_vector_export(tmp_path: Path):

@@ -728,10 +728,10 @@ def generate_explorer_html(
                 <h3>
                     <span>Interactive Folio Canvas</span>
                     <span id="canvas-status" style="font-size:0.72rem; color:var(--text-muted); display:flex; gap:8px;">
-                        <span><strong style="color:#a855f7;">🟣 Ligne</strong></span>
-                        <span><strong style="color:#10b981;">🟢 Mot</strong></span>
-                        <span><strong style="color:#38bdf8;">🔵 Glyphe</strong></span>
-                        <span><strong style="color:#00e5ff;">⚡ Actif</strong></span>
+                        <span><strong style="color:#a855f7;">🟣 Lines</strong></span>
+                        <span><strong style="color:#10b981;">🟢 Words</strong></span>
+                        <span><strong style="color:#38bdf8;">🔵 Glyphs</strong></span>
+                        <span><strong style="color:#00e5ff;">⚡ Active</strong></span>
                     </span>
                 </h3>
                 <div class="canvas-wrapper" id="canvas-wrapper">
@@ -745,9 +745,9 @@ def generate_explorer_html(
 
                     <!-- Zoom Controls & Layer Toggles Toolbar -->
                     <div class="canvas-toolbar">
-                        <button id="btn-toggle-lines" class="btn-tool" onclick="toggleLayer('lines')" style="width:auto; padding:0 8px; font-size:0.72rem; background:#581c87; border-color:#a855f7;" title="Afficher/Masquer Lignes (L)">🟣 Lignes</button>
-                        <button id="btn-toggle-words" class="btn-tool" onclick="toggleLayer('words')" style="width:auto; padding:0 8px; font-size:0.72rem; background:#064e3b; border-color:#10b981;" title="Afficher/Masquer Mots (W)">🟢 Mots</button>
-                        <button id="btn-toggle-glyphs" class="btn-tool" onclick="toggleLayer('glyphs')" style="width:auto; padding:0 8px; font-size:0.72rem; background:#075985; border-color:#38bdf8;" title="Afficher/Masquer Glyphes (G)">🔵 Glyphes</button>
+                        <button id="btn-toggle-lines" class="btn-tool" onclick="toggleLayer('lines')" style="width:auto; padding:0 8px; font-size:0.72rem; background:#581c87; border-color:#a855f7;" title="Toggle Lines Layer (L)">🟣 Lines</button>
+                        <button id="btn-toggle-words" class="btn-tool" onclick="toggleLayer('words')" style="width:auto; padding:0 8px; font-size:0.72rem; background:#064e3b; border-color:#10b981;" title="Toggle Words Layer (W)">🟢 Words</button>
+                        <button id="btn-toggle-glyphs" class="btn-tool" onclick="toggleLayer('glyphs')" style="width:auto; padding:0 8px; font-size:0.72rem; background:#075985; border-color:#38bdf8;" title="Toggle Glyphs Layer (G)">🔵 Glyphs</button>
                         <div style="width:1px; height:18px; background:var(--border); margin:0 2px;"></div>
                         <select id="canvas-filter-select" class="select-filter" onchange="setCanvasFilter(this.value)" style="font-size:0.72rem; padding:2px 6px;">
                             <option value="crisp">✨ Ink Boost</option>
