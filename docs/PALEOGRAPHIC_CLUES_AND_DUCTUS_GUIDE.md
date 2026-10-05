@@ -139,12 +139,31 @@ To prevent clustering open crescents (`C`) with closed loops (`O`):
 
 ---
 
-### H. Deep Learning & Vision Transformers (ViT / InkSight / DINOv2)
-1. **Offline-to-Online Handwriting Transformers (InkSight / ViT)**:
-   - Modern vision-language transformers (such as Google's *InkSight* architecture) learn deep spatial representations of pen dynamics directly from static 2D bitmap patches.
-   - The codebase provides the `InkSightAdapter` interface (`voynich_ductus.vectorizer.inksight_adapter`) enabling deep transformer checkpoints to replace or supplement geometric medial axis skeletonization when GPU backends are available.
-2. **Self-Supervised Feature Embeddings (DINOv2 / CLIP)**:
-   - Self-supervised Vision Transformers (e.g., Meta's DINOv2) trained without human labels capture rich paleographic stroke textures, ligature joints, and pen pressure dynamics, serving as deep 768-D feature extractors for unsupervised clustering.
+### I. Native Calligraphic Ridge Tracker & Pen-Nib Physics
+1. **Beveled Quill Nib Mechanics**:
+   - A physical medieval quill cut with a fixed bevel angle $\theta_{\text{nib}} \approx 35^\circ - 45^\circ$ naturally produces *pleins et déliés* governed by:
+     $$w(\theta) = W_{\text{nib}} \cdot |\sin(\theta - \theta_{\text{nib}})| + w_0$$
+   - Strokes perpendicular to the bevel produce maximum thickness $W_{\text{nib}}$, while strokes parallel to the bevel yield hairline strokes $w_0$.
+2. **Euclidean Distance Ridge Propagation**:
+   - Instead of generic graph skeletonization that branches arbitrarily at intersections, `CalligraphicVectorizer` propagates continuous centerline trajectories along the ridges of the Euclidean distance map $D(y, x)$, prioritizing forward momentum and preserving nested loops as single continuous strokes.
+
+---
+
+### J. Scribal Kinematic Flow Net & Contrastive Triplet Embedding Net
+1. **Directional Flow U-Net (`ScribalKinematicFlowNet`)**:
+   - A lightweight neural architecture predicting the continuous unit vector field $\vec{u}(x, y) = (\cos \theta, \sin \theta)$, along with spatial probability maps for pen touchdowns $P(t=0)$ and pen-lifts $P(t=1)$.
+2. **Triplet Contrastive Representation (`ScribalContrastiveEmbeddingNet`)**:
+   - Deep 128-D embedding network trained with Triplet Margin Loss:
+     $$\mathcal{L}(a, p, n) = \max(0, \|f(a) - f(p)\|_2^2 - \|f(a) - f(n)\|_2^2 + \alpha)$$
+   - Enforces invariance to parchment discoloration, ink fading, and slant variations.
+
+---
+
+### K. Multimodal Paleographic Supervision (Gemini 2.5 Flash)
+1. **Automated Expert Paleography Validation (`GeminiPaleographyAdapter`)**:
+   - Visual inspection of ambiguous ligatures and cursive joints directly through multimodal vision queries.
+   - Comparative scribal hand authentication (analyzing slant consistency and nib angle).
+   - Zero-shot cursive word decomposition based on Minimum Description Length (MDL) principles.
 
 ---
 
@@ -160,4 +179,5 @@ To prevent clustering open crescents (`C`) with closed loops (`O`):
 | **Violet Dotted Box** | `rgba(168, 85, 247, 0.65)` | Detected text line baseline span |
 | **Green Box** | `rgba(16, 185, 129, 0.45)` | Lexical parent word bounding box |
 | **Cyan Solid Box** | `rgba(56, 189, 248, 0.50)` | Isolated, verified single glyph bounding box |
+
 
