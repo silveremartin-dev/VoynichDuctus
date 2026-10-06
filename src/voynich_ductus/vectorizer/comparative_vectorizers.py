@@ -1,9 +1,11 @@
 """
-Comparative Vectorization and Embedding Framework.
-Unifies, benchmarks, and contrasts 3 foundational paleographic approaches:
-1. Geometric Medial Axis + Euler-Bernoulli Splines (Pure Algorithmic Baseline)
-2. DINOv2 Self-Supervised Vision Transformer Embeddings (Deep Visual Token Representation)
-3. Google InkSight Offline-to-Online Handwriting Transformer (Deep Kinematic Trajectory Recovery)
+Comparative Vectorization and Embedding Framework (5-Way Comparative Ductus Suite).
+Unifies, benchmarks, and contrasts 5 foundational paleographic approaches:
+1. Native Calligraphic Ridge Tracker (Formule Maison: Biseau 40°, crêtes EDT, boucle continue)
+2. Euler-Bernoulli Topological Skeleton (Squelette 1D + graphe NetworkX + énergie de courbure)
+3. Scribal Kinematic Flow Net (U-Net de champ vectoriel tangent u(x,y), amorces P(t=0), levées P(t=1))
+4. Meta DINOv2 Self-Supervised Vision Transformer (Tokens 768-D ViT invariants au parchemin)
+5. Google InkSight Offline-to-Online Handwriting Transformer (Déréférencement autorégressif x,y,t,p)
 """
 
 import time
@@ -11,16 +13,47 @@ from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
 from PIL import Image
 
+from voynich_ductus.vectorizer.calligraphic_tracker import CalligraphicVectorizer
 from voynich_ductus.vectorizer.skeleton import Skeletonizer
 from voynich_ductus.vectorizer.stroke_graph import StrokeGraphExtractor
 from voynich_ductus.vectorizer.junction_resolver import JunctionResolver
 from voynich_ductus.vectorizer.export_format import VectorExporter
 from voynich_ductus.vectorizer.inksight_adapter import InkSightAdapter
+from voynich_ductus.embeddings.scribal_neural_net import ScribalKinematicFlowNet
+
+
+class CalligraphicVectorEngine:
+    """
+    Method 1: Native Calligraphic Ridge Tracker (Formule Maison).
+    Simulates right-handed 15th-century quill pen physics (40° nib bevel),
+    Euclidean distance transform gradient ridges, and unbroken single-stroke loop preservation.
+    """
+
+    def __init__(self, nib_angle_deg: float = 40.0):
+        self.tracker = CalligraphicVectorizer(nib_angle_deg=nib_angle_deg)
+
+    def process(self, binary_mask: np.ndarray) -> Dict[str, Any]:
+        t0 = time.perf_counter()
+        strokes = self.tracker.extract_calligraphic_ductus(binary_mask)
+        h, w = binary_mask.shape
+        svg_content = VectorExporter.to_svg(strokes, width=w, height=h, output_path=None)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+        return {
+            "method": "Calligraphic Ridge Tracker (Formule Maison)",
+            "method_code": "calligraphic",
+            "stroke_count": len(strokes),
+            "strokes": strokes,
+            "svg_content": svg_content,
+            "latency_ms": round(elapsed_ms, 2),
+            "nib_angle_deg": 40.0,
+            "physics_model": "Beveled Quill (w(θ) = W·|sin(θ-θ₀)| + w₀)"
+        }
 
 
 class GeometricVectorEngine:
     """
-    Method 1: Pure Geometric Medial Axis + Euler-Bernoulli Tangent Continuity + Cubic Bézier Splines.
+    Method 2: Pure Geometric Medial Axis + Euler-Bernoulli Tangent Continuity + Cubic Bézier Splines.
     Fast, deterministic, mathematically transparent.
     """
 
@@ -45,7 +78,7 @@ class GeometricVectorEngine:
         continuity_score = self._compute_continuity(ordered_strokes)
 
         return {
-            "method": "Geometric (Medial Axis + Bézier)",
+            "method": "Euler-Bernoulli Topological Skeleton",
             "method_code": "geometric",
             "stroke_count": len(ordered_strokes),
             "strokes": ordered_strokes,
@@ -85,13 +118,41 @@ class GeometricVectorEngine:
             return 0.0
         lengths = [s.get("length", len(s.get("points", []))) for s in strokes]
         mean_l = float(np.mean(lengths))
-        # Ideal glyph has 1-3 strokes of meaningful length (>= 15px)
         return min(1.0, mean_l / 25.0)
+
+
+class ScribalFlowVectorEngine:
+    """
+    Method 3: Scribal Kinematic Flow Net (U-Net Vector Field).
+    Predicts local tangent direction u(x, y), touchdown probability P(t=0), and pen-lift probability P(t=1).
+    """
+
+    def __init__(self):
+        self.flow_net = ScribalKinematicFlowNet()
+
+    def process(self, binary_mask: np.ndarray, raw_patch: Optional[np.ndarray] = None) -> Dict[str, Any]:
+        t0 = time.perf_counter()
+        patch_to_use = raw_patch if raw_patch is not None else (binary_mask.astype(np.float32))
+        res = self.flow_net.predict(patch_to_use)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+        td = res.get("touchdown_prob", res.get("touchdown", np.zeros((1, 1))))
+        pl = res.get("penlift_prob", res.get("penlift", np.zeros((1, 1))))
+        flow = res.get("flow_field", res.get("flow", np.zeros((1, 1, 2))))
+
+        return {
+            "method": "Scribal Kinematic Flow Net (U-Net)",
+            "method_code": "scribal_flow",
+            "latency_ms": round(elapsed_ms, 2),
+            "touchdown_count": int(np.sum(td > 0.5)),
+            "penlift_count": int(np.sum(pl > 0.5)),
+            "mean_flow_norm": round(float(np.mean(np.linalg.norm(flow, axis=-1))), 3)
+        }
 
 
 class DINOv2EmbeddingEngine:
     """
-    Method 2: Self-Supervised Vision Transformer (Meta DINOv2 / ViT Patch Tokens).
+    Method 4: Self-Supervised Vision Transformer (Meta DINOv2 / ViT Patch Tokens).
     Extracts deep 768-D geometric and textural stroke representations invariant to parchment noise.
     """
 
@@ -104,7 +165,6 @@ class DINOv2EmbeddingEngine:
         if self._model is None:
             try:
                 import torch
-                # In offline/torch environment, load DINOv2 or fallback to deep feature projector
                 self._model = torch.hub.load("facebookresearch/dinov2", self.model_name, pretrained=True)
                 self._model.eval()
             except Exception:
@@ -136,7 +196,6 @@ class DINOv2EmbeddingEngine:
         # High-precision 64-D multi-scale spatial frequency & gradient orientation fallback
         h, w = patch.shape[:2]
         gray = np.mean(patch, axis=2) if patch.ndim == 3 else patch.astype(float)
-        # 8x8 spatial grid
         grid_h, grid_w = max(1, h // 8), max(1, w // 8)
         feats = []
         for r in range(8):
@@ -165,7 +224,7 @@ class DINOv2EmbeddingEngine:
 
 class InkSightVectorEngine:
     """
-    Method 3: Offline-to-Online Handwriting Transformer (Google InkSight).
+    Method 5: Offline-to-Online Handwriting Transformer (Google InkSight).
     End-to-end autoregressive trajectory prediction (x, y, t, lift) from 2D pixel patches.
     """
 
@@ -193,26 +252,36 @@ class InkSightVectorEngine:
 
 class ComparativeVectorizerBenchmark:
     """
-    Unified comparative benchmark evaluating all 3 vision/vectorization paradigms
-    on the exact same historical glyph patch.
+    Unified 5-Way Comparative Benchmark Suite evaluating all 5 paleographic vectorization
+    and vision paradigms on the exact same scribal glyph crop.
     """
 
     def __init__(self):
+        self.calligraphic_engine = CalligraphicVectorEngine()
         self.geometric_engine = GeometricVectorEngine()
+        self.scribal_flow_engine = ScribalFlowVectorEngine()
         self.dinov2_engine = DINOv2EmbeddingEngine()
         self.inksight_engine = InkSightVectorEngine()
 
     def evaluate_glyph(self, binary_mask: np.ndarray, raw_patch: Optional[np.ndarray] = None) -> Dict[str, Any]:
+        res_cal = self.calligraphic_engine.process(binary_mask)
         res_geom = self.geometric_engine.process(binary_mask)
+        res_flow = self.scribal_flow_engine.process(binary_mask, raw_patch=raw_patch)
         res_dino = self.dinov2_engine.process(binary_mask, raw_patch=raw_patch)
         res_inksight = self.inksight_engine.process(binary_mask, raw_patch=raw_patch)
 
         return {
+            "calligraphic": res_cal,
             "geometric": res_geom,
+            "scribal_flow": res_flow,
             "dinov2": res_dino,
             "inksight": res_inksight,
             "summary": {
-                "fastest_method": "geometric" if res_geom["latency_ms"] <= res_inksight["latency_ms"] else "inksight",
+                "fastest_method": min(
+                    [res_cal, res_geom, res_flow, res_dino, res_inksight],
+                    key=lambda x: x["latency_ms"]
+                )["method_code"],
+                "recommended_for_calligraphic_ductus": "calligraphic",
                 "recommended_for_alphabet_clustering": "dinov2",
                 "recommended_for_kinematic_ordering": "inksight",
                 "recommended_for_deterministic_baseline": "geometric"

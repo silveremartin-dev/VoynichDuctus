@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Copyright (C) 2014 The Voynichese Project
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+         http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+-->
+<folio name="f55r" wordCount="124" width="1144" height="1500">
+  <word index="0" x="92" y="157" width="87" height="36">podaiin</word>
+  <word index="1" x="197" y="151" width="85" height="47">shekchy</word>
+  <word index="2" x="295" y="148" width="65" height="44">qofair</word>
+  <word index="3" x="379" y="153" width="51" height="34">okar</word>
+  <word index="4" x="436" y="156" width="35" height="42">yk</word>
+  <word index="5" x="483" y="158" width="77" height="36">chcpaiin</word>
+  <word index="6" x="581" y="172" width="91" height="36">qokchdy</word>
+  <word index="7" x="680" y="181" width="26" height="22">or</word>
+  <word index="8" x="713" y="185" width="56" height="24">arod</word>
+  <word index="9" x="103" y="191" width="55" height="29">okair</word>
+  <word index="10" x="169" y="192" width="26" height="21">or</word>
+  <word index="11" x="211" y="197" width="43" height="15">aiin</word>
+  <word index="12" x="267" y="192" width="65" height="21">chody</word>
+  <word index="13" x="349" y="184" width="67" height="29">ykair</word>
+  <word index="14" x="417" y="198" width="22" height="33">y</word>
+  <word index="15" x="455" y="190" width="70" height="31">qokar</word>
+  <word index="16" x="533" y="195" width="48" height="29">okar</word>
+  <word index="17" x="600" y="212" width="29" height="17">ol</word>
+  <word index="18" x="642" y="208" width="62" height="26">ykar</word>
+  <word index="19" x="713" y="216" width="29" height="22">or</word>
+  <word index="20" x="746" y="221" width="26" height="27">al</word>
+  <word index="21" x="103" y="218" width="64" height="30">ykaiir</word>
+  <word index="22" x="176" y="220" width="50" height="21">chol</word>
+  <word index="23" x="232" y="212" width="53" height="28">chky</word>
+  <word index="24" x="299" y="213" width="58" height="25">okar</word>
+  <word index="25" x="361" y="212" width="50" height="29">chky</word>
+  <word index="26" x="420" y="222" width="51" height="32">chdy</word>
+  <word index="27" x="484" y="219" width="68" height="28">qokar</word>
+  <word index="28" x="561" y="222" width="69" height="32">okaiin</word>
+  <word index="29" x="643" y="234" width="76" height="29">chckhy</word>
+  <word index="30" x="729" y="239" width="65" height="19">saiin</word>
+  <word index="31" x="104" y="247" width="50" height="24">daiin</word>
+  <word index="32" x="183" y="241" width="17" height="22">or</word>
+  <word index="33" x="213" y="240" width="50" height="25">orol</word>
+  <word index="34" x="278" y="240" width="50" height="23">chas</word>
+  <word index="35" x="339" y="240" width="28" height="26">or</word>
+  <word index="36" x="380" y="241" width="60" height="27">kaiin</word>
+  <word index="37" x="459" y="244" width="58" height="28">okchd</word>
+  <word index="38" x="533" y="252" width="50" height="28">ykar</word>
+  <word index="39" x="597" y="263" width="70" height="18">odaiin</word>
+  <word index="40" x="679" y="265" width="108" height="23">chdolaiin</word>
+  <word index="41" x="103" y="283" width="11" height="17">y</word>
+  <word index="42" x="119" y="272" width="24" height="22">or</word>
+  <word index="43" x="146" y="274" width="42" height="19">aiin</word>
+  <word index="44" x="200" y="265" width="59" height="29">okal</word>
+  <word index="45" x="272" y="279" width="51" height="18">chol</word>
+  <word index="46" x="331" y="266" width="63" height="29">kchoy</word>
+  <word index="47" x="398" y="265" width="100" height="35">pchtchdy</word>
+  <word index="48" x="509" y="280" width="86" height="26">oekaiin</word>
+  <word index="49" x="611" y="280" width="80" height="32">okasor</word>
+  <word index="50" x="700" y="289" width="75" height="31">olkam</word>
+  <word index="51" x="98" y="298" width="54" height="27">tcho</word>
+  <word index="52" x="157" y="303" width="57" height="23">daiin</word>
+  <word index="53" x="232" y="299" width="36" height="26">sho</word>
+  <word index="54" x="280" y="297" width="56" height="39">kedy</word>
+  <word index="55" x="346" y="295" width="50" height="37">kedy</word>
+  <word index="56" x="414" y="296" width="49" height="31">okol</word>
+  <word index="57" x="474" y="309" width="45" height="22">chdy</word>
+  <word index="58" x="96" y="323" width="87" height="32">tchedor</word>
+  <word index="59" x="191" y="328" width="114" height="34">cheolkedy</word>
+  <word index="60" x="317" y="344" width="63" height="23">chody</word>
+  <word index="61" x="391" y="329" width="69" height="40">kshdy</word>
+  <word index="62" x="474" y="331" width="94" height="42">qotchdy</word>
+  <word index="63" x="581" y="341" width="92" height="32">qokchdy</word>
+  <word index="64" x="680" y="341" width="120" height="33">olkardam</word>
+  <word index="65" x="103" y="356" width="73" height="35">dchykey</word>
+  <word index="66" x="191" y="362" width="51" height="23">char</word>
+  <word index="67" x="253" y="364" width="50" height="22">chek</word>
+  <word index="68" x="306" y="367" width="51" height="22">xar</word>
+  <word index="69" x="372" y="369" width="62" height="22">odar</word>
+  <word index="70" x="455" y="377" width="112" height="23">xaloeees</word>
+  <word index="71" x="577" y="372" width="88" height="33">cpheody</word>
+  <word index="72" x="675" y="374" width="76" height="27">qokeeo</word>
+  <word index="73" x="754" y="376" width="28" height="29">dy</word>
+  <word index="74" x="104" y="394" width="46" height="20">dain</word>
+  <word index="75" x="166" y="386" width="59" height="22">cheky</word>
+  <word index="76" x="243" y="387" width="46" height="24">das</word>
+  <word index="77" x="300" y="390" width="69" height="24">chckhy</word>
+  <word index="78" x="380" y="400" width="42" height="20">dal</word>
+  <word index="79" x="434" y="395" width="55" height="34">qoko</word>
+  <word index="80" x="494" y="402" width="77" height="32">lkeedy</word>
+  <word index="81" x="581" y="410" width="44" height="22">dar</word>
+  <word index="82" x="630" y="405" width="54" height="25">kaiin</word>
+  <word index="83" x="696" y="411" width="28" height="25">dy</word>
+  <word index="84" x="729" y="401" width="47" height="35">kam</word>
+  <word index="85" x="106" y="414" width="44" height="26">dair</word>
+  <word index="86" x="156" y="408" width="52" height="32">okal</word>
+  <word index="87" x="225" y="411" width="81" height="27">qokar</word>
+  <word index="88" x="318" y="418" width="29" height="20">or</word>
+  <word index="89" x="359" y="420" width="57" height="21">orai</word>
+  <word index="90" x="430" y="434" width="16" height="12">o</word>
+  <word index="91" x="453" y="429" width="29" height="18">as</word>
+  <word index="92" x="486" y="434" width="76" height="19">odaiin</word>
+  <word index="93" x="579" y="432" width="61" height="27">okeey</word>
+  <word index="94" x="657" y="436" width="42" height="21">dar</word>
+  <word index="95" x="701" y="438" width="39" height="17">chd</word>
+  <word index="96" x="745" y="437" width="27" height="26">ol</word>
+  <word index="97" x="102" y="440" width="62" height="34">lchor</word>
+  <word index="98" x="174" y="445" width="48" height="18">chey</word>
+  <word index="99" x="239" y="438" width="64" height="32">keedy</word>
+  <word index="100" x="321" y="444" width="29" height="28">dy</word>
+  <word index="101" x="360" y="442" width="73" height="33">qokal</word>
+  <word index="102" x="439" y="447" width="58" height="27">okad</word>
+  <word index="103" x="505" y="457" width="39" height="24">dal</word>
+  <word index="104" x="545" y="458" width="49" height="30">shdy</word>
+  <word index="105" x="610" y="459" width="59" height="23">otal</word>
+  <word index="106" x="679" y="456" width="105" height="26">otaldiin</word>
+  <word index="107" x="108" y="477" width="49" height="18">oain</word>
+  <word index="108" x="168" y="463" width="50" height="43">ckhy</word>
+  <word index="109" x="228" y="472" width="24" height="21">dl</word>
+  <word index="110" x="272" y="471" width="58" height="18">oiiin</word>
+  <word index="111" x="337" y="473" width="63" height="19">daiin</word>
+  <word index="112" x="413" y="472" width="72" height="25">okaiin</word>
+  <word index="113" x="500" y="488" width="74" height="18">chelal</word>
+  <word index="114" x="588" y="482" width="85" height="32">qokaiin</word>
+  <word index="115" x="690" y="481" width="70" height="23">okain</word>
+  <word index="116" x="768" y="482" width="20" height="22">r</word>
+  <word index="117" x="107" y="503" width="71" height="26">lchdal</word>
+  <word index="118" x="192" y="493" width="70" height="36">ockhy</word>
+  <word index="119" x="270" y="501" width="59" height="18">daiin</word>
+  <word index="120" x="342" y="494" width="50" height="32">otol</word>
+  <word index="121" x="402" y="497" width="56" height="27">otar</word>
+  <word index="122" x="470" y="500" width="57" height="25">shar</word>
+  <word index="123" x="529" y="511" width="39" height="16">ain</word>
+</folio>

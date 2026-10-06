@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Copyright (C) 2014 The Voynichese Project
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+         http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+-->
+<folio name="f36r" wordCount="62" width="1158" height="1500">
+  <word index="0" x="97" y="141" width="109" height="63">pchafdan</word>
+  <word index="1" x="229" y="177" width="85" height="29">qorain</word>
+  <word index="2" x="327" y="156" width="85" height="45">chcfhal</word>
+  <word index="3" x="415" y="174" width="74" height="24">soiin</word>
+  <word index="4" x="497" y="143" width="79" height="56">cphor</word>
+  <word index="5" x="584" y="169" width="75" height="34">shaiin</word>
+  <word index="6" x="672" y="168" width="60" height="44">cthy</word>
+  <word index="7" x="739" y="165" width="50" height="35">dair</word>
+  <word index="8" x="109" y="206" width="49" height="30">oral</word>
+  <word index="9" x="170" y="208" width="47" height="27">shor</word>
+  <word index="10" x="237" y="206" width="93" height="40">ytaiin</word>
+  <word index="11" x="342" y="201" width="105" height="40">qotaiin</word>
+  <word index="12" x="459" y="213" width="87" height="29">qooldy</word>
+  <word index="13" x="566" y="203" width="62" height="45">chty</word>
+  <word index="14" x="639" y="220" width="53" height="27">chol</word>
+  <word index="15" x="699" y="215" width="32" height="23">dy</word>
+  <word index="16" x="736" y="205" width="54" height="30">tor</word>
+  <word index="17" x="104" y="236" width="80" height="55">qotchy</word>
+  <word index="18" x="187" y="234" width="67" height="54">tchy</word>
+  <word index="19" x="270" y="245" width="66" height="21">daiin</word>
+  <word index="20" x="349" y="241" width="73" height="23">gaiin</word>
+  <word index="21" x="436" y="242" width="98" height="33">dolsain</word>
+  <word index="22" x="81" y="295" width="112" height="50">podaiir</word>
+  <word index="23" x="199" y="290" width="57" height="55">cphy</word>
+  <word index="24" x="271" y="292" width="109" height="49">qoypchol</word>
+  <word index="25" x="385" y="307" width="42" height="33">rom</word>
+  <word index="26" x="469" y="303" width="27" height="41">cy</word>
+  <word index="27" x="541" y="317" width="39" height="23">chy</word>
+  <word index="28" x="591" y="306" width="54" height="34">dchy</word>
+  <word index="29" x="644" y="284" width="78" height="46">fchom</word>
+  <word index="30" x="727" y="287" width="45" height="33">dar</word>
+  <word index="31" x="114" y="344" width="54" height="23">daiin</word>
+  <word index="32" x="175" y="345" width="47" height="24">qor</word>
+  <word index="33" x="226" y="353" width="48" height="16">chol</word>
+  <word index="34" x="285" y="340" width="85" height="32">ctholy</word>
+  <word index="35" x="376" y="347" width="18" height="23">s</word>
+  <word index="36" x="438" y="361" width="12" height="12">o</word>
+  <word index="37" x="472" y="346" width="16" height="23">r</word>
+  <word index="38" x="506" y="356" width="42" height="25">chy</word>
+  <word index="39" x="555" y="340" width="34" height="37">sy</word>
+  <word index="40" x="632" y="330" width="140" height="34">chytaroiin</word>
+  <word index="41" x="115" y="370" width="68" height="31">okaiin</word>
+  <word index="42" x="196" y="367" width="76" height="32">cthor</word>
+  <word index="43" x="283" y="372" width="93" height="33">ykaiiin</word>
+  <word index="44" x="376" y="376" width="20" height="25">s</word>
+  <word index="45" x="492" y="380" width="55" height="23">dain</word>
+  <word index="46" x="553" y="378" width="33" height="24">an</word>
+  <word index="47" x="732" y="363" width="49" height="23">dan</word>
+  <word index="48" x="112" y="401" width="71" height="34">qotol</word>
+  <word index="49" x="193" y="401" width="64" height="32">cthol</word>
+  <word index="50" x="272" y="405" width="61" height="35">okol</word>
+  <word index="51" x="340" y="414" width="26" height="32">dy</word>
+  <word index="52" x="378" y="401" width="69" height="30">okchy</word>
+  <word index="53" x="490" y="404" width="100" height="33">ytorory</word>
+  <word index="54" x="723" y="393" width="51" height="35">sold</word>
+  <word index="55" x="121" y="435" width="73" height="39">ytchor</word>
+  <word index="56" x="202" y="433" width="64" height="39">cthol</word>
+  <word index="57" x="272" y="440" width="72" height="21">chaiin</word>
+  <word index="58" x="352" y="442" width="30" height="30">yd</word>
+  <word index="59" x="113" y="474" width="110" height="46">ytodaly</word>
+  <word index="60" x="232" y="472" width="66" height="23">daiin</word>
+  <word index="61" x="307" y="464" width="79" height="30">otaro</word>
+</folio>

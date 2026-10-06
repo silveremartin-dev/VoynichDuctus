@@ -36,7 +36,9 @@ env.bak/
 venv.bak/
 
 # Data and large downloads
-data/
+data/*
+!data/annotations/
+!data/annotations/**
 scans/
 scan/
 downloads/
@@ -64,3 +66,8 @@ htmlcov/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Temporary scratch directories
+tmp/
+.tmp/
+scratch/

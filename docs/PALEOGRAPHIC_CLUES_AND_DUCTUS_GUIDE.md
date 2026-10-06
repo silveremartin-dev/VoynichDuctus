@@ -167,6 +167,19 @@ To prevent clustering open crescents (`C`) with closed loops (`O`):
 
 ---
 
+### L. Voynichese Rosetta Stone Ground Truth Integration (`VoynicheseRosettaLoader`)
+1. **Full-Corpus Ground Truth Integration**:
+   - Ingestion of 225 curated XML annotation folios covering the complete Beinecke MS 408 corpus ($>35,000$ segmented word bounding boxes with verified EVA transliterations).
+2. **High-Resolution Affine Coordinate Projection**:
+   - Maps normalized low-resolution annotation bounding boxes $(x_{\text{xml}}, y_{\text{xml}}, w_{\text{xml}}, h_{\text{xml}})$ onto native high-definition Yale Beinecke scans ($2500 \times 3168\text{ px}$) using affine registration:
+     $$X_{\text{scan}} = t_x + x_{\text{xml}} \cdot s_x, \quad Y_{\text{scan}} = t_y + y_{\text{xml}} \cdot s_y$$
+3. **Atomic EVA Glyph Tokenization**:
+   - Greedy longest-match tokenization decomposing complex compound words and gallows ligatures (`cth`, `ckh`, `cfh`, `cph`, `ch`, `sh`, `iii`, `ee`, `ii`, `aiin`) into atomic ductus training targets.
+4. **Supervised Paleographic Benchmarking**:
+   - Enables direct quantitative validation of unsupervised alphabet induction clusters against standardized paleographical ground truth without inducing transliteration hallucinations.
+
+---
+
 ## 3. Summary of Visual Encoding & Ductus Kinematics Legend
 
 | Visual Element | Representation | Kinematic Meaning |

@@ -19,7 +19,8 @@
 - [7. Benchmark Results & Findings](#7-benchmark-results--findings)
 - [8. Project Structure](#8-project-structure)
 - [9. Contributing & Scientific Ethics](#9-contributing--scientific-ethics)
-- [10. License](#10-license)
+- [10. Acknowledgments & Data Sources](#10-acknowledgments--data-sources)
+- [11. License](#11-license)
 
 ---
 
@@ -207,6 +208,18 @@ We welcome contributions from paleographers, computer vision engineers, and comp
 
 ---
 
-## 10. License
+## 10. Acknowledgments & Data Sources
+
+This project gratefully acknowledges and builds upon open paleographical datasets and reference material:
+- **[The Voynichese Project](https://github.com/voynichese/voynichese)**: For the comprehensive 225-folio segmentation dataset and curated EVA word-level ground truth annotations (Copyright (C) 2014 The Voynichese Project, licensed under Apache-2.0).
+- **[Yale Beinecke Rare Book & Manuscript Library](https://beinecke.library.yale.edu/)**: For providing open high-resolution digital scans and IIIF manifests of the Voynich Manuscript (Beinecke MS 408).
+- **Torsten Timm**: For foundational work on scribal self-citation algorithms and paleographical stroke mechanics.
+- **Gordon Rugg**: For research on combinatorial Cardan grilles and mechanical text synthesis.
+- **Landini, Stolfi, Currier, and Takahashi**: For standard transliteration censuses and comparative statistics.
+
+---
+
+## 11. License
 
 This project is licensed under the [MIT License](LICENSE).
+The Voynichese annotation dataset bundled under `data/annotations/voynichese/` is licensed under the Apache License, Version 2.0.

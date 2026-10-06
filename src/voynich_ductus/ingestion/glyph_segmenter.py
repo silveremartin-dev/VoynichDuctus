@@ -49,16 +49,55 @@ class GlyphSegmenter:
         self.graph_extractor = StrokeGraphExtractor()
         self.resolver = JunctionResolver(right_handed_prior=True)
 
-    def extract_clean_page_mask(self, image: Image.Image, subfolder: str = "voynich") -> Tuple[np.ndarray, np.ndarray]:
+    def detect_parchment_bounds(self, rgb_arr: np.ndarray) -> Tuple[int, int, int, int]:
+        """
+        Detects genuine parchment / paper boundary inside the scan, removing
+        outer black scanner beds, binding folds, and margin rulers.
+        """
+        H, W, _ = rgb_arr.shape
+        rgb_float = rgb_arr.astype(np.float32) / 255.0
+        gray = np.mean(rgb_float, axis=2)
+        
+        # Parchment is distinctly brighter than black scanner bed (gray > 0.32 / ~82/255)
+        # and has warm parchment color tone (R >= B)
+        r = rgb_float[:, :, 0]
+        b = rgb_float[:, :, 2]
+        is_parchment = (gray > 0.32) & (r >= b - 0.05) & (gray < 0.98)
+
+        # Morphological opening to remove small dust outside
+        from scipy.ndimage import binary_opening, binary_closing
+        is_parchment = binary_opening(is_parchment, iterations=4)
+        is_parchment = binary_closing(is_parchment, iterations=4)
+
+        labeled, num_features = label(is_parchment)
+        if num_features == 0:
+            return (int(H * 0.02), int(W * 0.02), int(H * 0.98), int(W * 0.98))
+
+        props = regionprops(labeled)
+        largest = max(props, key=lambda p: p.area)
+        py0, px0, py1, px1 = largest.bbox
+
+        # Add 1.5% inner margin buffer to avoid frayed edges/tears
+        buf_y = max(8, int((py1 - py0) * 0.015))
+        buf_x = max(8, int((px1 - px0) * 0.015))
+        return (py0 + buf_y, px0 + buf_x, py1 - buf_y, px1 - buf_x)
+
+    def extract_clean_page_mask(self, image: Image.Image, subfolder: str = "voynich") -> Tuple[np.ndarray, np.ndarray, bool]:
         """
         Extracts clean text ink mask, strictly separating grayscale text ink
         from colored illustrations (green/ochre/blue/red/yellow paints) and large drawings.
+        Detects if page has vertical text orientation and returns (clean_mask, rgb_arr, was_rotated).
         """
         rgb_arr = np.array(image.convert("RGB"))
         H, W, _ = rgb_arr.shape
         rgb_float = rgb_arr.astype(np.float32) / 255.0
 
-        # Calculate Chroma and Brightness
+        # 1. Detect genuine parchment canvas bounding box (strips outer black background & binding)
+        py0, px0, py1, px1 = self.detect_parchment_bounds(rgb_arr)
+        parchment_mask = np.zeros((H, W), dtype=bool)
+        parchment_mask[py0:py1, px0:px1] = True
+
+        # Calculate Chroma and HSV components
         chroma = np.max(rgb_float, axis=2) - np.min(rgb_float, axis=2)
         gray = np.mean(rgb_float, axis=2)
 
@@ -71,50 +110,28 @@ class GlyphSegmenter:
         from scipy.ndimage import binary_dilation
 
         if subfolder == "voynich":
-            # Voynich / Medieval parchment:
-            # Text ink is dark iron-gall. Illustrations are green foliage, blue water, or vivid red/yellow paint.
-            is_green = (hue >= 0.14) & (hue <= 0.50) & (sat > 0.14) & (val > 0.18)
-            is_blue = (hue >= 0.50) & (hue <= 0.78) & (sat > 0.14) & (val > 0.18)
-            is_red = ((hue >= 0.85) | (hue <= 0.06)) & (sat > 0.20) & (val > 0.20)
-            is_yellow_ochre = (hue >= 0.08) & (hue <= 0.16) & (sat > 0.28) & (val > 0.35)
-            is_illustration_color = is_green | is_blue | is_red | is_yellow_ochre | ((chroma > 0.24) & (val > 0.28))
-            is_illustration_color = binary_dilation(is_illustration_color, iterations=3)
+            # Voynich manuscript: Text ink is strictly achromatic iron-gall (sat < 0.18, chroma < 0.14).
+            # Illustrations contain green chlorophyll, azurite blue, cinnabar red, ochre roots:
+            is_green = (hue >= 0.14) & (hue <= 0.50) & (sat > 0.12) & (val > 0.16)
+            is_blue = (hue >= 0.50) & (hue <= 0.78) & (sat > 0.12) & (val > 0.16)
+            is_red = ((hue >= 0.85) | (hue <= 0.06)) & (sat > 0.16) & (val > 0.18)
+            is_yellow_ochre = (hue >= 0.08) & (hue <= 0.16) & (sat > 0.22) & (val > 0.30)
+            is_illustration_color = is_green | is_blue | is_red | is_yellow_ochre | ((chroma > 0.18) & (val > 0.22))
+            is_illustration_color = binary_dilation(is_illustration_color, iterations=4)
         else:
-            # Codex Seraphinianus / Printed paper:
-            # Text ink is strictly achromatic (low sat < 0.20, dark val < 0.45).
-            # Illustrations are colored pigments with vivid saturation / chroma:
-            is_illustration_color = ((sat > 0.18) & (chroma > 0.09) & (val < 0.92)) | (sat > 0.30) | (chroma > 0.18)
-            is_illustration_color = binary_dilation(is_illustration_color, iterations=2)
+            # Codex Seraphinianus: Text ink is crisp grayscale / black (sat < 0.12, chroma < 0.06).
+            # Illustrations are rich polychrome pencil / watercolor drawings:
+            is_illustration_color = (sat > 0.14) | (chroma > 0.07) | ((val > 0.75) & (sat > 0.08))
+            is_illustration_color = binary_dilation(is_illustration_color, iterations=4)
 
         # 2. Local adaptive Sauvola thresholding for ink
         sauvola_mask = self.binarizer.binarize(image)
         sauvola_mask = self.binarizer.remove_small_artifacts(sauvola_mask, min_size=8)
 
-        # Subtract colored illustration paints
-        ink_mask = sauvola_mask & (~is_illustration_color)
+        # Restrict to genuine parchment and subtract colored illustration paints
+        ink_mask = sauvola_mask & (~is_illustration_color) & parchment_mask
 
-        # 3. Strip page borders & binding margins (Keep right margin wide so letters are NOT cut off)
-        if subfolder == "seraphinianus":
-            margin_y = max(8, int(H * 0.020))
-            margin_x = max(6, int(W * 0.015))
-            inner_mask = np.zeros_like(ink_mask)
-            inner_mask[margin_y:H - margin_y, margin_x:W - margin_x] = True
-        else:
-            margin_y = max(10, int(H * 0.020))
-            margin_x = max(6, int(W * 0.008))  # Only 0.8% margin: preserves all right-margin text!
-            inner_mask = np.zeros_like(ink_mask)
-            inner_mask[margin_y:H - margin_y, margin_x:W - margin_x] = True
-            # Cut off outer 2% corners (tears, corner spots)
-            corner_y = int(H * 0.02)
-            corner_x = int(W * 0.02)
-            inner_mask[:corner_y, :corner_x] = False
-            inner_mask[:corner_y, W - corner_x:] = False
-            inner_mask[H - corner_y:, :corner_x] = False
-            inner_mask[H - corner_y:, W - corner_x:] = False
-
-        ink_mask = ink_mask & inner_mask
-
-        # 4. Remove large drawing connected components (drawings, frames, diagrams)
+        # 3. Remove large drawing connected components (drawings, frames, diagrams)
         labeled, num_features = label(ink_mask)
         props = regionprops(labeled)
 
@@ -128,7 +145,19 @@ class GlyphSegmenter:
             if is_drawing or is_line_smear:
                 clean_text_mask[labeled == p.label] = False
 
-        return clean_text_mask, rgb_arr
+        # 4. Check page orientation: if text runs vertically (column variance > row variance * 1.5)
+        was_rotated = False
+        row_proj = np.sum(clean_text_mask, axis=1)
+        col_proj = np.sum(clean_text_mask, axis=0)
+        var_row = np.var(row_proj)
+        var_col = np.var(col_proj)
+        if var_col > 1.6 * max(1e-5, var_row) and subfolder == "seraphinianus":
+            # Page has vertical columns / sideways text -> rotate 270 degrees to horizontal
+            clean_text_mask = np.rot90(clean_text_mask, k=3)
+            rgb_arr = np.rot90(rgb_arr, k=3)
+            was_rotated = True
+
+        return clean_text_mask, rgb_arr, was_rotated
 
     def assemble_word_into_glyphs(self, w_img: np.ndarray) -> List[Dict[str, Any]]:
         """
@@ -489,18 +518,21 @@ class GlyphSegmenter:
         Processes an entire manuscript page, extracting all lines, words, and individual glyphs.
         Saves full page image for interactive explorer overlay.
         """
-        clean_mask, page_rgb = self.extract_clean_page_mask(image, subfolder=subfolder)
+        clean_mask, page_rgb, was_rotated = self.extract_clean_page_mask(image, subfolder=subfolder)
         lines = self.line_segmenter.segment_lines(clean_mask, auto_isolate=False)
 
         if max_lines:
             lines = lines[:max_lines]
+
+        # Use page_rgb (which has correct orientation) for saving the explorer canvas image
+        page_img_for_explorer = Image.fromarray(page_rgb)
 
         page_img_rel = ""
         if output_dir:
             pages_dir = output_dir / subfolder / "pages"
             pages_dir.mkdir(parents=True, exist_ok=True)
             page_img_path = pages_dir / f"{page_id}.jpg"
-            image.save(page_img_path, quality=88)
+            page_img_for_explorer.save(page_img_path, quality=88)
             page_img_rel = f"{subfolder}/pages/{page_id}.jpg"
 
         all_page_glyphs = []
@@ -528,8 +560,8 @@ class GlyphSegmenter:
         return {
             "page_id": page_id,
             "page_img_rel": page_img_rel,
-            "image_width": image.width,
-            "image_height": image.height,
+            "image_width": page_img_for_explorer.width,
+            "image_height": page_img_for_explorer.height,
             "line_count": len(lines),
             "word_count": len(all_page_words),
             "glyph_count": len(all_page_glyphs),

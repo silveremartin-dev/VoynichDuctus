@@ -160,6 +160,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "o",
             "currier": "O",
+            "v101": "o",
+            "voynichese": "o",
             "name": "Single Loop Oval",
             "category": "Oval / Minim",
             "strokes": 1.0,
@@ -173,6 +175,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "a",
             "currier": "A",
+            "v101": "a",
+            "voynichese": "a",
             "name": "Loop with Vertical Stem",
             "category": "Oval / Minim",
             "strokes": 2.0,
@@ -186,6 +190,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "y",
             "currier": "Y",
+            "v101": "y",
+            "voynichese": "y",
             "name": "Terminal Tail Descender",
             "category": "Descender",
             "strokes": 2.0,
@@ -199,6 +205,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "d",
             "currier": "D",
+            "v101": "d",
+            "voynichese": "d",
             "name": "Benched Loop Ascender",
             "category": "Ascender",
             "strokes": 2.0,
@@ -212,6 +220,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "e",
             "currier": "E",
+            "v101": "e",
+            "voynichese": "e",
             "name": "C-Curve Minim",
             "category": "Minim",
             "strokes": 1.0,
@@ -225,6 +235,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "s",
             "currier": "S",
+            "v101": "s",
+            "voynichese": "s",
             "name": "S-Curve Terminal",
             "category": "Terminal",
             "strokes": 1.0,
@@ -238,6 +250,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "l",
             "currier": "L",
+            "v101": "l",
+            "voynichese": "l",
             "name": "Looping Tall Ascender",
             "category": "Ascender",
             "strokes": 2.0,
@@ -251,6 +265,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "r",
             "currier": "R",
+            "v101": "r",
+            "voynichese": "r",
             "name": "Shouldered Arch / Hook",
             "category": "Minim",
             "strokes": 2.0,
@@ -264,6 +280,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "ch",
             "currier": "C",
+            "v101": "c8",
+            "voynichese": "ch",
             "name": "Single Correa Ligature",
             "category": "Ligature / Correa",
             "strokes": 2.0,
@@ -277,6 +295,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "sh",
             "currier": "H",
+            "v101": "c9",
+            "voynichese": "sh",
             "name": "Double-Loop Correa Ligature",
             "category": "Ligature / Correa",
             "strokes": 3.0,
@@ -290,6 +310,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "k",
             "currier": "K",
+            "v101": "t",
+            "voynichese": "k",
             "name": "Benched Gallows (High Crossbar)",
             "category": "Gallows",
             "strokes": 3.0,
@@ -303,6 +325,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "t",
             "currier": "T",
+            "v101": "k",
+            "voynichese": "t",
             "name": "Pedestal Crossed Gallows",
             "category": "Gallows",
             "strokes": 3.0,
@@ -316,6 +340,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "p",
             "currier": "P",
+            "v101": "p",
+            "voynichese": "p",
             "name": "Double-Benched Split Gallows",
             "category": "Gallows",
             "strokes": 4.0,
@@ -329,6 +355,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "f",
             "currier": "F",
+            "v101": "f",
+            "voynichese": "f",
             "name": "Looped Flag Gallows",
             "category": "Gallows",
             "strokes": 3.0,
@@ -342,6 +370,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "q",
             "currier": "Q",
+            "v101": "4",
+            "voynichese": "q",
             "name": "Initial 4-Like Descender Hook",
             "category": "Initial / Descender",
             "strokes": 2.0,
@@ -355,6 +385,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "m",
             "currier": "M",
+            "v101": "m",
+            "voynichese": "m",
             "name": "Triple Minim Wave",
             "category": "Minim Sequence",
             "strokes": 3.0,
@@ -368,6 +400,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "n",
             "currier": "N",
+            "v101": "n",
+            "voynichese": "n",
             "name": "Double Minim Wave",
             "category": "Minim Sequence",
             "strokes": 2.0,
@@ -381,6 +415,8 @@ class CorpusCorrespondenceMatcher:
         {
             "eva": "i",
             "currier": "I",
+            "v101": "i",
+            "voynichese": "i",
             "name": "Single Vertical Minim",
             "category": "Minim",
             "strokes": 1.0,
@@ -397,6 +433,8 @@ class CorpusCorrespondenceMatcher:
         {
             "code": "S-L01",
             "name": "Loop-Stem Ascender",
+            "deri": "A-Loop",
+            "bulik": "α₁",
             "category": "Syllabic Initial",
             "strokes": 2.0,
             "min_strokes": 2,
@@ -408,6 +446,8 @@ class CorpusCorrespondenceMatcher:
         {
             "code": "S-C02",
             "name": "Crescent-Bar Connector",
+            "deri": "Arch-Cap",
+            "bulik": "β₂",
             "category": "Medial Connector",
             "strokes": 2.0,
             "min_strokes": 1,
@@ -419,6 +459,8 @@ class CorpusCorrespondenceMatcher:
         {
             "code": "S-H03",
             "name": "Double-Hook Ligature",
+            "deri": "Double-Arch",
+            "bulik": "γ₃",
             "category": "Rhythmic Arch",
             "strokes": 2.0,
             "min_strokes": 2,
@@ -430,6 +472,8 @@ class CorpusCorrespondenceMatcher:
         {
             "code": "S-W04",
             "name": "Wave-Descender",
+            "deri": "Wave-Tail",
+            "bulik": "δ₄",
             "category": "Terminal Descender",
             "strokes": 2.0,
             "min_strokes": 1,
@@ -441,6 +485,8 @@ class CorpusCorrespondenceMatcher:
         {
             "code": "S-B05",
             "name": "Benched Arch",
+            "deri": "Cross-Beam",
+            "bulik": "ε₅",
             "category": "Roof / Arch",
             "strokes": 2.0,
             "min_strokes": 2,
@@ -452,6 +498,8 @@ class CorpusCorrespondenceMatcher:
         {
             "code": "S-K06",
             "name": "Circle-Knot Glyphe",
+            "deri": "O-Ring",
+            "bulik": "ζ₆",
             "category": "Complex Loop",
             "strokes": 3.0,
             "min_strokes": 2,
@@ -463,6 +511,8 @@ class CorpusCorrespondenceMatcher:
         {
             "code": "S-S07",
             "name": "Serpentine-S Ligature",
+            "deri": "S-Cursive",
+            "bulik": "η₇",
             "category": "Vertical Ligature",
             "strokes": 1.0,
             "min_strokes": 1,
@@ -474,6 +524,8 @@ class CorpusCorrespondenceMatcher:
         {
             "code": "S-M08",
             "name": "Twin-Tooth Comb",
+            "deri": "Twin-Pole",
+            "bulik": "θ₈",
             "category": "Minim Wave",
             "strokes": 3.0,
             "min_strokes": 2,
@@ -485,6 +537,8 @@ class CorpusCorrespondenceMatcher:
         {
             "code": "S-T09",
             "name": "Triple-Crown Comb",
+            "deri": "Trident-Base",
+            "bulik": "ι₉",
             "category": "Comb / Crest",
             "strokes": 4.0,
             "min_strokes": 3,
@@ -496,6 +550,8 @@ class CorpusCorrespondenceMatcher:
         {
             "code": "S-P10",
             "name": "Spiral Terminal Dot",
+            "deri": "P-Loop",
+            "bulik": "κ₁₀",
             "category": "Punctuation / Marker",
             "strokes": 1.0,
             "min_strokes": 1,
@@ -517,18 +573,16 @@ class CorpusCorrespondenceMatcher:
         cluster_glyphs: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
-        Estimates the closest standard corpus match (EVA / Currier) for an induced Voynich archetype
+        Estimates the closest standard corpus match (EVA / Currier / v101 / Voynichese) for an induced Voynich archetype
         using strict topological constraints (stroke count bounds, aspect ratio, and loop compatibility).
         """
         aspect_ratio = mean_width / max(1.0, mean_height)
 
-        # Detect if the archetype features closed loops
         archetype_has_loop = False
         if cluster_glyphs:
             loop_scores = []
             for g in cluster_glyphs[:12]:
                 ff = g.get("fill_factor", 0.25)
-                # Loop graphemes typically have higher hollow fill or aspect > 0.7 with 1-2 strokes
                 if 0.18 <= ff <= 0.48 and len(g.get("strokes", [])) <= 3:
                     loop_scores.append(True)
                 else:
@@ -539,7 +593,6 @@ class CorpusCorrespondenceMatcher:
         best_distance = float("inf")
 
         for prof in cls.VOYNICH_STANDARD_PROFILES:
-            # 1. Stroke count penalty (heavy penalty if archetype stroke count is outside valid bounds)
             if round(mean_strokes) < prof["min_strokes"]:
                 stroke_pen = 4.0 * (prof["min_strokes"] - mean_strokes)
             elif round(mean_strokes) > prof["max_strokes"]:
@@ -547,16 +600,12 @@ class CorpusCorrespondenceMatcher:
             else:
                 stroke_pen = abs(prof["strokes"] - mean_strokes) * 1.2
 
-            # 2. Aspect ratio difference
             aspect_diff = abs(prof["aspect_ratio"] - aspect_ratio) * 1.8
-
-            # 3. Frequency rank compatibility
             rank_diff = abs(prof["relative_freq_rank"] - frequency_rank) / 20.0
 
-            # 4. Topological Loop Compatibility
             loop_pen = 0.0
             if prof["has_loop"] and not archetype_has_loop and mean_strokes < 1.8:
-                loop_pen = 3.5  # Heavy penalty matching a straight line with a loop
+                loop_pen = 3.5
             elif not prof["has_loop"] and archetype_has_loop and prof["strokes"] <= 1.2:
                 loop_pen = 3.0
 
@@ -566,12 +615,13 @@ class CorpusCorrespondenceMatcher:
                 best_distance = total_dist
                 best_match = prof
 
-        # If topological distance is too high (discordance between ductus and reference), suppress false match
         if best_distance > 4.2:
             return {
-                "system": "EVA / Currier / Takahashi",
+                "system": "EVA / Currier / v101 / Voynichese",
                 "eva_equivalent": "—",
                 "currier_equivalent": "—",
+                "v101_equivalent": "—",
+                "voynichese_equivalent": "—",
                 "name": "Distinct Emergent Ductus",
                 "category": "Unclassified Scribal Form",
                 "confidence_pct": round(max(30.0, 100.0 - best_distance * 15.0), 1),
@@ -585,9 +635,11 @@ class CorpusCorrespondenceMatcher:
         ref_svg = cls.EVA_REFERENCE_SVGS.get(eva_char, "")
 
         return {
-            "system": "EVA / Currier / Takahashi",
+            "system": "EVA / Currier / v101 / Voynichese",
             "eva_equivalent": best_match["eva"],
             "currier_equivalent": best_match["currier"],
+            "v101_equivalent": best_match.get("v101", best_match["eva"]),
+            "voynichese_equivalent": best_match.get("voynichese", best_match["eva"]),
             "name": best_match["name"],
             "category": best_match["category"],
             "confidence_pct": round(confidence * 100, 1),
@@ -630,8 +682,10 @@ class CorpusCorrespondenceMatcher:
 
         if best_distance > 3.8:
             return {
-                "system": "Serafini Typology (Stolfi / Derksen)",
+                "system": "Serafini Typology (1981) / Deri (2015) / Bulik (2011)",
                 "serafini_code": "S-EMERGENT",
+                "deri_equivalent": "EMERGENT",
+                "bulik_equivalent": "ω₀",
                 "name": "Emergent Serafinian Ductus",
                 "category": "Unclassified Cursive Glyph",
                 "confidence_pct": round(max(30.0, 100.0 - best_distance * 15.0), 1),
@@ -643,8 +697,10 @@ class CorpusCorrespondenceMatcher:
         ref_svg = cls.SERAFINI_REFERENCE_SVGS.get(best_match["code"], "")
 
         return {
-            "system": "Serafini Typology (Stolfi / Derksen)",
+            "system": "Serafini Typology (1981) / Deri (2015) / Bulik (2011)",
             "serafini_code": best_match["code"],
+            "deri_equivalent": best_match.get("deri", best_match["code"]),
+            "bulik_equivalent": best_match.get("bulik", best_match["code"]),
             "name": best_match["name"],
             "category": best_match["category"],
             "confidence_pct": round(confidence * 100, 1),

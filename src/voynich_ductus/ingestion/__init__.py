@@ -8,6 +8,8 @@ from voynich_ductus.ingestion.color_normalizer import ColorIlluminationNormalize
 from voynich_ductus.ingestion.transcription_reference import TranscriptionReference, PaleographyYieldValidator
 from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
 
+from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader, RosettaWord
+
 __all__ = [
     "IIIFClient",
     "Binarizer",
@@ -16,7 +18,9 @@ __all__ = [
     "ColorIlluminationNormalizer",
     "TranscriptionReference",
     "PaleographyYieldValidator",
-    "GlyphSegmenter"
+    "GlyphSegmenter",
+    "VoynicheseRosettaLoader",
+    "RosettaWord",
 ]
 
 
