@@ -346,6 +346,192 @@ class GlyphSegmenter:
 
         return sorted(res_glyphs, key=lambda g: g["bbox_local"][1])
 
+    @staticmethod
+    def _paint_fraction(ink_pixels: np.ndarray) -> float:
+        """
+        Fraction of ink pixels whose HSV signature matches the Voynich pigment palette
+        (green / blue / red / ochre washes) rather than iron-gall ink.
+        """
+        from skimage.color import rgb2hsv
+        ink_hsv = rgb2hsv(ink_pixels.reshape(-1, 1, 3))
+        h, s, v = ink_hsv[:, 0, 0], ink_hsv[:, 0, 1], ink_hsv[:, 0, 2]
+        is_paint = (
+            ((h >= 0.14) & (h <= 0.50) & (s > 0.14)) |
+            ((h >= 0.50) & (h <= 0.78) & (s > 0.14)) |
+            (((h >= 0.85) | (h <= 0.06)) & (s > 0.20) & (v > 0.25)) |
+            ((h >= 0.08) & (h <= 0.16) & (s > 0.28))
+        )
+        return float(np.mean(is_paint))
+
+    def build_glyph_record(
+        self,
+        g_mask: np.ndarray,
+        abs_bbox: Tuple[int, int, int, int],
+        page_rgb: np.ndarray,
+        page_id: str,
+        line_id: str,
+        word_id: str,
+        word_bbox: Tuple[int, int, int, int],
+        word_png_rel: str,
+        glyph_idx: int,
+        output_dir: Optional[Path] = None,
+        subfolder: str = "voynich",
+        strict: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Validates, vectorizes and exports a single glyph candidate.
+
+        Parameters
+        ----------
+        g_mask : boolean ink mask of the candidate glyph (local coordinates).
+        abs_bbox : (y0, x0, y1, x1) of the mask on the page.
+        strict : when True (heuristic, transcription-free mode) the candidate must pass
+            physical quill-scale bounds, a filamentary fill-factor test (0.05 <= fill <= 0.40)
+            and a pigment test. When False (transcription-guided mode) the reference
+            transcription already certifies that the zone contains text, so only a minimal
+            ink-mass test is applied; the pigment fraction is still recorded for auditing.
+
+        Returns
+        -------
+        Glyph dictionary (ids, bbox, ordered strokes, exported assets) or None if rejected.
+        """
+        gh, gw = g_mask.shape
+        area = int(np.sum(g_mask))
+        gy0, gx0, gy1, gx1 = [int(v) for v in abs_bbox]
+        aspect = gw / max(1, gh)
+        fill_factor = area / max(1, gh * gw)
+
+        if strict:
+            # Physical quill-scale bounds
+            if area < 22 or gh < 14 or gw < 6:
+                return None
+            if gh > self.max_glyph_height or gw > self.max_glyph_width:
+                return None
+            if aspect > 3.2 or aspect < 0.18:
+                return None
+            # Filamentary stroke test (rejects solid stains / textures)
+            if fill_factor < 0.05 or fill_factor > 0.40:
+                return None
+        else:
+            if area < 12 or gh < 4 or gw < 2:
+                return None
+
+        crop_pad = 6
+        cy0, cx0 = max(0, gy0 - crop_pad), max(0, gx0 - crop_pad)
+        cy1, cx1 = min(page_rgb.shape[0], gy1 + crop_pad), min(page_rgb.shape[1], gx1 + crop_pad)
+        raw_patch = page_rgb[cy0:cy1, cx0:cx1]
+        if raw_patch.shape[0] < 4 or raw_patch.shape[1] < 3:
+            return None
+
+        paint_fraction = 0.0
+        mean_chroma = 0.0
+        crop_patch_rgb = page_rgb[gy0:gy1, gx0:gx1].astype(np.float32) / 255.0
+        if crop_patch_rgb.shape[:2] == g_mask.shape:
+            ink_pixels = crop_patch_rgb[g_mask]
+            if ink_pixels.shape[0] > 0:
+                chroma_ink = np.max(ink_pixels, axis=1) - np.min(ink_pixels, axis=1)
+                mean_chroma = float(np.mean(chroma_ink))
+                if subfolder == "seraphinianus":
+                    paint_fraction = float(np.mean(chroma_ink > 0.06))
+                else:
+                    paint_fraction = self._paint_fraction(ink_pixels)
+
+        if strict:
+            # Authentic parchment is bright (> 115/255); reject dark blobs
+            if np.mean(raw_patch) < 115:
+                return None
+            if subfolder == "seraphinianus":
+                if mean_chroma > 0.06:
+                    return None
+            elif paint_fraction > 0.08:
+                return None
+
+        # Vectorize glyph ductus using Our Model (Kinematic Quill Tracker)
+        try:
+            ordered_strokes = self.calligraphic_vectorizer.extract_calligraphic_ductus(g_mask)
+            if not ordered_strokes:
+                skel, widths = self.skel_engine.extract_skeleton(g_mask)
+                pixel_graph = self.graph_extractor.build_pixel_graph(skel, widths)
+                raw_strokes = self.graph_extractor.decompose_into_strokes(pixel_graph)
+                ordered_strokes = self.resolver.resolve_and_order_strokes(raw_strokes) if raw_strokes else []
+        except Exception:
+            ordered_strokes = []
+
+        if not ordered_strokes:
+            return None
+        if strict:
+            if len(ordered_strokes) > 6:
+                return None
+            if sum(len(s.get("points", [])) for s in ordered_strokes) < 8:
+                return None
+
+        # Unique hierarchical glyph identifier: Page_Line_Word_G##
+        glyph_id = f"{page_id}_{line_id}_{word_id}_G{glyph_idx:02d}"
+
+        png_rel, svg_rel, svg_str = "", "", ""
+        if output_dir:
+            (output_dir / subfolder / "glyphs" / "png").mkdir(parents=True, exist_ok=True)
+            (output_dir / subfolder / "glyphs" / "svg").mkdir(parents=True, exist_ok=True)
+            png_filename = f"{glyph_id}.png"
+            svg_filename = f"{glyph_id}.svg"
+            png_path = output_dir / subfolder / "glyphs" / "png" / png_filename
+            svg_path = output_dir / subfolder / "glyphs" / "svg" / svg_filename
+
+            save_patch = self.normalizer.enhance_contrast_and_sharpness(
+                raw_patch, contrast_gain=1.35, unsharp_radius=1.0, unsharp_amount=1.6
+            )
+            Image.fromarray(save_patch).save(png_path)
+            svg_str = VectorExporter.to_svg(ordered_strokes, width=gw, height=gh, output_path=svg_path)
+            png_rel = f"{subfolder}/glyphs/png/{png_filename}"
+            svg_rel = f"{subfolder}/glyphs/svg/{svg_filename}"
+
+        return {
+            "glyph_id": glyph_id,
+            "page_id": page_id,
+            "line_id": line_id,
+            "word_id": word_id,
+            "word_bbox": tuple(int(v) for v in word_bbox),
+            "word_png_rel": word_png_rel,
+            "bbox": (gy0, gx0, gy1, gx1),
+            "height": int(gh),
+            "width": int(gw),
+            "area": area,
+            "fill_factor": round(float(fill_factor), 3),
+            "paint_fraction": round(float(paint_fraction), 3),
+            "stroke_count": len(ordered_strokes),
+            "strokes": ordered_strokes,
+            "png_rel": png_rel,
+            "svg_rel": svg_rel,
+            "svg_content": svg_str,
+        }
+
+    def save_word_crop(
+        self,
+        page_rgb: np.ndarray,
+        word_bbox: Tuple[int, int, int, int],
+        page_id: str,
+        word_id: str,
+        output_dir: Optional[Path],
+        subfolder: str,
+        pad: int = 6,
+    ) -> str:
+        """Saves a contrast-enhanced word crop and returns its path relative to output_dir."""
+        if not output_dir:
+            return ""
+        y0, x0, y1, x1 = word_bbox
+        (output_dir / subfolder / "words" / "png").mkdir(parents=True, exist_ok=True)
+        cy0, cx0 = max(0, y0 - pad), max(0, x0 - pad)
+        cy1, cx1 = min(page_rgb.shape[0], y1 + pad), min(page_rgb.shape[1], x1 + pad)
+        patch = page_rgb[cy0:cy1, cx0:cx1]
+        if patch.size == 0:
+            return ""
+        enhanced = self.normalizer.enhance_contrast_and_sharpness(
+            patch, contrast_gain=1.35, unsharp_radius=1.0, unsharp_amount=1.6
+        )
+        filename = f"{page_id}_{word_id}.png"
+        Image.fromarray(enhanced).save(output_dir / subfolder / "words" / "png" / filename)
+        return f"{subfolder}/words/png/{filename}"
+
     def extract_glyphs_from_line(
         self,
         line_mask: np.ndarray,
@@ -410,122 +596,30 @@ class GlyphSegmenter:
 
             glyph_idx = 0
             for item in assembled_components:
-                g_mask = item["mask"]
-                gh, gw = g_mask.shape
                 bbox_loc = item["bbox_local"]
-                aspect = gw / max(1, gh)
-                fill_factor = item["area"] / max(1, gh * gw)
-
-                # 1. Strict glyph dimension & scale bounds (quill stroke physical bounds)
-                if item["area"] < 22 or gh < 14 or gw < 6:
+                abs_bbox = (
+                    y_off + wy0 + bbox_loc[0],
+                    x_off + wx0 + bbox_loc[1],
+                    y_off + wy0 + bbox_loc[2],
+                    x_off + wx0 + bbox_loc[3],
+                )
+                record = self.build_glyph_record(
+                    g_mask=item["mask"],
+                    abs_bbox=abs_bbox,
+                    page_rgb=page_rgb,
+                    page_id=page_id,
+                    line_id=line_id,
+                    word_id=word_id,
+                    word_bbox=(int(abs_wy0), int(abs_wx0), int(abs_wy1), int(abs_wx1)),
+                    word_png_rel=word_png_rel,
+                    glyph_idx=glyph_idx,
+                    output_dir=output_dir,
+                    subfolder=subfolder,
+                    strict=True,
+                )
+                if record is None:
                     continue
-                if gh > self.max_glyph_height or gw > self.max_glyph_width:
-                    continue
-                if aspect > 3.2 or aspect < 0.18:
-                    continue
-
-                # 2. Filamentary 1D stroke check (rejects solid textures, blobs, and dark areas)
-                if fill_factor < 0.05 or fill_factor > 0.40:
-                    continue
-
-                gy0 = y_off + wy0 + bbox_loc[0]
-                gx0 = x_off + wx0 + bbox_loc[1]
-                gy1 = y_off + wy0 + bbox_loc[2]
-                gx1 = x_off + wx0 + bbox_loc[3]
-
-                # 3. Strict Chromatic Pigment Discrimination & Brightness Verification
-                crop_pad = 6  # Generous padding around the stroke
-                cy0, cx0 = max(0, gy0 - crop_pad), max(0, gx0 - crop_pad)
-                cy1, cx1 = min(page_rgb.shape[0], gy1 + crop_pad), min(page_rgb.shape[1], gx1 + crop_pad)
-                
-                raw_patch = page_rgb[cy0:cy1, cx0:cx1]
-                if raw_patch.shape[0] < 8 or raw_patch.shape[1] < 6:
-                    continue
-
-                # Reject mostly black/dark blobs (authentic parchment is bright, >115/255)
-                if np.mean(raw_patch) < 115:
-                    continue
-
-                crop_patch_rgb = page_rgb[gy0:gy1, gx0:gx1].astype(np.float32) / 255.0
-                if crop_patch_rgb.shape[0] == g_mask.shape[0] and crop_patch_rgb.shape[1] == g_mask.shape[1]:
-                    ink_pixels = crop_patch_rgb[g_mask]
-                    if ink_pixels.shape[0] > 0:
-                        if subfolder == "seraphinianus":
-                            chroma_ink = np.max(ink_pixels, axis=1) - np.min(ink_pixels, axis=1)
-                            if np.mean(chroma_ink) > 0.06:
-                                continue
-                        else:
-                            from skimage.color import rgb2hsv
-                            ink_hsv = rgb2hsv(ink_pixels.reshape(-1, 1, 3))
-                            is_paint_stroke = (
-                                ((ink_hsv[:, 0, 0] >= 0.14) & (ink_hsv[:, 0, 0] <= 0.50) & (ink_hsv[:, 0, 1] > 0.14)) |
-                                ((ink_hsv[:, 0, 0] >= 0.50) & (ink_hsv[:, 0, 0] <= 0.78) & (ink_hsv[:, 0, 1] > 0.14)) |
-                                (((ink_hsv[:, 0, 0] >= 0.85) | (ink_hsv[:, 0, 0] <= 0.06)) & (ink_hsv[:, 0, 1] > 0.20) & (ink_hsv[:, 0, 2] > 0.25)) |
-                                ((ink_hsv[:, 0, 0] >= 0.08) & (ink_hsv[:, 0, 0] <= 0.16) & (ink_hsv[:, 0, 1] > 0.28))
-                            )
-                            if np.mean(is_paint_stroke) > 0.08:
-                                continue
-
-                # Vectorize glyph ductus using Our Model (Kinematic Quill Tracker)
-                try:
-                    ordered_strokes = self.calligraphic_vectorizer.extract_calligraphic_ductus(g_mask)
-                    if not ordered_strokes:
-                        skel, widths = self.skel_engine.extract_skeleton(g_mask)
-                        pixel_graph = self.graph_extractor.build_pixel_graph(skel, widths)
-                        raw_strokes = self.graph_extractor.decompose_into_strokes(pixel_graph)
-                        ordered_strokes = self.resolver.resolve_and_order_strokes(raw_strokes) if raw_strokes else []
-                except Exception:
-                    ordered_strokes = []
-
-                if not ordered_strokes or len(ordered_strokes) > 6:
-                    continue
-
-                total_stroke_len = sum(len(s.get("points", [])) for s in ordered_strokes)
-                if total_stroke_len < 8:
-                    continue
-
-                # Unique hierarchical glyph identifier: Page_Line_Word_G##
-                glyph_id = f"{page_id}_{line_id}_{word_id}_G{glyph_idx:02d}"
-
-                # Save crops and SVGs if output_dir provided
-                png_rel, svg_rel, svg_str = "", "", ""
-                if output_dir:
-                    (output_dir / subfolder / "glyphs" / "png").mkdir(parents=True, exist_ok=True)
-                    (output_dir / subfolder / "glyphs" / "svg").mkdir(parents=True, exist_ok=True)
-
-                    png_filename = f"{glyph_id}.png"
-                    svg_filename = f"{glyph_id}.svg"
-                    png_path = output_dir / subfolder / "glyphs" / "png" / png_filename
-                    svg_path = output_dir / subfolder / "glyphs" / "svg" / svg_filename
-
-                    # Save crop patch with sharp stroke contrast and generous padding
-                    save_patch = self.normalizer.enhance_contrast_and_sharpness(raw_patch, contrast_gain=1.35, unsharp_radius=1.0, unsharp_amount=1.6)
-                    Image.fromarray(save_patch).save(png_path)
-
-                    gh_m, gw_m = g_mask.shape
-                    svg_str = VectorExporter.to_svg(ordered_strokes, width=gw_m, height=gh_m, output_path=svg_path)
-
-                    png_rel = f"{subfolder}/glyphs/png/{png_filename}"
-                    svg_rel = f"{subfolder}/glyphs/svg/{svg_filename}"
-
-                line_glyphs.append({
-                    "glyph_id": glyph_id,
-                    "page_id": page_id,
-                    "line_id": line_id,
-                    "word_id": word_id,
-                    "word_bbox": (int(abs_wy0), int(abs_wx0), int(abs_wy1), int(abs_wx1)),
-                    "word_png_rel": word_png_rel,
-                    "bbox": (int(gy0), int(gx0), int(gy1), int(gx1)),
-                    "height": int(gh),
-                    "width": int(gw),
-                    "area": int(item["area"]),
-                    "fill_factor": round(float(fill_factor), 3),
-                    "stroke_count": len(ordered_strokes),
-                    "strokes": ordered_strokes,
-                    "png_rel": png_rel,
-                    "svg_rel": svg_rel,
-                    "svg_content": svg_str
-                })
+                line_glyphs.append(record)
                 glyph_idx += 1
 
             # Guarantee that every lexical word contains at least 1 constituent glyph (monoglyph fallback)
@@ -649,4 +743,195 @@ class GlyphSegmenter:
             "words": all_page_words,
             "glyphs": all_page_glyphs
         }
+
+    def extract_page_glyphs_with_ground_truth(
+        self,
+        page_id: str,
+        image: Image.Image,
+        rosetta_words: List[Any],
+        output_dir: Optional[Path] = None,
+        subfolder: str = "voynich"
+    ) -> Dict[str, Any]:
+        """
+        Extracts words and glyphs strictly guided by Voynichese Rosetta Ground Truth annotations:
+        1. Uses certified ground truth word bounding boxes (no rogue words/glyphs in margins or drawings).
+        2. Calibrates character segmentation to expected token length K = len(tokenize_eva(word)).
+        3. Tags each constituent glyph with its exact historical EVA character transcription.
+        """
+        page_rgb = np.array(image.convert("RGB"))
+        H, W, _ = page_rgb.shape
+
+        page_img_for_explorer = Image.fromarray(page_rgb)
+        page_img_rel = ""
+        if output_dir:
+            pages_dir = output_dir / subfolder / "pages"
+            pages_dir.mkdir(parents=True, exist_ok=True)
+            page_img_path = pages_dir / f"{page_id}.jpg"
+            page_img_for_explorer.save(page_img_path, quality=88)
+            page_img_rel = f"{subfolder}/pages/{page_id}.jpg"
+
+        from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader
+        loader = VoynicheseRosettaLoader()
+
+        all_page_words = []
+        all_page_glyphs = []
+        
+        # Sort ground truth words by y (lines) then x
+        valid_r_words = [rw for rw in rosetta_words if rw.bbox_scan is not None]
+        valid_r_words.sort(key=lambda rw: (rw.bbox_scan[1], rw.bbox_scan[0]))
+
+        # Group words into lines by vertical proximity
+        line_clusters: List[List[Any]] = []
+        for rw in valid_r_words:
+            rx0, ry0, rx1, ry1 = rw.bbox_scan
+            rc_y = (ry0 + ry1) / 2.0
+            
+            placed = False
+            for lc in line_clusters:
+                lc_ys = [(w.bbox_scan[1] + w.bbox_scan[3]) / 2.0 for w in lc]
+                mean_y = sum(lc_ys) / len(lc_ys)
+                if abs(rc_y - mean_y) < 30:  # Same line pitch
+                    lc.append(rw)
+                    placed = True
+                    break
+            if not placed:
+                line_clusters.append([rw])
+
+        clean_lines = []
+        for line_idx, lc in enumerate(line_clusters):
+            lc.sort(key=lambda w: w.bbox_scan[0])  # Left to right
+            line_id = f"L{line_idx:02d}"
+            
+            ly0 = min(w.bbox_scan[1] for w in lc)
+            lx0 = min(w.bbox_scan[0] for w in lc)
+            ly1 = max(w.bbox_scan[3] for w in lc)
+            lx1 = max(w.bbox_scan[2] for w in lc)
+
+            clean_lines.append({
+                "line_id": line_id,
+                "bbox": (int(ly0), int(lx0), int(ly1), int(lx1))
+            })
+
+            for word_idx, rw in enumerate(lc):
+                rx0, ry0, rx1, ry1 = rw.bbox_scan
+                word_id = f"{line_id}_W{word_idx:02d}"
+                eva_text = rw.eva_text or ""
+                eva_tokens = loader.tokenize_eva_to_glyphs(eva_text)
+                expected_k = max(1, len(eva_tokens)) if eva_tokens else None
+
+                # Crop word patch from scan with padding for local contrast calculation
+                w_pad = 6
+                c_ry0, c_rx0 = max(0, ry0 - w_pad), max(0, rx0 - w_pad)
+                c_ry1, c_rx1 = min(H, ry1 + w_pad), min(W, rx1 + w_pad)
+                padded_word_rgb = page_rgb[c_ry0:c_ry1, c_rx0:c_rx1]
+
+                # Binarize with Sauvola on padded patch
+                w_pil = Image.fromarray(padded_word_rgb)
+                padded_mask = self.binarizer.binarize(w_pil)
+                off_y = ry0 - c_ry0
+                off_x = rx0 - c_rx0
+                w_mask = padded_mask[off_y:off_y + (ry1 - ry0), off_x:off_x + (rx1 - rx0)]
+
+                # Fallback if local mask is sparse
+                if np.sum(w_mask) < 8:
+                    word_gray = np.mean(page_rgb[ry0:ry1, rx0:rx1], axis=2)
+                    w_mask = word_gray < 160
+
+                # Save word crop image
+                word_png_rel = self.save_word_crop(
+                    page_rgb=page_rgb,
+                    word_bbox=(ry0, rx0, ry1, rx1),
+                    page_id=page_id,
+                    word_id=word_id,
+                    output_dir=output_dir,
+                    subfolder=subfolder
+                )
+
+                all_page_words.append({
+                    "word_id": word_id,
+                    "line_id": line_id,
+                    "bbox": (int(ry0), int(rx0), int(ry1), int(rx1)),
+                    "word_png_rel": word_png_rel,
+                    "eva_text": eva_text,
+                    "eva_glyphs": eva_tokens
+                })
+
+                # Assemble glyphs guided by expected token count K
+                assembled_components = self.assemble_word_into_glyphs(
+                    w_mask, expected_glyph_count=expected_k
+                )
+
+                glyph_idx = 0
+                for item in assembled_components:
+                    bbox_loc = item["bbox_local"]
+                    abs_bbox = (
+                        ry0 + bbox_loc[0],
+                        rx0 + bbox_loc[1],
+                        ry0 + bbox_loc[2],
+                        rx0 + bbox_loc[3],
+                    )
+                    record = self.build_glyph_record(
+                        g_mask=item["mask"],
+                        abs_bbox=abs_bbox,
+                        page_rgb=page_rgb,
+                        page_id=page_id,
+                        line_id=line_id,
+                        word_id=word_id,
+                        word_bbox=(int(ry0), int(rx0), int(ry1), int(rx1)),
+                        word_png_rel=word_png_rel,
+                        glyph_idx=glyph_idx,
+                        output_dir=output_dir,
+                        subfolder=subfolder,
+                        strict=False,  # Certified by ground truth
+                    )
+                    if record is None:
+                        continue
+
+                    # Associate with ground truth EVA token
+                    if eva_tokens and glyph_idx < len(eva_tokens):
+                        record["eva_char"] = eva_tokens[glyph_idx]
+                    elif eva_tokens:
+                        record["eva_char"] = eva_tokens[-1]
+                    else:
+                        record["eva_char"] = ""
+                    record["ref_eva_text"] = eva_text
+
+                    all_page_glyphs.append(record)
+                    glyph_idx += 1
+
+                # Monoglyph fallback for words that didn't generate glyph records
+                if glyph_idx == 0 and np.sum(w_mask) >= 12:
+                    abs_bbox = (int(ry0), int(rx0), int(ry1), int(rx1))
+                    record = self.build_glyph_record(
+                        g_mask=w_mask,
+                        abs_bbox=abs_bbox,
+                        page_rgb=page_rgb,
+                        page_id=page_id,
+                        line_id=line_id,
+                        word_id=word_id,
+                        word_bbox=(int(ry0), int(rx0), int(ry1), int(rx1)),
+                        word_png_rel=word_png_rel,
+                        glyph_idx=0,
+                        output_dir=output_dir,
+                        subfolder=subfolder,
+                        strict=False,
+                    )
+                    if record is not None:
+                        record["eva_char"] = eva_tokens[0] if eva_tokens else ""
+                        record["ref_eva_text"] = eva_text
+                        all_page_glyphs.append(record)
+
+        return {
+            "page_id": page_id,
+            "page_img_rel": page_img_rel,
+            "image_width": W,
+            "image_height": H,
+            "line_count": len(clean_lines),
+            "word_count": len(all_page_words),
+            "glyph_count": len(all_page_glyphs),
+            "lines": clean_lines,
+            "words": all_page_words,
+            "glyphs": all_page_glyphs
+        }
+
 

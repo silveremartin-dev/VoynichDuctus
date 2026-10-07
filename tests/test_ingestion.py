@@ -93,4 +93,43 @@ def test_transcription_reference_and_yield_validator():
     assert yield_res["expected_glyphs"] == 1180
 
 
+def test_extract_page_glyphs_with_ground_truth():
+    from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
+    from voynich_ductus.ingestion.voynichese_rosetta import RosettaWord
+    from PIL import ImageDraw
+
+    segmenter = GlyphSegmenter()
+    # Create synthetic test page image (light parchment background with drawn strokes)
+    h, w = 120, 200
+    img = Image.new("RGB", (w, h), color=(235, 225, 205))
+    draw = ImageDraw.Draw(img)
+    # Draw dark strokes for word "daiin" in word bbox [30, 40, 150, 70]
+    draw.ellipse([35, 45, 55, 65], outline=(30, 25, 20), width=3) # 'd' bowl
+    draw.line([(55, 38), (55, 68)], fill=(30, 25, 20), width=3)    # 'd' ascender
+    draw.ellipse([65, 48, 85, 68], outline=(30, 25, 20), width=3) # 'a'
+    draw.line([(95, 48), (95, 68)], fill=(30, 25, 20), width=3)    # 'i'
+    draw.line([(110, 48), (110, 68)], fill=(30, 25, 20), width=3)  # 'i'
+    draw.line([(125, 48), (125, 68)], fill=(30, 25, 20), width=3)  # 'n'
+
+    r_words = [
+        RosettaWord(
+            folio="f1r",
+            index=0,
+            eva_text="daiin",
+            x_xml=30,
+            y_xml=40,
+            width_xml=120,
+            height_xml=30,
+            bbox_scan=(30, 35, 150, 75),
+        )
+    ]
+
+    res = segmenter.extract_page_glyphs_with_ground_truth("f001r", img, rosetta_words=r_words)
+    assert res["word_count"] == 1
+    assert res["words"][0]["eva_text"] == "daiin"
+    assert len(res["glyphs"]) >= 1
+    assert "eva_char" in res["glyphs"][0]
+
+
+
 

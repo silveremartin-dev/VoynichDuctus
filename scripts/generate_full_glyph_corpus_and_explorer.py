@@ -2223,31 +2223,30 @@ def main():
             f_path = iiif_client.download_folio(folio_id, max_width=2400)
             img = Image.open(f_path)
             print(f"[*] Extracting all glyphs on Voynich HD '{folio_id}' ({img.width}x{img.height} px)...")
-            res = segmenter.extract_page_glyphs(folio_id, img, output_dir=base_out, subfolder="voynich")
             
-            # Match detected words with Voynichese Rosetta Ground Truth
+            # Check for Voynichese Rosetta Ground Truth annotations
+            r_words = None
             try:
                 r_words = rosetta_loader.extract_aligned_words(folio_id, scan_image=img)
-                for w in res.get("words", []):
-                    wy0, wx0, wy1, wx1 = w["bbox"]
-                    wc_y = (wy0 + wy1) / 2.0
-                    wc_x = (wx0 + wx1) / 2.0
-                    best_match = None
-                    min_dist = float("inf")
-                    for rw in r_words:
-                        if rw.bbox_scan:
-                            ry0, rx0, ry1, rx1 = rw.bbox_scan
-                            rc_y = (ry0 + ry1) / 2.0
-                            rc_x = (rx0 + rx1) / 2.0
-                            dist = (wc_y - rc_y)**2 + (wc_x - rc_x)**2
-                            if dist < min_dist:
-                                min_dist = dist
-                                best_match = rw
-                    if best_match and min_dist < (180**2):
-                        w["eva_text"] = best_match.eva_text
-                        w["eva_glyphs"] = rosetta_loader.tokenize_eva_to_glyphs(best_match.eva_text)
             except Exception as e_rosetta:
-                print(f"  [i] Rosetta matching notice for {folio_id}: {e_rosetta}")
+                print(f"  [i] Rosetta annotation notice for {folio_id}: {e_rosetta}")
+
+            if r_words:
+                print(f"  [+] Using Voynichese Rosetta ground truth ({len(r_words)} registered words)...")
+                res = segmenter.extract_page_glyphs_with_ground_truth(
+                    page_id=folio_id,
+                    image=img,
+                    rosetta_words=r_words,
+                    output_dir=base_out,
+                    subfolder="voynich"
+                )
+            else:
+                res = segmenter.extract_page_glyphs(
+                    page_id=folio_id,
+                    image=img,
+                    output_dir=base_out,
+                    subfolder="voynich"
+                )
 
             # Census yield validation
             yr = PaleographyYieldValidator.evaluate_yield(
