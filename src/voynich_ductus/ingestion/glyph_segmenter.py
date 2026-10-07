@@ -167,11 +167,16 @@ class GlyphSegmenter:
 
         return clean_text_mask, rgb_arr, was_rotated
 
-    def assemble_word_into_glyphs(self, w_img: np.ndarray) -> List[Dict[str, Any]]:
+    def assemble_word_into_glyphs(
+        self,
+        w_img: np.ndarray,
+        expected_glyph_count: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """
         Assembles connected components within a word into intact multi-stroke glyphs.
         Groups vertically overlapping or tightly adjacent sub-strokes (e.g., bowl + ascender,
         gallows bar + leg, diacritic + minim) and recursively splits wide cursive ligatures.
+        Optionally uses expected_glyph_count as a calibrated prior from reference transcriptions.
         """
         labeled_w, num_w = label(w_img)
         if num_w == 0:
@@ -276,7 +281,70 @@ class GlyphSegmenter:
             split_res = split_ligature_mask(g_mask, gy0, gx0)
             assembled_glyphs.extend(split_res)
 
-        return sorted(assembled_glyphs, key=lambda g: g["bbox_local"][1])
+        res_glyphs = sorted(assembled_glyphs, key=lambda g: g["bbox_local"][1])
+
+        # 5. Prior-guided calibration when expected ground truth glyph count is provided
+        if expected_glyph_count is not None and expected_glyph_count > 0:
+            K = expected_glyph_count
+            # If under-segmented (e.g. 1 continuous cursive blob for a 4-glyph word)
+            if len(res_glyphs) == 1 and K >= 2:
+                sole = res_glyphs[0]
+                s_mask = sole["mask"]
+                sh, sw = s_mask.shape
+                if sw >= K * 12:
+                    col_proj = np.sum(s_mask, axis=0)
+                    # Find K-1 cut points near proportional locations (1/K, 2/K ... (K-1)/K)
+                    cuts = [0]
+                    for k in range(1, K):
+                        center_x = int(k * sw / K)
+                        search_r = max(4, int(sw / (K * 3)))
+                        x_start = max(1, center_x - search_r)
+                        x_end = min(sw - 1, center_x + search_r)
+                        if x_end > x_start:
+                            cut_x = x_start + int(np.argmin(col_proj[x_start:x_end]))
+                            cuts.append(cut_x)
+                    cuts.append(sw)
+                    calibrated = []
+                    sy0, sx0, _, _ = sole["bbox_local"]
+                    for k in range(len(cuts) - 1):
+                        c0, c1 = cuts[k], cuts[k+1]
+                        sub_m = s_mask[:, c0:c1]
+                        if np.sum(sub_m) >= 15:
+                            calibrated.append({
+                                "mask": sub_m,
+                                "bbox_local": (sy0, sx0 + c0, sy0 + sh, sx0 + c1),
+                                "area": int(np.sum(sub_m))
+                            })
+                    if len(calibrated) >= 2:
+                        res_glyphs = calibrated
+
+            # If over-segmented (e.g. fragmented into > K + 2 pieces), merge closest adjacent pairs
+            while len(res_glyphs) > K + 1 and len(res_glyphs) > 2:
+                # Find pair with smallest horizontal distance
+                min_gap = 1e9
+                best_pair = 0
+                for i in range(len(res_glyphs) - 1):
+                    gap = res_glyphs[i+1]["bbox_local"][1] - res_glyphs[i]["bbox_local"][3]
+                    if gap < min_gap:
+                        min_gap = gap
+                        best_pair = i
+                # Merge best_pair and best_pair + 1
+                g_a, g_b = res_glyphs[best_pair], res_glyphs[best_pair + 1]
+                m_y0 = min(g_a["bbox_local"][0], g_b["bbox_local"][0])
+                m_y1 = max(g_a["bbox_local"][2], g_b["bbox_local"][2])
+                m_x0 = min(g_a["bbox_local"][1], g_b["bbox_local"][1])
+                m_x1 = max(g_a["bbox_local"][3], g_b["bbox_local"][3])
+                comb_m = np.zeros((m_y1 - m_y0, m_x1 - m_x0), dtype=bool)
+                comb_m[g_a["bbox_local"][0]-m_y0:g_a["bbox_local"][2]-m_y0, g_a["bbox_local"][1]-m_x0:g_a["bbox_local"][3]-m_x0] |= g_a["mask"]
+                comb_m[g_b["bbox_local"][0]-m_y0:g_b["bbox_local"][2]-m_y0, g_b["bbox_local"][1]-m_x0:g_b["bbox_local"][3]-m_x0] |= g_b["mask"]
+                merged_g = {
+                    "mask": comb_m,
+                    "bbox_local": (m_y0, m_x0, m_y1, m_x1),
+                    "area": int(np.sum(comb_m))
+                }
+                res_glyphs = res_glyphs[:best_pair] + [merged_g] + res_glyphs[best_pair+2:]
+
+        return sorted(res_glyphs, key=lambda g: g["bbox_local"][1])
 
     def extract_glyphs_from_line(
         self,

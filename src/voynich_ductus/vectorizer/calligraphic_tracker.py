@@ -114,15 +114,15 @@ class CalligraphicVectorizer:
         strokes = []
         stroke_idx = 0
 
+        # 1. Primary continuous stroke tracing from best touchdown
         for _, start_y, start_x, init_dy, init_dx in candidates:
-            if visited[start_y, start_x]:
-                # Check if there is still unvisited ink nearby
-                y_min, y_max = max(0, start_y - 2), min(h, start_y + 3)
-                x_min, x_max = max(0, start_x - 2), min(w, start_x + 3)
-                if np.sum(~visited[y_min:y_max, x_min:x_max] & binary_mask[y_min:y_max, x_min:x_max]) < 3:
-                    continue
+            # Check if this touchdown area is already covered
+            y_min, y_max = max(0, start_y - 2), min(h, start_y + 3)
+            x_min, x_max = max(0, start_x - 2), min(w, start_x + 3)
+            if np.all(visited[y_min:y_max, x_min:x_max] | ~binary_mask[y_min:y_max, x_min:x_max]):
+                continue
 
-            # Trace single continuous trajectory from this touchdown
+            # Trace single continuous trajectory from this touchdown as long as physically possible
             raw_pts = self._trace_continuous_ridge(smoothed_dist, visited, start_y, start_x, init_dy, init_dx)
             if len(raw_pts) < 4:
                 continue
@@ -142,19 +142,30 @@ class CalligraphicVectorizer:
                     "mean_width": float(np.mean([p[2] for p in calligraphic_pts]))
                 })
                 stroke_idx += 1
+                break  # Primary stroke traced unbroken
 
-        # Check for remaining unvisited major ink clusters (e.g. separate diacritic or crossbar)
-        remaining_ink = binary_mask & ~visited
-        if np.sum(remaining_ink) >= 18 and stroke_idx < 3:
+        # 2. Subsequent stroke tracing for disconnected ink components (e.g. crossbars, separate legs/accents)
+        max_strokes = 4
+        while stroke_idx < max_strokes:
+            remaining_ink = binary_mask & ~visited
+            if np.sum(remaining_ink) < 14:
+                break  # All ink accounted for by preceding strokes
+
             rem_skel = skel & remaining_ink
-            rem_candidates = self.find_touchdown_endpoints(remaining_ink, rem_skel if np.any(rem_skel) else remaining_ink)
+            rem_candidates = self.find_touchdown_endpoints(
+                remaining_ink, rem_skel if np.any(rem_skel) else remaining_ink
+            )
+            if not rem_candidates:
+                break
+
+            stroke_found = False
             for _, start_y, start_x, init_dy, init_dx in rem_candidates:
                 if visited[start_y, start_x]:
                     continue
                 raw_pts = self._trace_continuous_ridge(smoothed_dist, visited, start_y, start_x, init_dy, init_dx)
-                if len(raw_pts) >= 4:
+                if len(raw_pts) >= 3:
                     calligraphic_pts = self._parameterize_stroke(raw_pts)
-                    if len(calligraphic_pts) >= 4:
+                    if len(calligraphic_pts) >= 3:
                         strokes.append({
                             "stroke_id": f"cal_s{stroke_idx:02d}",
                             "order_index": stroke_idx,
@@ -166,7 +177,10 @@ class CalligraphicVectorizer:
                             "mean_width": float(np.mean([p[2] for p in calligraphic_pts]))
                         })
                         stroke_idx += 1
+                        stroke_found = True
                         break
+            if not stroke_found:
+                break
 
         # Fallback if no stroke passed
         if not strokes:
