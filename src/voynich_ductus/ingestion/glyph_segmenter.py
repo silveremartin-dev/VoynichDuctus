@@ -17,6 +17,7 @@ from voynich_ductus.ingestion.segmenter import LineSegmenter
 from voynich_ductus.vectorizer.skeleton import Skeletonizer
 from voynich_ductus.vectorizer.stroke_graph import StrokeGraphExtractor
 from voynich_ductus.vectorizer.junction_resolver import JunctionResolver
+from voynich_ductus.vectorizer.calligraphic_tracker import CalligraphicVectorizer
 from voynich_ductus.vectorizer.export_format import VectorExporter
 
 
@@ -45,42 +46,43 @@ class GlyphSegmenter:
         self.normalizer = ColorIlluminationNormalizer()
         self.binarizer = Binarizer(method="sauvola", window_size=29, k=0.20)
         self.line_segmenter = LineSegmenter(min_line_pitch=28, min_line_height=14, min_word_width=12, min_word_area=25)
+        self.calligraphic_vectorizer = CalligraphicVectorizer(nib_angle_deg=40.0)
         self.skel_engine = Skeletonizer(method="medial_axis")
         self.graph_extractor = StrokeGraphExtractor()
         self.resolver = JunctionResolver(right_handed_prior=True)
 
     def detect_parchment_bounds(self, rgb_arr: np.ndarray) -> Tuple[int, int, int, int]:
         """
-        Detects genuine parchment / paper boundary inside the scan, removing
-        outer black scanner beds, binding folds, and margin rulers.
+        Detects genuine parchment / paper boundary inside the scan, strictly removing
+        outer black scanner beds, binding folds, background frames, and margin rulers.
         """
         H, W, _ = rgb_arr.shape
-        rgb_float = rgb_arr.astype(np.float32) / 255.0
-        gray = np.mean(rgb_float, axis=2)
         
-        # Parchment is distinctly brighter than black scanner bed (gray > 0.32 / ~82/255)
-        # and has warm parchment color tone (R >= B)
-        r = rgb_float[:, :, 0]
-        b = rgb_float[:, :, 2]
-        is_parchment = (gray > 0.32) & (r >= b - 0.05) & (gray < 0.98)
+        # Downsample for fast, robust parchment bounding box detection
+        scale = 4
+        rgb_sub = rgb_arr[::scale, ::scale].astype(np.float32) / 255.0
+        gray = np.mean(rgb_sub, axis=2)
+        r = rgb_sub[:, :, 0]
+        b = rgb_sub[:, :, 2]
+        is_parchment = (gray > 0.35) & (r >= b - 0.04) & (gray < 0.98)
 
-        # Morphological opening to remove small dust outside
+        # Morphological opening/closing to remove small dust outside
         from scipy.ndimage import binary_opening, binary_closing
-        is_parchment = binary_opening(is_parchment, iterations=4)
-        is_parchment = binary_closing(is_parchment, iterations=4)
+        is_parchment = binary_opening(is_parchment, iterations=2)
+        is_parchment = binary_closing(is_parchment, iterations=2)
 
         labeled, num_features = label(is_parchment)
         if num_features == 0:
-            return (int(H * 0.02), int(W * 0.02), int(H * 0.98), int(W * 0.98))
+            return (int(H * 0.04), int(W * 0.04), int(H * 0.96), int(W * 0.96))
 
         props = regionprops(labeled)
         largest = max(props, key=lambda p: p.area)
-        py0, px0, py1, px1 = largest.bbox
+        py0, px0, py1, px1 = [int(v * scale) for v in largest.bbox]
 
-        # Add 1.5% inner margin buffer to avoid frayed edges/tears
-        buf_y = max(8, int((py1 - py0) * 0.015))
-        buf_x = max(8, int((px1 - px0) * 0.015))
-        return (py0 + buf_y, px0 + buf_x, py1 - buf_y, px1 - buf_x)
+        # Add 3.0% inner margin safety buffer to avoid frayed edges, tears, and binder holes
+        buf_y = max(16, int((py1 - py0) * 0.030))
+        buf_x = max(16, int((px1 - px0) * 0.030))
+        return (min(H - 1, py0 + buf_y), min(W - 1, px0 + buf_x), max(0, py1 - buf_y), max(0, px1 - buf_x))
 
     def extract_clean_page_mask(self, image: Image.Image, subfolder: str = "voynich") -> Tuple[np.ndarray, np.ndarray, bool]:
         """
@@ -97,53 +99,59 @@ class GlyphSegmenter:
         parchment_mask = np.zeros((H, W), dtype=bool)
         parchment_mask[py0:py1, px0:px1] = True
 
-        # Calculate Chroma and HSV components
-        chroma = np.max(rgb_float, axis=2) - np.min(rgb_float, axis=2)
-        gray = np.mean(rgb_float, axis=2)
+        # 2. Local adaptive Sauvola thresholding for ink
+        sauvola_mask = self.binarizer.binarize(image)
+        sauvola_mask = self.binarizer.remove_small_artifacts(sauvola_mask, min_size=8)
+        ink_candidates = sauvola_mask & parchment_mask
 
+        # 3. Component-level color and geometry discrimination
         from skimage.color import rgb2hsv
         hsv = rgb2hsv(rgb_float)
         hue = hsv[:, :, 0]
         sat = hsv[:, :, 1]
         val = hsv[:, :, 2]
+        chroma = np.max(rgb_float, axis=2) - np.min(rgb_float, axis=2)
 
-        from scipy.ndimage import binary_dilation
-
-        if subfolder == "voynich":
-            # Voynich manuscript: Text ink is strictly achromatic iron-gall (sat < 0.18, chroma < 0.14).
-            # Illustrations contain green chlorophyll, azurite blue, cinnabar red, ochre roots:
-            is_green = (hue >= 0.14) & (hue <= 0.50) & (sat > 0.12) & (val > 0.16)
-            is_blue = (hue >= 0.50) & (hue <= 0.78) & (sat > 0.12) & (val > 0.16)
-            is_red = ((hue >= 0.85) | (hue <= 0.06)) & (sat > 0.16) & (val > 0.18)
-            is_yellow_ochre = (hue >= 0.08) & (hue <= 0.16) & (sat > 0.22) & (val > 0.30)
-            is_illustration_color = is_green | is_blue | is_red | is_yellow_ochre | ((chroma > 0.18) & (val > 0.22))
-            is_illustration_color = binary_dilation(is_illustration_color, iterations=4)
-        else:
-            # Codex Seraphinianus: Text ink is crisp grayscale / black (sat < 0.12, chroma < 0.06).
-            # Illustrations are rich polychrome pencil / watercolor drawings:
-            is_illustration_color = (sat > 0.14) | (chroma > 0.07) | ((val > 0.75) & (sat > 0.08))
-            is_illustration_color = binary_dilation(is_illustration_color, iterations=4)
-
-        # 2. Local adaptive Sauvola thresholding for ink
-        sauvola_mask = self.binarizer.binarize(image)
-        sauvola_mask = self.binarizer.remove_small_artifacts(sauvola_mask, min_size=8)
-
-        # Restrict to genuine parchment and subtract colored illustration paints
-        ink_mask = sauvola_mask & (~is_illustration_color) & parchment_mask
-
-        # 3. Remove large drawing connected components (drawings, frames, diagrams)
-        labeled, num_features = label(ink_mask)
+        labeled, num_features = label(ink_candidates)
         props = regionprops(labeled)
 
-        clean_text_mask = np.copy(ink_mask)
+        clean_text_mask = np.zeros((H, W), dtype=bool)
+
         for p in props:
             ph = p.bbox[2] - p.bbox[0]
             pw = p.bbox[3] - p.bbox[1]
             aspect = pw / max(1, ph)
-            is_drawing = p.area > self.max_drawing_area or ph > self.max_glyph_height * 2.2 or pw > self.max_glyph_width * 3.0
-            is_line_smear = (aspect > 6.0 and pw > 120) or (aspect < 0.12 and ph > 120)
-            if is_drawing or is_line_smear:
-                clean_text_mask[labeled == p.label] = False
+
+            # Geometry filtering: reject giant drawings, full plate frames, or border smears
+            if p.area > self.max_drawing_area or ph > self.max_glyph_height * 2.2 or pw > self.max_glyph_width * 3.5:
+                continue
+            if (aspect > 6.5 and pw > 140) or (aspect < 0.10 and ph > 140):
+                continue
+
+            # Pigment color filtering on component ink pixels
+            c_mask = (labeled[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] == p.label)
+            c_sat = sat[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
+            c_hue = hue[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
+            c_val = val[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
+            c_chroma = chroma[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
+
+            if len(c_sat) > 0:
+                if subfolder == "voynich":
+                    # Colored plant/diagram pigments: Green leaves, blue flowers, red cinnabar, yellow washes
+                    is_paint = (
+                        ((c_hue >= 0.14) & (c_hue <= 0.50) & (c_sat > 0.18)) | # Green
+                        ((c_hue >= 0.50) & (c_hue <= 0.80) & (c_sat > 0.18)) | # Blue
+                        (((c_hue >= 0.85) | (c_hue <= 0.06)) & (c_sat > 0.22)) | # Red
+                        (c_chroma > 0.22) # Highly saturated washes
+                    )
+                    if np.mean(is_paint) > 0.35 and p.area > 35:
+                        continue
+                else:
+                    # Codex Seraphinianus: Colored drawings vs black/gray ink
+                    if (np.mean(c_sat > 0.18) > 0.30 or np.mean(c_chroma > 0.12) > 0.30) and p.area > 35:
+                        continue
+
+            clean_text_mask[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] |= c_mask
 
         # 4. Check page orientation: if text runs vertically (column variance > row variance * 1.5)
         was_rotated = False
@@ -390,12 +398,14 @@ class GlyphSegmenter:
                             if np.mean(is_paint_stroke) > 0.08:
                                 continue
 
-                # Vectorize glyph ductus
+                # Vectorize glyph ductus using Our Model (Kinematic Quill Tracker)
                 try:
-                    skel, widths = self.skel_engine.extract_skeleton(g_mask)
-                    pixel_graph = self.graph_extractor.build_pixel_graph(skel, widths)
-                    raw_strokes = self.graph_extractor.decompose_into_strokes(pixel_graph)
-                    ordered_strokes = self.resolver.resolve_and_order_strokes(raw_strokes) if raw_strokes else []
+                    ordered_strokes = self.calligraphic_vectorizer.extract_calligraphic_ductus(g_mask)
+                    if not ordered_strokes:
+                        skel, widths = self.skel_engine.extract_skeleton(g_mask)
+                        pixel_graph = self.graph_extractor.build_pixel_graph(skel, widths)
+                        raw_strokes = self.graph_extractor.decompose_into_strokes(pixel_graph)
+                        ordered_strokes = self.resolver.resolve_and_order_strokes(raw_strokes) if raw_strokes else []
                 except Exception:
                     ordered_strokes = []
 
@@ -403,7 +413,7 @@ class GlyphSegmenter:
                     continue
 
                 total_stroke_len = sum(len(s.get("points", [])) for s in ordered_strokes)
-                if total_stroke_len < 10:
+                if total_stroke_len < 8:
                     continue
 
                 # Unique hierarchical glyph identifier: Page_Line_Word_G##
@@ -453,10 +463,12 @@ class GlyphSegmenter:
             # Guarantee that every lexical word contains at least 1 constituent glyph (monoglyph fallback)
             if glyph_idx == 0 and np.sum(w_img) >= 15:
                 try:
-                    skel, widths = self.skel_engine.extract_skeleton(w_img)
-                    pixel_graph = self.graph_extractor.build_pixel_graph(skel, widths)
-                    raw_strokes = self.graph_extractor.decompose_into_strokes(pixel_graph)
-                    ordered_strokes = self.resolver.resolve_and_order_strokes(raw_strokes) if raw_strokes else []
+                    ordered_strokes = self.calligraphic_vectorizer.extract_calligraphic_ductus(w_img)
+                    if not ordered_strokes:
+                        skel, widths = self.skel_engine.extract_skeleton(w_img)
+                        pixel_graph = self.graph_extractor.build_pixel_graph(skel, widths)
+                        raw_strokes = self.graph_extractor.decompose_into_strokes(pixel_graph)
+                        ordered_strokes = self.resolver.resolve_and_order_strokes(raw_strokes) if raw_strokes else []
                 except Exception:
                     ordered_strokes = []
 

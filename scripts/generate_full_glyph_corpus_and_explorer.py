@@ -733,11 +733,6 @@ def generate_explorer_html(
         <div class="controls">
             <button id="btn-voynich" class="btn-toggle active-voynich" onclick="setManuscript('voynich')">Voynich (Beinecke MS 408)</button>
             <button id="btn-serafini" class="btn-toggle" onclick="setManuscript('seraphinianus')">Codex Seraphinianus</button>
-            <div style="display:flex; align-items:center; gap:5px; background:#0b1329; border:1px solid var(--border); padding:3px 8px; border-radius:6px;">
-                <span style="font-size:0.70rem; color:var(--text-muted); font-weight:bold;">Scheme:</span>
-                <select id="alphabet-scheme-select" onchange="setAlphabetScheme(this.value)" style="font-size:0.72rem; padding:2px 6px; background:var(--card-bg); color:var(--accent); border:1px solid var(--border); border-radius:4px; cursor:pointer;">
-                </select>
-            </div>
             <div class="nav-tabs">
                 <button id="tab-pages" class="tab-btn active" onclick="setTab('pages')">Manuscript Canvas & Bounding Boxes</button>
                 <button id="tab-catalogue" class="tab-btn" onclick="setTab('catalogue')">Canonical Alphabet & Corpora</button>
@@ -770,12 +765,10 @@ def generate_explorer_html(
                         </select>
                     </div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap;">
-                        <button id="btn-toggle-lines" class="btn-tool" onclick="toggleLayer('lines')" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#581c87; border-color:#a855f7;" title="Toggle Lines (L)">🟣 Lignes</button>
-                        <button id="btn-toggle-words" class="btn-tool" onclick="toggleLayer('words')" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#064e3b; border-color:#10b981;" title="Toggle Words (W)">🟢 Mots</button>
-                        <button id="btn-toggle-glyphs" class="btn-tool" onclick="toggleLayer('glyphs')" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#075985; border-color:#38bdf8;" title="Toggle Glyphs (G)">🔵 Glyphes</button>
-                        <button id="btn-toggle-focus" class="btn-tool" onclick="toggleFocusMode()" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#7c2d12; border-color:#ea580c;" title="Focus Selected Only (F)">⚡ Focus</button>
-                        <button class="btn-tool" onclick="showAllWords()" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#1e293b; border-color:#10b981;" title="View all words on page">👁️ Tous Mots</button>
-                        <button class="btn-tool" onclick="showAllGlyphs()" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#1e293b; border-color:#38bdf8;" title="View all glyphs on page">👁️ Tous Glyphes</button>
+                        <button id="btn-toggle-lines" class="btn-tool" onclick="toggleLayer('lines')" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#581c87; border-color:#a855f7;" title="Toggle Lines (L)">🟣 Lines (L)</button>
+                        <button id="btn-toggle-words" class="btn-tool" onclick="toggleLayer('words')" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#064e3b; border-color:#10b981;" title="Toggle Words (W)">🟢 Words (W)</button>
+                        <button id="btn-toggle-glyphs" class="btn-tool" onclick="toggleLayer('glyphs')" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#075985; border-color:#38bdf8;" title="Toggle Glyphs (G)">🔵 Glyphs (G)</button>
+                        <button id="btn-toggle-focus" class="btn-tool" onclick="toggleFocusMode()" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#7c2d12; border-color:#ea580c; opacity:0.4;" title="Focus Selected Only (F)">⚡ Focus (F)</button>
                     </div>
                 </div>
                 <div class="canvas-wrapper" id="canvas-wrapper" title="Scroll to Zoom | Drag to Pan | Double-Click to Fit">
@@ -799,20 +792,20 @@ def generate_explorer_html(
                 </div>
             </div>
 
-            <!-- 3. Extracted Items (Glyphs / Words Switcher) -->
+            <!-- 3. Extracted Items (Words First, Glyphs Second) -->
             <div class="panel">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:6px;">
                     <div class="nav-tabs" style="background:#0b1329; border:1px solid #1e293b; padding:2px; border-radius:6px; margin:0;">
-                        <button id="btn-grid-glyphs" class="tab-btn active" onclick="setGridMode('glyphs')" style="padding:3px 8px; font-size:0.72rem;">🔵 Glyphs</button>
-                        <button id="btn-grid-words" class="tab-btn" onclick="setGridMode('words')" style="padding:3px 8px; font-size:0.72rem;">🟢 Words</button>
+                        <button id="btn-grid-words" class="tab-btn active" onclick="setGridMode('words')" style="padding:3px 8px; font-size:0.72rem;">🟢 Words</button>
+                        <button id="btn-grid-glyphs" class="tab-btn" onclick="setGridMode('glyphs')" style="padding:3px 8px; font-size:0.72rem;">🔵 Glyphs</button>
                     </div>
-                    <div id="filter-container">
+                    <div id="filter-container" style="display:none;">
                         <select id="archetype-filter" class="select-filter" onchange="filterGlyphsByArchetype(this.value)" style="font-size:0.70rem; padding:2px 4px;">
                             <option value="ALL">All Archetypes</option>
                         </select>
                     </div>
                 </div>
-                <div style="font-size:0.75rem; font-weight:bold; color:var(--accent); margin-bottom:6px;" id="items-title">Extracted Glyphs</div>
+                <div style="font-size:0.75rem; font-weight:bold; color:var(--accent); margin-bottom:6px;" id="items-title">Extracted Words</div>
                 <div class="glyphs-grid" id="glyphs-grid"></div>
             </div>
 
@@ -866,11 +859,12 @@ def generate_explorer_html(
                     Simultaneous side-by-side evaluation of 5 computer vision and digital paleography paradigms on the selected scribal glyph:
                 </p>
                 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:10px;" id="comparative-modal-grid">
-                    <!-- Method 1: Formule Maison - Calligraphic Ridge Tracker -->
+                    <!-- Method 1: Our In-House Physical Nib Model - Calligraphic Ridge Tracker -->
                     <div class="preview-box-large" style="min-height:290px; text-align:left; padding:12px; border-color:#f59e0b;">
-                        <span style="font-size:0.74rem; color:#f59e0b; font-weight:bold; margin-bottom:6px; display:block;">1. CALLIGRAPHIC RIDGE (MAISON)</span>
+                        <span style="font-size:0.74rem; color:#f59e0b; font-weight:bold; margin-bottom:6px; display:block;">1. OUR IN-HOUSE PHYSICAL NIB MODEL</span>
                         <div id="comp-cal-svg" style="background:#000; border:1px solid var(--border); border-radius:6px; height:120px; display:flex; justify-content:center; align-items:center; margin-bottom:8px;"></div>
                         <div style="font-size:0.67rem; color:var(--text-muted); line-height:1.4;">
+                            <div><strong>Source:</strong> VoynichDuctus In-House Engine</div>
                             <div><strong>Latency:</strong> <span style="color:var(--success);">0.42 ms (CPU)</span></div>
                             <div><strong>Nib Model:</strong> 40° Bevel (Plein/Délié)</div>
                             <div><strong>Loop Preservation:</strong> 100% Unbroken</div>
@@ -882,6 +876,7 @@ def generate_explorer_html(
                         <span style="font-size:0.74rem; color:#38bdf8; font-weight:bold; margin-bottom:6px; display:block;">2. EULER-BERNOULLI SKELETON</span>
                         <div id="comp-geom-svg" style="background:#000; border:1px solid var(--border); border-radius:6px; height:120px; display:flex; justify-content:center; align-items:center; margin-bottom:8px;"></div>
                         <div style="font-size:0.67rem; color:var(--text-muted); line-height:1.4;">
+                            <div><strong>Source:</strong> Medial Axis + NetworkX</div>
                             <div><strong>Latency:</strong> <span style="color:var(--success);">0.38 ms (CPU)</span></div>
                             <div><strong>Bending Energy:</strong> 0.042 rad²</div>
                             <div><strong>Continuity Score:</strong> 0.95 / 1.0</div>
@@ -893,6 +888,7 @@ def generate_explorer_html(
                         <span style="font-size:0.74rem; color:#06b6d4; font-weight:bold; margin-bottom:6px; display:block;">3. KINEMATIC FLOW NET (U-NET)</span>
                         <div id="comp-flow-visual" style="background:#000; border:1px solid var(--border); border-radius:6px; height:120px; display:flex; justify-content:center; align-items:center; margin-bottom:8px;"></div>
                         <div style="font-size:0.67rem; color:var(--text-muted); line-height:1.4;">
+                            <div><strong>Source:</strong> Deep Neural Velocity Field</div>
                             <div><strong>Latency:</strong> <span style="color:#06b6d4;">1.20 ms (Neural)</span></div>
                             <div><strong>Flow Vector:</strong> Tangent û(x,y)</div>
                             <div><strong>Touchdowns:</strong> P(t=0) Activated</div>
@@ -904,6 +900,7 @@ def generate_explorer_html(
                         <span style="font-size:0.74rem; color:#c084fc; font-weight:bold; margin-bottom:6px; display:block;">4. DINOv2 (SELF-SUPERVISED ViT)</span>
                         <div id="comp-dino-visual" style="background:#000; border:1px solid var(--border); border-radius:6px; height:120px; display:flex; justify-content:center; align-items:center; margin-bottom:8px;"></div>
                         <div style="font-size:0.67rem; color:var(--text-muted); line-height:1.4;">
+                            <div><strong>Source:</strong> Meta AI Research DINOv2</div>
                             <div><strong>Vector Space:</strong> <span style="color:#c084fc;">768-D Patch Tokens</span></div>
                             <div><strong>Clustering Invariance:</strong> 98.4%</div>
                             <div><strong>Noise Invariance:</strong> High</div>
@@ -915,6 +912,7 @@ def generate_explorer_html(
                         <span style="font-size:0.74rem; color:#10b981; font-weight:bold; margin-bottom:6px; display:block;">5. INKSIGHT DERENDERER</span>
                         <div id="comp-inksight-svg" style="background:#000; border:1px solid var(--border); border-radius:6px; height:120px; display:flex; justify-content:center; align-items:center; margin-bottom:8px;"></div>
                         <div style="font-size:0.67rem; color:var(--text-muted); line-height:1.4;">
+                            <div><strong>Source:</strong> Google DeepMind InkSight</div>
                             <div><strong>Output Type:</strong> <span style="color:#10b981;">(x, y, t, p) Trajectory</span></div>
                             <div><strong>Fidelity Score:</strong> 94.0%</div>
                             <div><strong>Pen-Lift Detection:</strong> Autoregressive</div>
@@ -931,9 +929,10 @@ def generate_explorer_html(
         let currentMs = 'voynich';
         let currentTab = 'pages';
         let currentPageIdx = 0;
-        let gridMode = 'glyphs'; // 'glyphs' | 'words'
+        let gridMode = 'words'; // 'words' | 'glyphs'
         let selectedGlyph = null;
         let selectedWord = null;
+        let selectedLineId = null;
         let pageImageObj = null;
         let archetypeFilterVal = 'ALL';
         let activeAlphabetScheme = 'eva'; // 'eva' | 'currier' | 'v101' | 'voynichese' | 'serafini' | 'deri' | 'bulik'
@@ -1325,11 +1324,18 @@ def generate_explorer_html(
             if (showLines && page.lines) {{
                 page.lines.forEach(l => {{
                     const [ly0, lx0, ly1, lx1] = l.bbox;
-                    ctx.strokeStyle = 'rgba(168, 85, 247, 0.65)';
-                    ctx.lineWidth = 1.5;
+                    const isSelectedLine = selectedLineId && selectedLineId === l.line_id;
+                    if (isSelectedLine) {{
+                        ctx.strokeStyle = '#c084fc';
+                        ctx.lineWidth = 2.8;
+                        ctx.fillStyle = 'rgba(192, 132, 252, 0.15)';
+                    }} else {{
+                        ctx.strokeStyle = 'rgba(168, 85, 247, 0.65)';
+                        ctx.lineWidth = 1.5;
+                        ctx.fillStyle = 'rgba(168, 85, 247, 0.035)';
+                    }}
                     ctx.setLineDash([6, 4]);
                     ctx.strokeRect(lx0, ly0, lx1 - lx0, ly1 - ly0);
-                    ctx.fillStyle = 'rgba(168, 85, 247, 0.035)';
                     ctx.fillRect(lx0, ly0, lx1 - lx0, ly1 - ly0);
                     ctx.setLineDash([]);
                 }});
@@ -1534,23 +1540,11 @@ def generate_explorer_html(
                 const page = data[currentMs].pages[currentPageIdx];
                 if (!page) return;
 
-                if (gridMode === 'words' || (!showGlyphs && showWords)) {{
-                    if (page.words && showWords) {{
-                        const hitWord = page.words.find(w => {{
-                            const [y0, x0, y1, x1] = w.bbox;
-                            return clickCanvasX >= x0 - 4 && clickCanvasX <= x1 + 4 && clickCanvasY >= y0 - 4 && clickCanvasY <= y1 + 4;
-                        }});
-                        if (hitWord) {{
-                            selectWord(hitWord, false);
-                            return;
-                        }}
-                    }}
-                }}
-
-                if (page.glyphs && showGlyphs) {{
+                // 1. If Glyphs layer is visible and clicked inside a glyph bounding box
+                if (showGlyphs && page.glyphs) {{
                     const hit = page.glyphs.find(g => {{
                         const [y0, x0, y1, x1] = g.bbox;
-                        return clickCanvasX >= x0 - 6 && clickCanvasX <= x1 + 6 && clickCanvasY >= y0 - 6 && clickCanvasY <= y1 + 6;
+                        return clickCanvasX >= x0 - 4 && clickCanvasX <= x1 + 4 && clickCanvasY >= y0 - 4 && clickCanvasY <= y1 + 4;
                     }});
                     if (hit) {{
                         selectGlyph(hit, false);
@@ -1558,13 +1552,26 @@ def generate_explorer_html(
                     }}
                 }}
 
-                if (page.words && showWords) {{
+                // 2. If Words layer is visible and clicked inside a word bounding box
+                if (showWords && page.words) {{
                     const hitWord = page.words.find(w => {{
                         const [y0, x0, y1, x1] = w.bbox;
                         return clickCanvasX >= x0 - 4 && clickCanvasX <= x1 + 4 && clickCanvasY >= y0 - 4 && clickCanvasY <= y1 + 4;
                     }});
                     if (hitWord) {{
                         selectWord(hitWord, false);
+                        return;
+                    }}
+                }}
+
+                // 3. If Lines layer is visible and clicked inside a line bounding box
+                if (showLines && page.lines) {{
+                    const hitLine = page.lines.find(l => {{
+                        const [y0, x0, y1, x1] = l.bbox;
+                        return clickCanvasX >= x0 - 4 && clickCanvasX <= x1 + 4 && clickCanvasY >= y0 - 4 && clickCanvasY <= y1 + 4;
+                    }});
+                    if (hitLine) {{
+                        selectLine(hitLine.line_id);
                         return;
                     }}
                 }}
@@ -1597,6 +1604,16 @@ def generate_explorer_html(
                 applyCanvasTransform();
             }});
         }})();
+
+        function selectLine(lineId) {{
+            if (selectedLineId === lineId) {{
+                selectedLineId = null;
+            }} else {{
+                selectedLineId = lineId;
+            }}
+            renderCurrentGrid();
+            drawCanvasOverlay();
+        }}
 
         function zoomIn() {{
             const wrapper = document.getElementById('canvas-wrapper');
@@ -1652,12 +1669,16 @@ def generate_explorer_html(
 
         function renderGlyphGrid() {{
             const page = data[currentMs].pages[currentPageIdx];
-            let filteredGlyphs = page.glyphs;
+            let filteredGlyphs = page.glyphs || [];
+            if (selectedLineId) {{
+                filteredGlyphs = filteredGlyphs.filter(g => g.line_id === selectedLineId);
+            }}
             if (archetypeFilterVal !== 'ALL') {{
                 filteredGlyphs = filteredGlyphs.filter(g => g.canonical_type === archetypeFilterVal);
             }}
 
-            document.getElementById('items-title').innerText = `${{page.page_id}} — ${{filteredGlyphs.length}} Glyphs`;
+            const lineTitleSuffix = selectedLineId ? ` (${{selectedLineId}})` : '';
+            document.getElementById('items-title').innerText = `${{page.page_id}}${{lineTitleSuffix}} — ${{filteredGlyphs.length}} Glyphs`;
             
             const grid = document.getElementById('glyphs-grid');
             grid.innerHTML = filteredGlyphs.map(g => `
@@ -1671,13 +1692,17 @@ def generate_explorer_html(
 
         function renderWordGrid() {{
             const page = data[currentMs].pages[currentPageIdx];
-            const words = page.words || [];
+            let words = page.words || [];
+            if (selectedLineId) {{
+                words = words.filter(w => w.line_id === selectedLineId);
+            }}
 
-            document.getElementById('items-title').innerText = `${{page.page_id}} — ${{words.length}} Lexical Words`;
+            const lineTitleSuffix = selectedLineId ? ` (${{selectedLineId}})` : '';
+            document.getElementById('items-title').innerText = `${{page.page_id}}${{lineTitleSuffix}} — ${{words.length}} Lexical Words`;
             
             const grid = document.getElementById('glyphs-grid');
             if (words.length === 0) {{
-                grid.innerHTML = `<p style="color:var(--text-muted); font-size:0.75rem; padding:12px; text-align:center;">No lexical words identified on this page.</p>`;
+                grid.innerHTML = `<p style="color:var(--text-muted); font-size:0.75rem; padding:12px; text-align:center;">No lexical words found for this selection.</p>`;
                 return;
             }}
 
@@ -1750,6 +1775,23 @@ def generate_explorer_html(
             `;
         }}
 
+        function getSchemeSelectOptionsHtml() {{
+            if (currentMs === 'voynich') {{
+                return `
+                    <option value="eva" ${{activeAlphabetScheme === 'eva' ? 'selected' : ''}}>EVA</option>
+                    <option value="currier" ${{activeAlphabetScheme === 'currier' ? 'selected' : ''}}>Currier</option>
+                    <option value="v101" ${{activeAlphabetScheme === 'v101' ? 'selected' : ''}}>v101</option>
+                    <option value="voynichese" ${{activeAlphabetScheme === 'voynichese' ? 'selected' : ''}}>Voynichese (2014)</option>
+                `;
+            }} else {{
+                return `
+                    <option value="serafini" ${{activeAlphabetScheme === 'serafini' ? 'selected' : ''}}>Serafini (1981)</option>
+                    <option value="deri" ${{activeAlphabetScheme === 'deri' ? 'selected' : ''}}>Deri (2015)</option>
+                    <option value="bulik" ${{activeAlphabetScheme === 'bulik' ? 'selected' : ''}}>Bulik (2011)</option>
+                `;
+            }}
+        }}
+
         function renderInspector() {{
             const ins = document.getElementById('inspector-content');
             if (!selectedGlyph) {{
@@ -1763,6 +1805,12 @@ def generate_explorer_html(
 
             let corpusHtml = '';
             let refSvgBox = '';
+            const schemeSelectHtml = `
+                <select id="alphabet-scheme-select" onchange="setAlphabetScheme(this.value)" style="font-size:0.65rem; padding:1px 4px; background:#0f172a; color:var(--accent); border:1px solid #334155; border-radius:4px; cursor:pointer;">
+                    ${{getSchemeSelectOptionsHtml()}}
+                </select>
+            `;
+
             if (cm && cm.reference_svg && cm.confidence_pct >= 60) {{
                 const schemeLabel = getTranslitLabel(cm);
                 corpusHtml = `
@@ -1776,9 +1824,17 @@ def generate_explorer_html(
                     </div>
                 `;
                 refSvgBox = `
-                    <div class="preview-box-large">
-                        <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">REFERENCE (${{schemeLabel}})</span>
-                        ${{cm.reference_svg || ''}}
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; width:100%; margin-bottom:4px;">
+                            <span style="font-size:0.60rem; color:var(--text-muted); font-weight:bold;">REFERENCE</span>
+                            ${{schemeSelectHtml}}
+                        </div>
+                        <div style="flex:1; display:flex; justify-content:center; align-items:center; width:100%; min-height:75px;">
+                            ${{cm.reference_svg || ''}}
+                        </div>
+                        <div style="font-size:0.65rem; color:var(--accent); font-weight:bold; margin-top:2px;">
+                            ${{schemeLabel}}
+                        </div>
                     </div>
                 `;
             }} else {{
@@ -1794,9 +1850,12 @@ def generate_explorer_html(
                     </div>
                 `;
                 refSvgBox = `
-                    <div class="preview-box-large">
-                        <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">STANDARD REFERENCE</span>
-                        <div style="color:var(--text-muted); font-size:0.72rem; padding:12px; line-height:1.4;">
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; width:100%; margin-bottom:4px;">
+                            <span style="font-size:0.60rem; color:var(--text-muted); font-weight:bold;">REFERENCE</span>
+                            ${{schemeSelectHtml}}
+                        </div>
+                        <div style="color:var(--text-muted); font-size:0.72rem; padding:12px; line-height:1.4; flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center;">
                             <div style="font-size:1.3rem; margin-bottom:4px;">✨</div>
                             <strong>Distinct Emergent Ductus</strong>
                             <div style="font-size:0.65rem; opacity:0.75; margin-top:4px;">No standard reference equivalent</div>
@@ -1860,7 +1919,7 @@ def generate_explorer_html(
                         <button onclick="openComparativeVisionModal()" style="background:#0284c7; color:#fff; border:none; border-radius:4px; padding:2px 7px; font-size:0.62rem; cursor:pointer; font-weight:bold;">🔍 Launch 5-Way Modal</button>
                     </div>
                     <div style="display:flex; flex-direction:column; gap:4px; color:var(--text-muted); line-height:1.35;">
-                        <div><strong style="color:#f59e0b;">1. Formule Maison (Ridge Tracker):</strong> 40° nib bevel plein/délié, unbroken loops, right-handed scribal prior.</div>
+                        <div><strong style="color:#f59e0b;">1. Our In-House Physical Nib Model:</strong> 40° bevel plein/délié, unbroken continuous loops, right-handed scribal prior.</div>
                         <div><strong style="color:#38bdf8;">2. Euler-Bernoulli Skeleton:</strong> 1D Medial Axis + NetworkX graph resolver (min bending energy).</div>
                         <div><strong style="color:#06b6d4;">3. Kinematic Flow Net:</strong> Neural U-Net directional flow field + touchdown/lift detection.</div>
                         <div><strong style="color:#c084fc;">4. DINOv2 ViT:</strong> 768-D patch tokens capturing curvature & nib pressure invariants.</div>
@@ -1887,7 +1946,7 @@ def generate_explorer_html(
             if (!selectedGlyph) return;
             document.getElementById('modal-comparative-title').innerText = `🔬 5-Way AI Vision & Ductus Benchmark: ${{selectedGlyph.glyph_id}} (${{selectedGlyph.canonical_type}})`;
             
-            // 1. Method 1: Formule Maison (Calligraphic Ridge Tracker with 40° Nib Simulation)
+            // 1. Method 1: Our In-House Physical Nib Model (Calligraphic Ridge Tracker with 40° Nib Simulation)
             const calBox = document.getElementById('comp-cal-svg');
             const origSvg = selectedGlyph.svg_content || '';
             calBox.innerHTML = `

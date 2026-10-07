@@ -40,7 +40,7 @@ class CalligraphicVectorEngine:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
         return {
-            "method": "Calligraphic Ridge Tracker (Formule Maison)",
+            "method": "Our Model (Kinematic Quill Tracker)",
             "method_code": "calligraphic",
             "stroke_count": len(strokes),
             "strokes": strokes,

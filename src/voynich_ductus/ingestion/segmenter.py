@@ -49,17 +49,21 @@ class LineSegmenter:
             work_img = binary_ink
             off_y, off_x = 0, 0
 
+        # Scale-adaptive line pitch and smoothing sigma based on page height
+        H_work = work_img.shape[0]
+        eff_pitch = max(self.min_line_pitch, int(H_work / 65))
+        min_dist = max(18, int(eff_pitch * 0.65))
+
         # Horizontal projection profile
         raw_profile = np.sum(work_img, axis=1).astype(float)
         from scipy.ndimage import gaussian_filter1d
         from scipy.signal import find_peaks
 
-        smooth_profile = gaussian_filter1d(raw_profile, sigma=3.5)
+        smooth_profile = gaussian_filter1d(raw_profile, sigma=max(3.0, eff_pitch * 0.08))
 
         # Detect line baseline centers with sensitive relative prominence
         max_p = np.max(smooth_profile) if len(smooth_profile) > 0 else 0
-        min_prom = max(2.0, max_p * 0.02)
-        min_dist = max(14, int(self.min_line_pitch * 0.65))
+        min_prom = max(1.5, max_p * 0.015)
         peaks, _ = find_peaks(smooth_profile, distance=min_dist, prominence=min_prom)
 
         if len(peaks) == 0:
@@ -85,7 +89,7 @@ class LineSegmenter:
             # Find closest peak
             distances = [abs(cy - peak_y) for peak_y in peaks]
             closest_idx = int(np.argmin(distances))
-            if distances[closest_idx] <= self.min_line_pitch * 1.2:
+            if distances[closest_idx] <= eff_pitch * 1.6:
                 line_buckets[closest_idx].append(p)
 
         results = []
