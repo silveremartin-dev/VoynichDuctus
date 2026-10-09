@@ -171,16 +171,19 @@ class VoynicheseRosettaLoader:
 
         scan_w, scan_h = scan_image.size
 
-        # Heuristic parchment registration for Yale full scans (approx 2500 x 3168 with black margin)
-        # Yale full scans typically contain ~200-240px black binding border on the left and 40-60px at top.
-        if scan_w >= 2000 and scan_h >= 2500:
-            # High-res Yale scan
-            sx = (scan_w - 300.0) / xml_w
-            sy = (scan_h - 100.0) / xml_h
-            tx = 230.0
-            ty = 50.0
-        else:
-            # Generic direct proportional scaling
+        # Calibrated parchment registration: maps 1090x1500 Voynichese canvas to actual parchment folio
+        try:
+            from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
+            seg = GlyphSegmenter()
+            rgb_arr = np.array(scan_image.convert("RGB"))
+            py0, px0, py1, px1 = seg.detect_parchment_bounds(rgb_arr)
+            parch_w = max(100, px1 - px0)
+            parch_h = max(100, py1 - py0)
+            sx = parch_w / xml_w
+            sy = parch_h / xml_h
+            tx = float(px0)
+            ty = float(py0)
+        except Exception:
             sx = scan_w / xml_w
             sy = scan_h / xml_h
             tx = 0.0
@@ -195,7 +198,8 @@ class VoynicheseRosettaLoader:
         padding_px: int = 4,
     ) -> List[RosettaWord]:
         """
-        Extracts all words for a folio with high-res bounding boxes and cropped image patches.
+        Extracts all words for a folio with high-res bounding boxes and cropped image patches,
+        using ink-locking alignment to lock onto the exact ink contours.
         """
         words = self.load_folio_words(folio_id)
         if scan_image is None:
@@ -208,13 +212,52 @@ class VoynicheseRosettaLoader:
         sx, sy, tx, ty = self.compute_scan_affine_transform(folio_id, scan_image)
         img_w, img_h = scan_image.size
 
+        # Precompute ink mask for fast local snapping
+        from voynich_ductus.ingestion.binarization import Binarizer
+        from scipy.ndimage import label
+        from skimage.measure import regionprops
+        binarizer = Binarizer(method="sauvola")
+        ink_mask = binarizer.binarize(scan_image)
+
         aligned_words: List[RosettaWord] = []
         for w in words:
-            # Map XML bbox to scan coordinates
-            min_x = max(0, int(tx + w.x_xml * sx - padding_px))
-            min_y = max(0, int(ty + w.y_xml * sy - padding_px))
-            max_x = min(img_w, int(tx + (w.x_xml + w.width_xml) * sx + padding_px))
-            max_y = min(img_h, int(ty + (w.y_xml + w.height_xml) * sy + padding_px))
+            # Map XML bbox to initial parchment coordinates
+            init_x0 = int(tx + w.x_xml * sx)
+            init_y0 = int(ty + w.y_xml * sy)
+            init_x1 = int(tx + (w.x_xml + w.width_xml) * sx)
+            init_y1 = int(ty + (w.y_xml + w.height_xml) * sy)
+
+            # Local ink-snapping within a search window around the annotated word
+            w_pad = 12
+            sy0 = max(0, init_y0 - w_pad)
+            sx0 = max(0, init_x0 - w_pad)
+            sy1 = min(img_h, init_y1 + w_pad)
+            sx1 = min(img_w, init_x1 + w_pad)
+
+            sub_ink = ink_mask[sy0:sy1, sx0:sx1]
+            labeled_sub, num_sub = label(sub_ink)
+            if num_sub > 0:
+                props = regionprops(labeled_sub)
+                valid = [p for p in props if p.area >= 12 and (p.bbox[2] - p.bbox[0]) >= 6]
+                if valid:
+                    min_r = min(p.bbox[0] for p in valid)
+                    min_c = min(p.bbox[1] for p in valid)
+                    max_r = max(p.bbox[2] for p in valid)
+                    max_c = max(p.bbox[3] for p in valid)
+                    min_y = max(0, sy0 + min_r - 2)
+                    min_x = max(0, sx0 + min_c - 3)
+                    max_y = min(img_h, sy0 + max_r + 2)
+                    max_x = min(img_w, sx0 + max_c + 3)
+                else:
+                    min_x = max(0, init_x0 - padding_px)
+                    min_y = max(0, init_y0 - padding_px)
+                    max_x = min(img_w, init_x1 + padding_px)
+                    max_y = min(img_h, init_y1 + padding_px)
+            else:
+                min_x = max(0, init_x0 - padding_px)
+                min_y = max(0, init_y0 - padding_px)
+                max_x = min(img_w, init_x1 + padding_px)
+                max_y = min(img_h, init_y1 + padding_px)
 
             bbox_scan = (min_x, min_y, max_x, max_y)
             

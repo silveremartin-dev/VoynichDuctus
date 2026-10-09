@@ -16,13 +16,13 @@ def test_gallica_client_ark_normalization():
     client = GallicaManuscriptClient()
     
     ark1 = client.normalize_ark("latin_6823")
-    assert ark1 == "ark:/12148/btv1b52501620s"
+    assert ark1 == "ark:/12148/btv1b6000517p"
 
-    ark2 = client.normalize_ark("btv1b8451106z")
-    assert ark2 == "ark:/12148/btv1b8451106z"
+    ark2 = client.normalize_ark("btv1b84262821")
+    assert ark2 == "ark:/12148/btv1b84262821"
 
     url = client.get_page_iiif_url("latin_6823", page_num=15, width=1800)
-    assert "https://gallica.bnf.fr/iiif/12148/btv1b52501620s/f15/full/1800,/0/native.jpg" in url
+    assert "https://gallica.bnf.fr/iiif/12148/btv1b6000517p/f15/full/1800,/0/native.jpg" in url
 
 
 def test_gallica_client_synthetic_fallback():

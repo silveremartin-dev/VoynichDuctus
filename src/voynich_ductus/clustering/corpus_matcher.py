@@ -576,6 +576,33 @@ class CorpusCorrespondenceMatcher:
         Estimates the closest standard corpus match (EVA / Currier / v101 / Voynichese) for an induced Voynich archetype
         using strict topological constraints (stroke count bounds, aspect ratio, and loop compatibility).
         """
+        # Check if cluster has certified ground truth EVA characters from transcriptions
+        if cluster_glyphs:
+            eva_votes = {}
+            for g in cluster_glyphs:
+                ec = (g.get("eva_char") or "").strip().lower()
+                if ec:
+                    eva_votes[ec] = eva_votes.get(ec, 0) + 1
+            if eva_votes:
+                top_eva, vote_count = max(eva_votes.items(), key=lambda item: item[1])
+                ratio = vote_count / max(1, len(cluster_glyphs))
+                if ratio >= 0.25 or vote_count >= 3:
+                    for prof in cls.VOYNICH_STANDARD_PROFILES:
+                        if prof["eva"] == top_eva:
+                            conf = min(0.98, max(0.75, ratio + 0.15))
+                            return {
+                                "system": "EVA / Currier / v101 / Voynichese",
+                                "eva_equivalent": prof["eva"],
+                                "currier_equivalent": prof["currier"],
+                                "v101_equivalent": prof.get("v101", prof["eva"]),
+                                "voynichese_equivalent": prof.get("voynichese", prof["eva"]),
+                                "name": prof["name"],
+                                "category": prof["category"],
+                                "confidence_pct": round(conf * 100, 1),
+                                "description": prof["description"],
+                                "reference_svg": cls.EVA_REFERENCE_SVGS.get(prof["eva"], "")
+                            }
+
         aspect_ratio = mean_width / max(1.0, mean_height)
 
         archetype_has_loop = False
@@ -662,25 +689,43 @@ class CorpusCorrespondenceMatcher:
         """
         aspect_ratio = mean_width / max(1.0, mean_height)
 
+        archetype_has_loop = False
+        if cluster_glyphs:
+            loop_scores = []
+            for g in cluster_glyphs[:12]:
+                ff = g.get("fill_factor", 0.25)
+                if 0.18 <= ff <= 0.48 and len(g.get("strokes", [])) <= 2:
+                    loop_scores.append(True)
+                else:
+                    loop_scores.append(False)
+            archetype_has_loop = np.mean(loop_scores) >= 0.50 if loop_scores else False
+
         best_match = None
         best_distance = float("inf")
 
         for prof in cls.SERAFINI_STANDARD_PROFILES:
             if round(mean_strokes) < prof["min_strokes"]:
-                stroke_pen = 3.5 * (prof["min_strokes"] - mean_strokes)
+                stroke_pen = 4.0 * (prof["min_strokes"] - mean_strokes)
             elif round(mean_strokes) > prof["max_strokes"]:
-                stroke_pen = 3.5 * (mean_strokes - prof["max_strokes"])
+                stroke_pen = 4.0 * (mean_strokes - prof["max_strokes"])
             else:
-                stroke_pen = abs(prof["strokes"] - mean_strokes) * 1.0
+                stroke_pen = abs(prof["strokes"] - mean_strokes) * 1.2
 
-            aspect_diff = abs(prof["aspect_ratio"] - aspect_ratio) * 1.6
-            total_dist = stroke_pen + aspect_diff
+            aspect_diff = abs(prof["aspect_ratio"] - aspect_ratio) * 1.8
+
+            loop_pen = 0.0
+            if prof.get("has_loop", False) and not archetype_has_loop and mean_strokes < 1.8:
+                loop_pen = 3.0
+            elif not prof.get("has_loop", False) and archetype_has_loop and prof["strokes"] <= 1.5:
+                loop_pen = 3.0
+
+            total_dist = stroke_pen + aspect_diff + loop_pen
 
             if total_dist < best_distance:
                 best_distance = total_dist
                 best_match = prof
 
-        if best_distance > 3.8:
+        if best_distance > 3.6:
             return {
                 "system": "Serafini Typology (1981) / Deri (2015) / Bulik (2011)",
                 "serafini_code": "S-EMERGENT",

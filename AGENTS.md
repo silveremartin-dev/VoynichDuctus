@@ -97,6 +97,13 @@ When interacting with or extending this codebase, all AI agents must adhere to t
   - `RuggCardanGenerator`: Gordon Rugg's Cardan grille across combinatorial syllable tables.
   - `BaselineGenerator`: Authentic 15th-century Latin herbal texts (Pseudo-Apuleius / Circa Instans), uniform noise, and Markov babblers.
 
+### 3.7 `gallica & medieval calibration`
+- **Goal**: Ground stroke extraction and scribal kinematics against authentic 15th-century Latin herbal codices digitized by Bibliothèque nationale de France (BnF).
+- **Key Classes**:
+  - `GallicaManuscriptClient`: Standardizes Gallica ARK identifiers (`ark:/12148/btv1b52501620s`, `latin_6823`, `latin_17868`) and fetches IIIF plates with transcription alignments.
+  - `MedievalScribalTrainer`: Supervised & self-supervised trainer calibrating quill physical parameters (40° nib angle, pleins & déliés contrast ratio, distance ridge continuity) on medieval scribal hands.
+  - `ComparativeVectorizerBenchmark`: Side-by-side evaluation suite benchmarking 5 digital paleography paradigms (Physical Nib Model, Euler-Bernoulli Skeleton, Scribal Flow Net, DINOv2 ViT, Google InkSight).
+
 ---
 
 ## 4. Guidelines for Future Agent Tasks
@@ -104,7 +111,7 @@ When interacting with or extending this codebase, all AI agents must adhere to t
 ### When adding a new stroke extraction model:
 1. Wrap the inference logic inside `voynich_ductus.vectorizer.inksight_adapter` or create a sibling adapter class.
 2. Ensure it outputs standard stroke dictionaries containing `stroke_id`, `points: [(y, x, width)]`, and `order_index`.
-3. Add a corresponding unit test in `tests/test_vectorizer.py`.
+3. Add a corresponding unit test in `tests/test_vectorizer.py` and `tests/test_comparative_vectorizers.py`.
 
 ### When adding a new diagnostic metric:
 1. Place the estimator class in `voynich_ductus.diagnostics`.

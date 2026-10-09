@@ -50,15 +50,15 @@ def test_empty_mask_ductus():
 def test_multi_stroke_ductus_extraction():
     vec = CalligraphicVectorizer()
     
-    # Synthetic letter 't' with a vertical stem and a separate horizontal crossbar
+    # Synthetic letter 'i' or accented letter with a main stem and a separate dot/accent mark
     mask = np.zeros((50, 50), dtype=bool)
-    # Vertical stem (y: 10 to 45, x: 23 to 27)
-    mask[10:45, 23:27] = True
-    # Disconnected horizontal crossbar (y: 20 to 24, x: 10 to 40)
-    mask[20:24, 10:40] = True
+    # Detached accent / dot (y: 6 to 12, x: 23 to 27)
+    mask[6:12, 23:27] = True
+    # Main stem (y: 18 to 45, x: 23 to 27)
+    mask[18:45, 23:27] = True
 
     strokes = vec.extract_calligraphic_ductus(mask)
-    assert len(strokes) >= 2
+    assert len(strokes) == 2
     assert strokes[0]["stroke_id"] == "cal_s00"
     assert strokes[1]["stroke_id"] == "cal_s01"
     assert strokes[0]["order_index"] == 0

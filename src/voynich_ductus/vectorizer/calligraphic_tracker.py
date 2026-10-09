@@ -96,40 +96,66 @@ class CalligraphicVectorizer:
     def extract_calligraphic_ductus(self, binary_mask: np.ndarray) -> List[Dict[str, Any]]:
         """
         Derenders a 2D binary ink patch into smooth calligraphic strokes following distance ridges.
-        Preserves single continuous strokes for loops and cursive letters.
+        Preserves single continuous strokes for loops and cursive letters by processing each
+        connected ink component as a single continuous scribal gesture.
         """
         if not np.any(binary_mask):
             return []
 
-        h, w = binary_mask.shape
-        skel, dist_map = medial_axis(binary_mask, return_distance=True)
-        smoothed_dist = gaussian_filter(dist_map.astype(np.float32), sigma=self.smoothing_sigma)
-
-        # 1. Identify genuine scribal touchdown points
-        candidates = self.find_touchdown_endpoints(binary_mask, skel)
-        if not candidates:
+        from scipy.ndimage import label
+        labeled_mask, num_features = label(binary_mask)
+        if num_features == 0:
             return []
 
-        visited = np.zeros_like(binary_mask, dtype=bool)
+        # Find properties of each connected component
+        components = []
+        for comp_id in range(1, num_features + 1):
+            comp_mask = (labeled_mask == comp_id)
+            comp_area = int(np.sum(comp_mask))
+            if comp_area < 12:
+                continue  # Ignore speckle noise
+            pts = np.argwhere(comp_mask)
+            min_y, min_x = pts.min(axis=0)
+            components.append({
+                "id": comp_id,
+                "mask": comp_mask,
+                "area": comp_area,
+                "min_y": min_y,
+                "min_x": min_x
+            })
+
+        # Sort components in natural scribal order: top-to-bottom, left-to-right
+        components.sort(key=lambda c: (c["min_y"] // 15, c["min_x"]))
+
         strokes = []
         stroke_idx = 0
 
-        # 1. Primary continuous stroke tracing from best touchdown
-        for _, start_y, start_x, init_dy, init_dx in candidates:
-            # Check if this touchdown area is already covered
-            y_min, y_max = max(0, start_y - 2), min(h, start_y + 3)
-            x_min, x_max = max(0, start_x - 2), min(w, start_x + 3)
-            if np.all(visited[y_min:y_max, x_min:x_max] | ~binary_mask[y_min:y_max, x_min:x_max]):
+        for comp in components:
+            comp_mask = comp["mask"]
+            h, w = comp_mask.shape
+            skel, dist_map = medial_axis(comp_mask, return_distance=True)
+            smoothed_dist = gaussian_filter(dist_map.astype(np.float32), sigma=self.smoothing_sigma)
+
+            candidates = self.find_touchdown_endpoints(comp_mask, skel)
+            if not candidates:
                 continue
 
-            # Trace single continuous trajectory from this touchdown as long as physically possible
+            # Pick the highest priority touchdown point for this component
+            _, start_y, start_x, init_dy, init_dx = candidates[0]
+
+            # Trace single continuous trajectory through the component's distance ridge
+            visited = np.zeros_like(comp_mask, dtype=bool)
             raw_pts = self._trace_continuous_ridge(smoothed_dist, visited, start_y, start_x, init_dy, init_dx)
-            if len(raw_pts) < 4:
-                continue
+            
+            if len(raw_pts) < 3:
+                # Small dot / punctuation: create minimal stroke
+                pts_comp = np.argwhere(comp_mask)
+                if len(pts_comp) > 0:
+                    cy, cx = np.mean(pts_comp, axis=0)
+                    raw_pts = [(float(cy), float(cx), 2.5), (float(cy), float(cx + 0.5), 2.5)]
 
-            # Compute physical pleins & déliés widths and tangents
             calligraphic_pts = self._parameterize_stroke(raw_pts)
-            if len(calligraphic_pts) >= 4:
+            if len(calligraphic_pts) >= 2:
                 stroke_len = float(len(calligraphic_pts))
                 strokes.append({
                     "stroke_id": f"cal_s{stroke_idx:02d}",
@@ -142,45 +168,6 @@ class CalligraphicVectorizer:
                     "mean_width": float(np.mean([p[2] for p in calligraphic_pts]))
                 })
                 stroke_idx += 1
-                break  # Primary stroke traced unbroken
-
-        # 2. Subsequent stroke tracing for disconnected ink components (e.g. crossbars, separate legs/accents)
-        max_strokes = 4
-        while stroke_idx < max_strokes:
-            remaining_ink = binary_mask & ~visited
-            if np.sum(remaining_ink) < 14:
-                break  # All ink accounted for by preceding strokes
-
-            rem_skel = skel & remaining_ink
-            rem_candidates = self.find_touchdown_endpoints(
-                remaining_ink, rem_skel if np.any(rem_skel) else remaining_ink
-            )
-            if not rem_candidates:
-                break
-
-            stroke_found = False
-            for _, start_y, start_x, init_dy, init_dx in rem_candidates:
-                if visited[start_y, start_x]:
-                    continue
-                raw_pts = self._trace_continuous_ridge(smoothed_dist, visited, start_y, start_x, init_dy, init_dx)
-                if len(raw_pts) >= 3:
-                    calligraphic_pts = self._parameterize_stroke(raw_pts)
-                    if len(calligraphic_pts) >= 3:
-                        strokes.append({
-                            "stroke_id": f"cal_s{stroke_idx:02d}",
-                            "order_index": stroke_idx,
-                            "points": calligraphic_pts,
-                            "length": float(len(calligraphic_pts)),
-                            "start": (calligraphic_pts[0][0], calligraphic_pts[0][1]),
-                            "end": (calligraphic_pts[-1][0], calligraphic_pts[-1][1]),
-                            "nib_angle_deg": float(np.rad2deg(self.nib_angle_rad)),
-                            "mean_width": float(np.mean([p[2] for p in calligraphic_pts]))
-                        })
-                        stroke_idx += 1
-                        stroke_found = True
-                        break
-            if not stroke_found:
-                break
 
         # Fallback if no stroke passed
         if not strokes:
@@ -204,12 +191,12 @@ class CalligraphicVectorizer:
     def _trace_continuous_ridge(
         self,
         dist_map: np.ndarray,
-        visited: np.ndarray,
+        global_visited: np.ndarray,
         start_y: int,
         start_x: int,
         init_dy: float,
         init_dx: float,
-        max_steps: int = 500
+        max_steps: int = 600
     ) -> List[Tuple[float, float, float]]:
         """
         Follows continuous ink crest with minimum bending energy (Euler-Bernoulli),
@@ -218,18 +205,21 @@ class CalligraphicVectorizer:
         h, w = dist_map.shape
         cy, cx = float(start_y), float(start_x)
         pts = [(cy, cx, float(dist_map[start_y, start_x] * 2.0))]
-        visited[start_y, start_x] = True
+        
+        # Local step tracker for the current continuous stroke
+        local_visited = set()
+        local_visited.add((start_y, start_x))
 
         cur_dy, cur_dx = init_dy, init_dx
-        step_size = 1.4
+        step_size = 1.35
 
         for step in range(max_steps):
             best_val = -1e9
             best_ny, best_nx = None, None
             best_vdy, best_vdx = None, None
 
-            # Sample 17 radial directions with forward momentum preference
-            for angle in np.linspace(-np.pi * 0.70, np.pi * 0.70, 17):
+            # Sample 19 radial directions with forward momentum preference
+            for angle in np.linspace(-np.pi * 0.65, np.pi * 0.65, 19):
                 cos_a, sin_a = np.cos(angle), np.sin(angle)
                 cand_dy = cur_dy * cos_a - cur_dx * sin_a
                 cand_dx = cur_dy * sin_a + cur_dx * cos_a
@@ -240,40 +230,43 @@ class CalligraphicVectorizer:
                 iy, ix = int(round(ny)), int(round(nx))
                 if 0 <= iy < h and 0 <= ix < w:
                     d_val = dist_map[iy, ix]
-                    if d_val >= 0.45:
+                    if d_val >= 0.35:
                         # Momentum score: favors straight/smooth continuation (Euler-Bernoulli)
-                        momentum_score = cos_a * 2.2
-                        # Unvisited bonus: encourages traversing unmapped ink
-                        unvis = not visited[iy, ix]
-                        unvis_bonus = 1.8 if unvis else 0.1
+                        momentum_score = cos_a * 2.0
+                        # Avoid immediate backtracking in the last 6 steps
+                        is_recent = False
+                        for p in pts[-6:]:
+                            if np.hypot(ny - p[0], nx - p[1]) < step_size * 0.8:
+                                is_recent = True
+                                break
+                        if is_recent:
+                            continue
 
                         # Distance crest bonus
-                        score = d_val * 2.5 + momentum_score + unvis_bonus
+                        unvis_bonus = 1.2 if (iy, ix) not in local_visited else 0.0
+                        score = d_val * 2.2 + momentum_score + unvis_bonus
 
                         if score > best_val:
                             best_val = score
                             best_ny, best_nx = ny, nx
                             best_vdy, best_vdx = cand_dy, cand_dx
 
-            if best_ny is None or dist_map[int(round(best_ny)), int(round(best_nx))] < 0.40:
-                # True pen lift reached at stroke end
+            if best_ny is None or dist_map[int(round(best_ny)), int(round(best_nx))] < 0.30:
+                # Pen lift reached at stroke end
                 break
 
-            # Mark neighborhood as visited
             iy, ix = int(round(best_ny)), int(round(best_nx))
-            for vy in range(max(0, iy - 1), min(h, iy + 2)):
-                for vx in range(max(0, ix - 1), min(w, ix + 2)):
-                    visited[vy, vx] = True
+            local_visited.add((iy, ix))
 
             cy, cx = best_ny, best_nx
             cur_dy, cur_dx = best_vdy, best_vdx
             w_val = float(dist_map[iy, ix] * 2.0)
             pts.append((round(cy, 2), round(cx, 2), round(w_val, 2)))
 
-            # Check loop closure: if we return close to start after >= 16 steps
-            if len(pts) > 16:
+            # Check loop closure: if we return close to start after >= 12 steps
+            if len(pts) > 12:
                 dist_to_start = np.hypot(cy - pts[0][0], cx - pts[0][1])
-                if dist_to_start <= step_size * 2.2:
+                if dist_to_start <= step_size * 2.0:
                     pts.append(pts[0])
                     break
 

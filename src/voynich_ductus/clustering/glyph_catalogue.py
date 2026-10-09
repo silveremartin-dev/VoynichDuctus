@@ -209,53 +209,71 @@ class GlyphCatalogue:
         if not glyphs:
             return {"total_glyphs": 0, "canonical_alphabet_size": 0, "alphabet": []}
 
-        # Tag each glyph with its topological group
-        for g in glyphs:
-            g["topology_group"] = self.classify_glyph_topology(g)
-
-        topo_groups = {}
-        for idx, g in enumerate(glyphs):
-            tg = g["topology_group"]
-            if tg not in topo_groups:
-                topo_groups[tg] = []
-            topo_groups[tg].append(idx)
-
         X_scaled = self.extract_glyph_features(glyphs)
 
-        raw_clusters = []
-        cluster_id_counter = 0
+        # 1. Voynich Ground-Truth Guided Induction (if EVA tokens are present)
+        eva_present = any(bool(g.get("eva_char")) for g in glyphs)
+        if corpus_type.lower() == "voynich" and eva_present:
+            eva_groups = {}
+            for idx, g in enumerate(glyphs):
+                ec = (g.get("eva_char") or "").strip().lower()
+                if not ec:
+                    ec = "emergent"
+                if ec not in eva_groups:
+                    eva_groups[ec] = []
+                eva_groups[ec].append(idx)
 
-        # Cluster within each topological partition
-        for tg, indices in topo_groups.items():
-            if len(indices) <= 2:
-                # Group small partitions directly
+            raw_clusters = []
+            cluster_id_counter = 0
+            for ec, indices in eva_groups.items():
                 cluster_glyphs = [glyphs[i] for i in indices]
                 raw_clusters.append((cluster_id_counter, indices, cluster_glyphs))
                 cluster_id_counter += 1
-                continue
+        else:
+            # 2. Unsupervised Deep Visual & Topological Induction (Seraphinianus / Asemic)
+            for g in glyphs:
+                g["topology_group"] = self.classify_glyph_topology(g)
 
-            sub_X = X_scaled[indices]
-            # Determine partition sub-clusters proportional to population
-            k_sub = max(1, min(int(round(self.target_alphabet_size * (len(indices) / len(glyphs)))), len(indices)))
-            
-            if k_sub == 1:
-                cluster_glyphs = [glyphs[i] for i in indices]
-                raw_clusters.append((cluster_id_counter, indices, cluster_glyphs))
-                cluster_id_counter += 1
-            else:
-                clusterer = AgglomerativeClustering(n_clusters=k_sub, metric="euclidean", linkage="ward")
-                sub_labels = clusterer.fit_predict(sub_X)
-                for sl in set(sub_labels):
-                    sub_idx = [indices[i] for i in np.where(sub_labels == sl)[0]]
-                    cluster_glyphs = [glyphs[i] for i in sub_idx]
-                    raw_clusters.append((cluster_id_counter, sub_idx, cluster_glyphs))
+            topo_groups = {}
+            for idx, g in enumerate(glyphs):
+                tg = g["topology_group"]
+                if tg not in topo_groups:
+                    topo_groups[tg] = []
+                topo_groups[tg].append(idx)
+
+            raw_clusters = []
+            cluster_id_counter = 0
+
+            # Cluster within each topological partition with tight granularity
+            for tg, indices in topo_groups.items():
+                if len(indices) <= 2:
+                    cluster_glyphs = [glyphs[i] for i in indices]
+                    raw_clusters.append((cluster_id_counter, indices, cluster_glyphs))
                     cluster_id_counter += 1
+                    continue
+
+                sub_X = X_scaled[indices]
+                k_sub = max(1, min(int(round(self.target_alphabet_size * (len(indices) / len(glyphs)))), len(indices)))
+                
+                if k_sub == 1:
+                    cluster_glyphs = [glyphs[i] for i in indices]
+                    raw_clusters.append((cluster_id_counter, indices, cluster_glyphs))
+                    cluster_id_counter += 1
+                else:
+                    clusterer = AgglomerativeClustering(n_clusters=k_sub, metric="euclidean", linkage="ward")
+                    sub_labels = clusterer.fit_predict(sub_X)
+                    for sl in set(sub_labels):
+                        sub_idx = [indices[i] for i in np.where(sub_labels == sl)[0]]
+                        cluster_glyphs = [glyphs[i] for i in sub_idx]
+                        raw_clusters.append((cluster_id_counter, sub_idx, cluster_glyphs))
+                        cluster_id_counter += 1
 
         # Sort raw clusters by size descending to have clean rank 1..N
         raw_clusters.sort(key=lambda item: len(item[2]), reverse=True)
 
         # Build canonical glyph entries
         alphabet_entries = []
+        assigned_standard_codes = set()
         for rank, (cluster_id, indices, cluster_glyphs) in enumerate(raw_clusters, start=1):
             cluster_points = X_scaled[indices]
 
@@ -275,7 +293,7 @@ class GlyphCatalogue:
             mean_height = round(float(np.mean([g.get("height", 20) for g in cluster_glyphs])), 1)
             mean_width = round(float(np.mean([g.get("width", 15) for g in cluster_glyphs])), 1)
 
-            # Match with standard historical corpora
+            # Match with standard historical corpora (enforcing 1-to-1 unique correspondence)
             if corpus_type.lower() == "seraphinianus":
                 corpus_match = CorpusCorrespondenceMatcher.match_serafini_archetype(
                     archetype_id=type_name,
@@ -285,6 +303,22 @@ class GlyphCatalogue:
                     frequency_rank=rank,
                     cluster_glyphs=cluster_glyphs
                 )
+                code = corpus_match.get("serafini_code")
+                if code and code != "S-EMERGENT" and code in assigned_standard_codes:
+                    # Already claimed by a higher-ranked archetype -> mark as distinct emergent
+                    corpus_match = {
+                        "system": "Serafini Typology (1981) / Deri (2015)",
+                        "serafini_code": f"S-EMERGENT-{rank:02d}",
+                        "deri_equivalent": f"EMERGENT-{rank:02d}",
+                        "bulik_equivalent": f"ω_{rank}",
+                        "name": f"Distinct Cursive Archetype {type_name}",
+                        "category": "Autonomous Emergent Form",
+                        "confidence_pct": round(max(40.0, 95.0 - rank * 1.5), 1),
+                        "description": f"Unique asemic cursive grapheme distinct from previously indexed standard archetypes.",
+                        "reference_svg": ""
+                    }
+                elif code and code != "S-EMERGENT":
+                    assigned_standard_codes.add(code)
             else:
                 corpus_match = CorpusCorrespondenceMatcher.match_voynich_archetype(
                     archetype_id=type_name,
@@ -294,6 +328,23 @@ class GlyphCatalogue:
                     frequency_rank=rank,
                     cluster_glyphs=cluster_glyphs
                 )
+                eva_eq = corpus_match.get("eva_equivalent")
+                if eva_eq and eva_eq != "—" and eva_eq in assigned_standard_codes:
+                    # Already claimed by a higher-ranked archetype -> mark as distinct emergent
+                    corpus_match = {
+                        "system": "EVA / Currier / v101 / Voynichese",
+                        "eva_equivalent": "—",
+                        "currier_equivalent": "—",
+                        "v101_equivalent": "—",
+                        "voynichese_equivalent": "—",
+                        "name": f"Distinct Scribal Ductus {type_name}",
+                        "category": "Autonomous Grapheme",
+                        "confidence_pct": round(max(40.0, 95.0 - rank * 1.5), 1),
+                        "description": f"Autonomous scribal grapheme with distinct topology; avoids duplicate mapping to '{eva_eq}'.",
+                        "reference_svg": ""
+                    }
+                elif eva_eq and eva_eq != "—":
+                    assigned_standard_codes.add(eva_eq)
 
             # Collect full occurrences / spatial instances across all pages
             all_instances = []

@@ -73,31 +73,38 @@ class GlyphSegmenter:
 
         labeled, num_features = label(is_parchment)
         if num_features == 0:
-            return (int(H * 0.04), int(W * 0.04), int(H * 0.96), int(W * 0.96))
+            return (int(H * 0.02), int(W * 0.02), int(H * 0.98), int(W * 0.995))
 
         props = regionprops(labeled)
         largest = max(props, key=lambda p: p.area)
         py0, px0, py1, px1 = [int(v * scale) for v in largest.bbox]
 
-        # Add 3.0% inner margin safety buffer to avoid frayed edges, tears, and binder holes
-        buf_y = max(16, int((py1 - py0) * 0.030))
-        buf_x = max(16, int((px1 - px0) * 0.030))
-        return (min(H - 1, py0 + buf_y), min(W - 1, px0 + buf_x), max(0, py1 - buf_y), max(0, px1 - buf_x))
+        # Gentle margins: preserve full right margin to never clip ending 1-3 characters of lines
+        buf_y = max(8, int((py1 - py0) * 0.015))
+        buf_x0 = max(8, int((px1 - px0) * 0.015))
+        return (min(H - 1, py0 + buf_y), min(W - 1, px0 + buf_x0), max(0, py1 - buf_y), min(W, px1 + 4))
 
     def extract_clean_page_mask(self, image: Image.Image, subfolder: str = "voynich") -> Tuple[np.ndarray, np.ndarray, bool]:
         """
         Extracts clean text ink mask, strictly separating grayscale text ink
         from colored illustrations (green/ochre/blue/red/yellow paints) and large drawings.
-        Detects if page has vertical text orientation and returns (clean_mask, rgb_arr, was_rotated).
         """
         rgb_arr = np.array(image.convert("RGB"))
         H, W, _ = rgb_arr.shape
         rgb_float = rgb_arr.astype(np.float32) / 255.0
 
-        # 1. Detect genuine parchment canvas bounding box (strips outer black background & binding)
-        py0, px0, py1, px1 = self.detect_parchment_bounds(rgb_arr)
-        parchment_mask = np.zeros((H, W), dtype=bool)
-        parchment_mask[py0:py1, px0:px1] = True
+        # 1. Detect genuine parchment canvas bounding box
+        if subfolder == "seraphinianus":
+            # In Seraphinianus, use full page width/height with minimal safety border
+            parchment_mask = np.ones((H, W), dtype=bool)
+            parchment_mask[:4, :] = False
+            parchment_mask[-4:, :] = False
+            parchment_mask[:, :4] = False
+            parchment_mask[:, -4:] = False
+        else:
+            py0, px0, py1, px1 = self.detect_parchment_bounds(rgb_arr)
+            parchment_mask = np.zeros((H, W), dtype=bool)
+            parchment_mask[py0:py1, px0:px1] = True
 
         # 2. Local adaptive Sauvola thresholding for ink
         sauvola_mask = self.binarizer.binarize(image)
@@ -123,12 +130,13 @@ class GlyphSegmenter:
             aspect = pw / max(1, ph)
 
             # Geometry filtering: reject giant drawings, full plate frames, or border smears
-            if p.area > self.max_drawing_area or ph > self.max_glyph_height * 2.2 or pw > self.max_glyph_width * 3.5:
+            max_area = 15000 if subfolder == "seraphinianus" else self.max_drawing_area
+            if p.area > max_area:
                 continue
-            if (aspect > 6.5 and pw > 140) or (aspect < 0.10 and ph > 140):
+            if ph > self.max_glyph_height * 3.5:
                 continue
 
-            # Pigment color filtering on component ink pixels
+            # Pigment and illustration color filtering on component ink pixels
             c_mask = (labeled[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] == p.label)
             c_sat = sat[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
             c_hue = hue[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
@@ -136,34 +144,47 @@ class GlyphSegmenter:
             c_chroma = chroma[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
 
             if len(c_sat) > 0:
-                if subfolder == "voynich":
-                    # Colored plant/diagram pigments: Green leaves, blue flowers, red cinnabar, yellow washes
-                    is_paint = (
-                        ((c_hue >= 0.14) & (c_hue <= 0.50) & (c_sat > 0.18)) | # Green
-                        ((c_hue >= 0.50) & (c_hue <= 0.80) & (c_sat > 0.18)) | # Blue
-                        (((c_hue >= 0.85) | (c_hue <= 0.06)) & (c_sat > 0.22)) | # Red
-                        (c_chroma > 0.22) # Highly saturated washes
+                if subfolder == "seraphinianus":
+                    # In Seraphinianus: strict dark quill ink vs colorful illustration filtering
+                    # Dark scribal ink has sat < 0.18, chroma < 0.12, val < 0.48
+                    if np.mean(c_sat) > 0.16 or np.mean(c_chroma) > 0.11 or np.mean(c_val) > 0.55:
+                        continue
+                    if np.percentile(c_sat, 75) > 0.22:
+                        continue
+                    # Reject specific saturated pigment hues (green, red, orange/yellow, blue)
+                    is_pigment = (
+                        ((c_hue >= 0.16) & (c_hue <= 0.48) & (c_sat > 0.10)) |  # Green
+                        (((c_hue >= 0.82) | (c_hue <= 0.08)) & (c_sat > 0.10)) |  # Red / Magenta
+                        ((c_hue >= 0.08) & (c_hue <= 0.16) & (c_sat > 0.12)) |  # Yellow / Orange
+                        ((c_hue >= 0.48) & (c_hue <= 0.82) & (c_sat > 0.10))    # Blue / Indigo
                     )
-                    if np.mean(is_paint) > 0.35 and p.area > 35:
+                    if np.mean(is_pigment) > 0.04:
                         continue
                 else:
-                    # Codex Seraphinianus: Colored drawings vs black/gray ink
-                    if (np.mean(c_sat > 0.18) > 0.30 or np.mean(c_chroma > 0.12) > 0.30) and p.area > 35:
+                    # Voynich: reject colored paint washes
+                    is_paint = (
+                        ((c_hue >= 0.14) & (c_hue <= 0.50) & (c_sat > 0.16)) |  # Green
+                        ((c_hue >= 0.50) & (c_hue <= 0.80) & (c_sat > 0.16)) |  # Blue
+                        (((c_hue >= 0.85) | (c_hue <= 0.06)) & (c_sat > 0.18)) |  # Red
+                        (c_chroma > 0.18)  # Saturated washes
+                    )
+                    if np.mean(is_paint) > 0.20 and p.area > 25:
                         continue
 
             clean_text_mask[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] |= c_mask
 
-        # 4. Check page orientation: if text runs vertically (column variance > row variance * 1.5)
+        # Check if text lines run vertically across the page (sideways landscape plate)
         was_rotated = False
-        row_proj = np.sum(clean_text_mask, axis=1)
-        col_proj = np.sum(clean_text_mask, axis=0)
-        var_row = np.var(row_proj)
-        var_col = np.var(col_proj)
-        if var_col > 1.6 * max(1e-5, var_row) and subfolder == "seraphinianus":
-            # Page has vertical columns / sideways text -> rotate 270 degrees to horizontal
-            clean_text_mask = np.rot90(clean_text_mask, k=3)
-            rgb_arr = np.rot90(rgb_arr, k=3)
-            was_rotated = True
+        if subfolder == "seraphinianus":
+            row_proj = np.sum(clean_text_mask, axis=1)
+            col_proj = np.sum(clean_text_mask, axis=0)
+            var_row = np.var(row_proj)
+            var_col = np.var(col_proj)
+            if var_col > 2.2 * max(1e-5, var_row):
+                # Rotate 270° (90° clockwise) to bring text lines into standard horizontal reading orientation
+                clean_text_mask = np.rot90(clean_text_mask, k=3)
+                rgb_arr = np.rot90(rgb_arr, k=3)
+                was_rotated = True
 
         return clean_text_mask, rgb_arr, was_rotated
 
@@ -441,9 +462,14 @@ class GlyphSegmenter:
             if np.mean(raw_patch) < 115:
                 return None
             if subfolder == "seraphinianus":
-                if mean_chroma > 0.06:
+                if mean_chroma > 0.055 or paint_fraction > 0.08:
                     return None
-            elif paint_fraction > 0.08:
+                if raw_patch.size > 0:
+                    patch_f = raw_patch.astype(np.float32) / 255.0
+                    patch_chr = np.max(patch_f, axis=2) - np.min(patch_f, axis=2)
+                    if np.mean(patch_chr > 0.08) > 0.15:
+                        return None
+            elif paint_fraction > 0.08 or mean_chroma > 0.08:
                 return None
 
         # Vectorize glyph ductus using Our Model (Kinematic Quill Tracker)
@@ -813,31 +839,35 @@ class GlyphSegmenter:
             })
 
             for word_idx, rw in enumerate(lc):
-                rx0, ry0, rx1, ry1 = rw.bbox_scan
+                rx0, ry0, rx1, ry1 = [int(v) for v in rw.bbox_scan]
+                # Ensure valid bbox within scan boundaries
+                rx0 = max(0, min(W - 1, rx0))
+                ry0 = max(0, min(H - 1, ry0))
+                rx1 = max(rx0 + 1, min(W, rx1))
+                ry1 = max(ry0 + 1, min(H, ry1))
+                
+                w_w = rx1 - rx0
+                w_h = ry1 - ry0
+                if w_w < 4 or w_h < 4:
+                    continue
+
                 word_id = f"{line_id}_W{word_idx:02d}"
                 eva_text = rw.eva_text or ""
                 eva_tokens = loader.tokenize_eva_to_glyphs(eva_text)
                 expected_k = max(1, len(eva_tokens)) if eva_tokens else None
 
-                # Crop word patch from scan with padding for local contrast calculation
-                w_pad = 6
-                c_ry0, c_rx0 = max(0, ry0 - w_pad), max(0, rx0 - w_pad)
-                c_ry1, c_rx1 = min(H, ry1 + w_pad), min(W, rx1 + w_pad)
-                padded_word_rgb = page_rgb[c_ry0:c_ry1, c_rx0:c_rx1]
-
-                # Binarize with Sauvola on padded patch
-                w_pil = Image.fromarray(padded_word_rgb)
-                padded_mask = self.binarizer.binarize(w_pil)
-                off_y = ry0 - c_ry0
-                off_x = rx0 - c_rx0
-                w_mask = padded_mask[off_y:off_y + (ry1 - ry0), off_x:off_x + (rx1 - rx0)]
+                # Direct word patch crop from exact ground truth bounding box
+                word_crop_rgb = page_rgb[ry0:ry1, rx0:rx1]
+                w_pil = Image.fromarray(word_crop_rgb)
+                w_mask = self.binarizer.binarize(w_pil)
+                w_mask = self.binarizer.remove_small_artifacts(w_mask, min_size=3)
 
                 # Fallback if local mask is sparse
-                if np.sum(w_mask) < 8:
-                    word_gray = np.mean(page_rgb[ry0:ry1, rx0:rx1], axis=2)
-                    w_mask = word_gray < 160
+                if np.sum(w_mask) < 6:
+                    word_gray = np.mean(word_crop_rgb, axis=2)
+                    w_mask = word_gray < 165
 
-                # Save word crop image
+                # Save word crop image directly without shifting
                 word_png_rel = self.save_word_crop(
                     page_rgb=page_rgb,
                     word_bbox=(ry0, rx0, ry1, rx1),
@@ -856,7 +886,7 @@ class GlyphSegmenter:
                     "eva_glyphs": eva_tokens
                 })
 
-                # Assemble glyphs guided by expected token count K
+                # Assemble constituent glyphs guided by expected token count K
                 assembled_components = self.assemble_word_into_glyphs(
                     w_mask, expected_glyph_count=expected_k
                 )
@@ -900,7 +930,7 @@ class GlyphSegmenter:
                     glyph_idx += 1
 
                 # Monoglyph fallback for words that didn't generate glyph records
-                if glyph_idx == 0 and np.sum(w_mask) >= 12:
+                if glyph_idx == 0 and np.sum(w_mask) >= 8:
                     abs_bbox = (int(ry0), int(rx0), int(ry1), int(rx1))
                     record = self.build_glyph_record(
                         g_mask=w_mask,
