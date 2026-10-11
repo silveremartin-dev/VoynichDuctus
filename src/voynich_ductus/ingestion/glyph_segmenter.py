@@ -145,20 +145,17 @@ class GlyphSegmenter:
 
             if len(c_sat) > 0:
                 if subfolder == "seraphinianus":
-                    # In Seraphinianus: strict dark quill ink vs colorful illustration filtering
-                    # Dark scribal ink has sat < 0.18, chroma < 0.12, val < 0.48
-                    if np.mean(c_sat) > 0.16 or np.mean(c_chroma) > 0.11 or np.mean(c_val) > 0.55:
-                        continue
-                    if np.percentile(c_sat, 75) > 0.22:
-                        continue
-                    # Reject specific saturated pigment hues (green, red, orange/yellow, blue)
+                    # In Seraphinianus: discriminate dark scribal ink from vibrant pencil drawings
+                    # Pure drawings have saturated color pigments (sat > 0.35, chroma > 0.22)
+                    # Scribal text ink has low saturation and chroma.
+                    is_vibrant = (c_sat > 0.35) & (c_chroma > 0.22)
                     is_pigment = (
-                        ((c_hue >= 0.16) & (c_hue <= 0.48) & (c_sat > 0.10)) |  # Green
-                        (((c_hue >= 0.82) | (c_hue <= 0.08)) & (c_sat > 0.10)) |  # Red / Magenta
-                        ((c_hue >= 0.08) & (c_hue <= 0.16) & (c_sat > 0.12)) |  # Yellow / Orange
-                        ((c_hue >= 0.48) & (c_hue <= 0.82) & (c_sat > 0.10))    # Blue / Indigo
+                        ((c_hue >= 0.18) & (c_hue <= 0.48) & (c_sat > 0.28) & (c_chroma > 0.18)) |  # Green
+                        (((c_hue >= 0.85) | (c_hue <= 0.06)) & (c_sat > 0.30) & (c_chroma > 0.20)) |  # Red
+                        ((c_hue >= 0.50) & (c_hue <= 0.82) & (c_sat > 0.28) & (c_chroma > 0.18))     # Blue
                     )
-                    if np.mean(is_pigment) > 0.04:
+                    # Discard only if component is predominantly colored drawing
+                    if np.mean(is_vibrant | is_pigment) > 0.25:
                         continue
                 else:
                     # Voynich: reject colored paint washes
@@ -462,12 +459,12 @@ class GlyphSegmenter:
             if np.mean(raw_patch) < 115:
                 return None
             if subfolder == "seraphinianus":
-                if mean_chroma > 0.055 or paint_fraction > 0.08:
+                if mean_chroma > 0.18 or paint_fraction > 0.25:
                     return None
                 if raw_patch.size > 0:
                     patch_f = raw_patch.astype(np.float32) / 255.0
                     patch_chr = np.max(patch_f, axis=2) - np.min(patch_f, axis=2)
-                    if np.mean(patch_chr > 0.08) > 0.15:
+                    if np.mean(patch_chr > 0.20) > 0.25:
                         return None
             elif paint_fraction > 0.08 or mean_chroma > 0.08:
                 return None

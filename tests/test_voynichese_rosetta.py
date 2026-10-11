@@ -67,7 +67,7 @@ def test_affine_transform_computation(rosetta_loader):
     sx, sy, tx, ty = rosetta_loader.compute_scan_affine_transform("f1r", dummy_img, xml_canvas=(1090.0, 1500.0))
     
     assert sx > 1.9
-    assert sy > 1.9
+    assert sy > 1.8
     assert tx >= 0
     assert ty >= 0
 

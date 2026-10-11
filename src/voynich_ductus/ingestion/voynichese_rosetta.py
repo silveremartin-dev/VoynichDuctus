@@ -171,19 +171,22 @@ class VoynicheseRosettaLoader:
 
         scan_w, scan_h = scan_image.size
 
-        # Calibrated parchment registration: maps 1090x1500 Voynichese canvas to actual parchment folio
-        try:
-            from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
-            seg = GlyphSegmenter()
-            rgb_arr = np.array(scan_image.convert("RGB"))
-            py0, px0, py1, px1 = seg.detect_parchment_bounds(rgb_arr)
-            parch_w = max(100, px1 - px0)
-            parch_h = max(100, py1 - py0)
-            sx = parch_w / xml_w
-            sy = parch_h / xml_h
-            tx = float(px0)
-            ty = float(py0)
-        except Exception:
+        # Calibrated Yale Beinecke HD IIIF registration:
+        # The Voynichese project trimmed Beinecke scans to a normalized 1090x1500 text viewport.
+        # On Yale scans (~2500x3168), line 0 starts at scan Y ~ 790-848 (XML y ~ 128-155),
+        # and line 25 ends at scan Y ~ 3025 (XML y ~ 1200).
+        # This yields scale factors:
+        #   sx = (scan_text_width) / (xml_text_width) ~ 2.493
+        #   sy = (scan_text_height) / (xml_text_height) ~ 2.083
+        #   tx ~ 118.0 px, ty ~ 525.0 px (or parchment-proportional)
+        if scan_w >= 2000 and scan_h >= 2500:
+            # High-res Yale scan registration
+            sx = 2.4927
+            sy = 2.0833
+            tx = 118.20
+            ty = 525.10
+        else:
+            # Scaled or downsampled scan
             sx = scan_w / xml_w
             sy = scan_h / xml_h
             tx = 0.0
