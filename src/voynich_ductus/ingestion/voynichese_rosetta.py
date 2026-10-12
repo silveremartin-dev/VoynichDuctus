@@ -174,26 +174,32 @@ class VoynicheseRosettaLoader:
         # High-precision calibrated alignment matrices (sx, sy, tx, ty) measured
         # directly via Sauvola ink cross-correlation against high-res Yale scans.
         CALIBRATED_FOLIO_TRANSFORMS: Dict[str, Tuple[float, float, float, float]] = {
-            "f1r": (2.45, 2.20, 140.0, 520.0),
-            "f001r": (2.45, 2.20, 140.0, 520.0),
-            "f1v": (2.40, 2.05, 50.0, 170.0),
-            "f001v": (2.40, 2.05, 50.0, 170.0),
-            "f2r": (2.20, 2.20, 80.0, 60.0),
-            "f002r": (2.20, 2.20, 80.0, 60.0),
-            "f2v": (2.20, 2.15, 40.0, 50.0),
-            "f002v": (2.20, 2.15, 40.0, 50.0),
-            "f3r": (2.20, 2.20, 90.0, 60.0),
-            "f003r": (2.20, 2.20, 90.0, 60.0),
-            "f3v": (2.20, 2.05, 40.0, 80.0),
-            "f003v": (2.20, 2.05, 40.0, 80.0),
-            "f4r": (2.25, 2.10, 90.0, 50.0),
-            "f004r": (2.25, 2.10, 90.0, 50.0),
-            "f4v": (2.45, 2.05, 100.0, 80.0),
-            "f004v": (2.45, 2.05, 100.0, 80.0),
+            "f1r": (2.087, 2.087, 241.2, 35.3),
+            "f001r": (2.087, 2.087, 241.2, 35.3),
+            "f1v": (2.148, 2.148, 5.1, 24.8),
+            "f001v": (2.148, 2.148, 5.1, 24.8),
+            "f2r": (1.911, 1.911, 318.5, 0.0),
+            "f002r": (1.911, 1.911, 318.5, 0.0),
+            "f2v": (1.902, 1.902, 134.0, 0.0),
+            "f002v": (1.902, 1.902, 134.0, 0.0),
+            "f3r": (2.209, 2.209, 15.0, 56.2),
+            "f003r": (2.209, 2.209, 15.0, 56.2),
+            "f3v": (1.983, 1.983, 281.8, 325.8),
+            "f003v": (1.983, 1.983, 281.8, 325.8),
+            "f4r": (2.148, 2.148, 120.9, 39.9),
+            "f004r": (2.148, 2.148, 120.9, 39.9),
+            "f4v": (1.965, 1.965, 0.0, 114.4),
+            "f004v": (1.965, 1.965, 0.0, 114.4),
         }
 
         if norm_name in CALIBRATED_FOLIO_TRANSFORMS:
             return CALIBRATED_FOLIO_TRANSFORMS[norm_name]
+
+        # Automated 2D Cross-Correlation Image Registration
+        try:
+            return self.calibrate_affine_by_cross_correlation(folio_id, scan_image, (xml_w, xml_h))
+        except Exception:
+            pass
 
         # Dynamic fallback based on parchment boundaries
         from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
@@ -209,6 +215,91 @@ class VoynicheseRosettaLoader:
         ty = float(py0)
 
         return (sx, sy, tx, ty)
+
+    def calibrate_affine_by_cross_correlation(
+        self,
+        folio_id: str,
+        scan_image: Image.Image,
+        xml_canvas: Optional[Tuple[float, float]] = None,
+    ) -> Tuple[float, float, float, float]:
+        """
+        Computes optimal affine registration parameters (sx, sy, tx, ty) between
+        the Voynichese XML bounding boxes canvas and the high-resolution scan ink mask
+        using 2-stage FFT cross-correlation and integral-image Nelder-Mead optimization.
+        """
+        import numpy as np
+        from scipy.optimize import minimize
+        from scipy.signal import fftconvolve
+        from skimage.transform import rescale
+
+        words = self.load_folio_words(folio_id)
+        if not words:
+            raise ValueError(f"No words found for folio {folio_id}")
+
+        norm_name = self._normalize_folio_id(folio_id)
+        if xml_canvas is None:
+            if norm_name in self._folio_canvas_meta:
+                xml_w, xml_h, _ = self._folio_canvas_meta[norm_name]
+            else:
+                xml_w, xml_h = 1090.0, 1500.0
+        else:
+            xml_w, xml_h = xml_canvas
+
+        # Render XML word mask on XML canvas
+        xml_canvas_arr = np.zeros((int(xml_h), int(xml_w)), dtype=np.float32)
+        word_coords = []
+        for w in words:
+            wx, wy, ww, wh = float(w.x_xml), float(w.y_xml), float(w.width_xml), float(w.height_xml)
+            word_coords.append((wx, wy, ww, wh))
+            xml_canvas_arr[int(wy):int(wy + wh), int(wx):int(wx + ww)] = 1.0
+
+        scan_gray = np.array(scan_image.convert("L"))
+        ink = (scan_gray < 125).astype(np.float32)
+
+        # Stage 1: Coarse search via 2D FFT cross-correlation on downsampled images (ds = 0.2)
+        ds = 0.2
+        ink_ds = rescale(ink, ds, anti_aliasing=False)
+        xml_ds = rescale(xml_canvas_arr, ds, anti_aliasing=False)
+
+        best_score = -1e9
+        best_s = 2.10
+        best_tx, best_ty = 100.0, 50.0
+
+        for s in np.linspace(1.90, 2.25, 15):
+            s_xml = rescale(xml_ds, s, anti_aliasing=False)
+            if s_xml.shape[0] > ink_ds.shape[0] or s_xml.shape[1] > ink_ds.shape[1]:
+                continue
+            corr = fftconvolve(ink_ds, s_xml[::-1, ::-1], mode="valid")
+            m_idx = np.unravel_index(np.argmax(corr), corr.shape)
+            if corr[m_idx] > best_score:
+                best_score = corr[m_idx]
+                best_s = float(s)
+                best_ty = float(m_idx[0] / ds)
+                best_tx = float(m_idx[1] / ds)
+
+        # Stage 2: Refined Nelder-Mead on integral image for O(1) word overlap lookup
+        ii = np.pad(np.cumsum(np.cumsum(ink, axis=0), axis=1), ((1, 0), (1, 0)))
+        H_s, W_s = ink.shape
+
+        def loss(p):
+            scale_v, off_x, off_y = p
+            if scale_v < 1.80 or scale_v > 2.40:
+                return 1e9
+            tot = 0
+            for wx, wy, ww, wh in word_coords:
+                x0 = int(round(off_x + wx * scale_v))
+                y0 = int(round(off_y + wy * scale_v))
+                x1 = int(round(off_x + (wx + ww) * scale_v))
+                y1 = int(round(off_y + (wy + wh) * scale_v))
+                if 0 <= y0 < y1 <= H_s and 0 <= x0 < x1 <= W_s:
+                    cnt = ii[y1, x1] - ii[y0, x1] - ii[y1, x0] + ii[y0, x0]
+                    tot += cnt
+            return -float(tot)
+
+        init_p = [best_s, best_tx, best_ty]
+        res = minimize(loss, init_p, method="Nelder-Mead", options={"maxiter": 100, "xatol": 0.005, "fatol": 1.0})
+        s_opt, tx_opt, ty_opt = res.x
+        return (round(float(s_opt), 3), round(float(s_opt), 3), round(float(tx_opt), 1), round(float(ty_opt), 1))
 
     def extract_aligned_words(
         self,

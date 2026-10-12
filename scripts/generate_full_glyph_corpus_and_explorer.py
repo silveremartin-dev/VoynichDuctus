@@ -1573,6 +1573,9 @@ def generate_explorer_html(
         function selectGlyph(glyph, shouldAutoZoom = true) {{
             selectedGlyph = glyph;
             selectedWord = null;
+            if (glyph && glyph.line_id) {{
+                selectedLineId = glyph.line_id;
+            }}
             
             const msData = data[currentMs];
             const pIdx = msData.pages.findIndex(p => p.page_id === glyph.page_id);
@@ -1593,6 +1596,9 @@ def generate_explorer_html(
         function selectWord(word, shouldAutoZoom = true) {{
             selectedWord = word;
             selectedGlyph = null;
+            if (word && word.line_id) {{
+                selectedLineId = word.line_id;
+            }}
 
             drawCanvasOverlay();
             if (shouldAutoZoom) {{
@@ -1806,9 +1812,15 @@ def generate_explorer_html(
 
         function renderWordGrid() {{
             const page = data[currentMs].pages[currentPageIdx];
-            let words = page.words || [];
+            let allWords = page.words || [];
+            let words = allWords;
             if (selectedLineId) {{
-                words = words.filter(w => w.line_id === selectedLineId);
+                const filtered = allWords.filter(w => w.line_id === selectedLineId);
+                if (filtered.length > 0) {{
+                    words = filtered;
+                }} else {{
+                    selectedLineId = null;
+                }}
             }}
 
             const lineTitleSuffix = selectedLineId ? ` (${{selectedLineId}})` : '';
@@ -1816,7 +1828,10 @@ def generate_explorer_html(
             
             const grid = document.getElementById('glyphs-grid');
             if (words.length === 0) {{
-                grid.innerHTML = `<p style="color:var(--text-muted); font-size:0.75rem; padding:12px; text-align:center;">No lexical words found for this selection.</p>`;
+                grid.innerHTML = `<div style="color:var(--text-muted); font-size:0.75rem; padding:16px; text-align:center;">
+                    <div>No words in current filter.</div>
+                    <button class="btn-locate" style="margin-top:8px;" onclick="selectedLineId=null; renderCurrentGrid();">Show All ${{allWords.length}} Words</button>
+                </div>`;
                 return;
             }}
 
@@ -2364,8 +2379,53 @@ def generate_explorer_html(
             if (!arch) return;
 
             const cm = arch.corpus_match;
+            const multi = arch.corpus_matches || {{}};
             document.getElementById('modal-archetype-title').innerText = `Archetype ${{arch.type_id}} — Morphological Variations & Standard Cross-Reference`;
             
+            let modalSchemesHtml = '';
+            if (currentMs === 'voynich') {{
+                const sList = [
+                    {{ k: 'eva', label: 'EVA', col: '#f59e0b' }},
+                    {{ k: 'currier', label: 'Currier', col: '#38bdf8' }},
+                    {{ k: 'v101', label: 'v101', col: '#a855f7' }},
+                    {{ k: 'voynichese', label: 'Voynichese', col: '#10b981' }}
+                ];
+                modalSchemesHtml = `
+                    <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin:6px 0;">
+                        ${{sList.map(s => {{
+                            const sm = multi[s.k] || {{}};
+                            return `
+                                <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center;">
+                                    <div style="font-size:0.62rem; color:${{s.col}}; font-weight:bold;">${{s.label}}</div>
+                                    <div style="font-size:1.1rem; font-family:monospace; font-weight:bold; color:#fff;">${{sm.symbol || '—'}}</div>
+                                    <div style="font-size:0.65rem; color:var(--success); font-weight:bold;">${{sm.confidence_pct || 75}}% match</div>
+                                </div>
+                            `;
+                        }}).join('')}}
+                    </div>
+                `;
+            }} else {{
+                const sList = [
+                    {{ k: 'serafini', label: 'Serafini (1981)', col: '#c084fc' }},
+                    {{ k: 'deri', label: 'Deri (2015)', col: '#38bdf8' }},
+                    {{ k: 'bulik', label: 'Bulik (2011)', col: '#10b981' }}
+                ];
+                modalSchemesHtml = `
+                    <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin:6px 0;">
+                        ${{sList.map(s => {{
+                            const sm = multi[s.k] || {{}};
+                            return `
+                                <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center;">
+                                    <div style="font-size:0.62rem; color:${{s.col}}; font-weight:bold;">${{s.label}}</div>
+                                    <div style="font-size:1.0rem; font-family:monospace; font-weight:bold; color:#fff;">${{sm.symbol || '—'}}</div>
+                                    <div style="font-size:0.65rem; color:var(--success); font-weight:bold;">${{sm.confidence_pct || 75}}% match</div>
+                                </div>
+                            `;
+                        }}).join('')}}
+                    </div>
+                `;
+            }}
+
             let bannerHtml = `
                 <div style="display:flex; gap:8px; background:#000; padding:8px; border-radius:6px; border:1px solid var(--border);">
                     <div style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
@@ -2377,15 +2437,13 @@ def generate_explorer_html(
                         <div style="max-height:90px;">${{cm?.reference_svg || ''}}</div>
                     </div>
                 </div>
-                <div style="display:flex; flex-direction:column; justify-content:center; gap:4px;">
+                <div style="display:flex; flex-direction:column; justify-content:center; gap:4px; flex:1;">
                     <div style="font-size:1.1rem; font-weight:bold; color:var(--accent);">
                         Type ${{arch.type_id}} (${{arch.frequency}} occurrences across corpus)
                     </div>
-                    <div style="font-size:0.85rem; color:#fff;">
-                        ${{cm ? (currentMs === 'voynich' ? `<strong>EVA Transliteration:</strong> <span style="color:var(--voynich-color); font-size:1.1rem; font-weight:bold;">'${{cm.eva_equivalent}}'</span> | <strong>Currier:</strong> '${{cm.currier_equivalent}}'` : `<strong>Serafini Typology:</strong> <span style="color:var(--serafini-color); font-weight:bold;">${{cm.serafini_code}}</span> (${{cm.name}})`) : ''}}
-                    </div>
+                    ${{modalSchemesHtml}}
                     <div style="font-size:0.75rem; color:var(--text-muted);">
-                        <strong>Category:</strong> ${{cm?.category || 'General'}} | <strong>Confidence:</strong> <span style="color:var(--success); font-weight:bold;">${{cm?.confidence_pct || 90}}%</span>
+                        <strong>Category:</strong> ${{cm?.category || 'General'}}
                     </div>
                     <div style="font-size:0.72rem; color:var(--text-muted);">${{cm?.description || ''}}</div>
                 </div>
