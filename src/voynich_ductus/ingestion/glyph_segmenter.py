@@ -121,9 +121,17 @@ class GlyphSegmenter:
         val = hsv[:, :, 2]
         chroma = np.max(rgb_float, axis=2) - np.min(rgb_float, axis=2)
 
-        # Build color mask: pigments, colored pencil, wash, paint
+        from scipy.ndimage import binary_dilation, binary_closing
+        from scipy.ndimage import sum as ndi_sum
+
         if subfolder == "seraphinianus":
-            is_color = (sat > 0.09) & (chroma > 0.08) & (val < 0.98)
+            # True pigment/pencil/wash detection: distinct from creamy background paper (sat~0.07, val~0.98)
+            is_color = (sat > 0.15) & (chroma > 0.13) & (val < 0.96)
+            # Form contiguous solid illustration blobs via 2D morphological closing
+            struct_col = np.ones((35, 35), dtype=bool)
+            closed_color = binary_closing(is_color, structure=struct_col)
+            # Dilate illustration envelope by 25px to engulf all black outlines, contours, and connected shading
+            color_envelope = binary_dilation(closed_color, iterations=18)
         else:
             is_color = (
                 ((hue >= 0.14) & (hue <= 0.50) & (sat > 0.14)) |  # Green
@@ -131,15 +139,13 @@ class GlyphSegmenter:
                 (((hue >= 0.85) | (hue <= 0.06)) & (sat > 0.16)) |  # Red
                 (chroma > 0.16)
             )
-
-        # Dilate color by 12 iterations (~12-18px) to bridge all outlines, black contours, and hatching touching color
-        color_dil = binary_dilation(is_color, iterations=12)
+            color_envelope = binary_dilation(is_color, iterations=12)
 
         labeled, num_features = label(ink_candidates)
         props = regionprops(labeled)
 
         # Topological Rule: Any ink component connected to or touching color is part of the drawing/figure
-        ink_touching_color = ndi_sum(color_dil, labeled, range(1, num_features + 1)) > 0 if num_features > 0 else np.array([])
+        ink_touching_color = ndi_sum(color_envelope, labeled, range(1, num_features + 1)) > 0 if num_features > 0 else np.array([])
 
         clean_text_mask = np.zeros((H, W), dtype=bool)
 
@@ -147,11 +153,11 @@ class GlyphSegmenter:
             ph = p.bbox[2] - p.bbox[0]
             pw = p.bbox[3] - p.bbox[1]
 
-            # Drawing exclusion: connected to color, or excessively tall (drawings/borders)
+            # Drawing exclusion: inside or connected to illustration envelope
             if len(ink_touching_color) >= p.label and ink_touching_color[p.label - 1]:
                 continue
-            # Text lines in Seraphinianus have bounded vertical height ph <= 130 px, but words can be arbitrarily long
-            if ph > 130:
+            # Text lines in Seraphinianus have bounded vertical height ph <= 140 px, but words can be arbitrarily long
+            if ph > 140:
                 continue
             # If area is huge and aspect ratio is square/tall, it's a drawing
             if p.area > (25000 if subfolder == "seraphinianus" else self.max_drawing_area):
@@ -620,7 +626,7 @@ class GlyphSegmenter:
                     glyph_idx=glyph_idx,
                     output_dir=output_dir,
                     subfolder=subfolder,
-                    strict=True,
+                    strict=(subfolder != "seraphinianus"),
                 )
                 if record is None:
                     continue
