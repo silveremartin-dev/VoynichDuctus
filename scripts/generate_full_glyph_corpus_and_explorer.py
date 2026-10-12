@@ -770,6 +770,7 @@ def generate_explorer_html(
                     </div>
                     <div style="display:flex; gap:4px; flex-wrap:wrap;">
                         <button id="btn-toggle-lines" class="btn-tool" onclick="toggleLayer('lines')" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#581c87; border-color:#a855f7;" title="Toggle Lines (L)">🟣 Lines (L)</button>
+                        <button id="btn-toggle-line-mode" class="btn-tool" onclick="toggleLineDisplayMode()" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#3b0764; border-color:#9333ea;" title="Toggle Line Style: 2D Block Area vs 1D Baseline Guide">📐 2D Block</button>
                         <button id="btn-toggle-words" class="btn-tool" onclick="toggleLayer('words')" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#064e3b; border-color:#10b981;" title="Toggle Words (W)">🟢 Words (W)</button>
                         <button id="btn-toggle-glyphs" class="btn-tool" onclick="toggleLayer('glyphs')" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#075985; border-color:#38bdf8;" title="Toggle Glyphs (G)">🔵 Glyphs (G)</button>
                         <button id="btn-toggle-focus" class="btn-tool" onclick="toggleFocusMode()" style="width:auto; padding:2px 7px; font-size:0.68rem; background:#7c2d12; border-color:#ea580c; opacity:0.4;" title="Focus Selected Only (F)">⚡ Focus (F)</button>
@@ -1350,9 +1351,20 @@ def generate_explorer_html(
         }}
 
         let showLines = true;
+        let lineMode = '2d'; // '2d' (Area Block) or '1d' (Baseline Guideline)
         let showWords = true;
         let showGlyphs = true;
         let focusMode = false;
+
+        function toggleLineDisplayMode() {{
+            lineMode = (lineMode === '2d') ? '1d' : '2d';
+            const btn = document.getElementById('btn-toggle-line-mode');
+            if (btn) {{
+                btn.innerHTML = (lineMode === '2d') ? '📐 2D Block' : '📏 1D Line';
+                btn.style.borderColor = (lineMode === '2d') ? '#9333ea' : '#c084fc';
+            }}
+            drawCanvasOverlay();
+        }}
 
         function toggleLayer(layer) {{
             if (layer === 'lines') {{
@@ -1437,24 +1449,43 @@ def generate_explorer_html(
                 return;
             }}
 
-            // 1. Layer 1: Text Lines (🟣 Violet)
+            // 1. Layer 1: Text Lines (🟣 Violet: 2D Block or 1D Baseline Guide)
             if (showLines && page.lines) {{
                 page.lines.forEach(l => {{
                     const [ly0, lx0, ly1, lx1] = l.bbox;
                     const isSelectedLine = selectedLineId && selectedLineId === l.line_id;
                     if (isSelectedLine) {{
                         ctx.strokeStyle = '#c084fc';
-                        ctx.lineWidth = lineThickness * 1.4;
+                        ctx.lineWidth = lineThickness * 1.5;
                         ctx.fillStyle = 'rgba(192, 132, 252, 0.20)';
                     }} else {{
                         ctx.strokeStyle = 'rgba(168, 85, 247, 0.85)';
                         ctx.lineWidth = lineThickness;
                         ctx.fillStyle = 'rgba(168, 85, 247, 0.08)';
                     }}
-                    ctx.setLineDash([8, 5]);
-                    ctx.strokeRect(lx0, ly0, lx1 - lx0, ly1 - ly0);
-                    ctx.fillRect(lx0, ly0, lx1 - lx0, ly1 - ly0);
-                    ctx.setLineDash([]);
+                    if (lineMode === '1d') {{
+                        // 1D Linear Guideline Mode (Single baseline running across words)
+                        const midY = (ly0 + ly1) / 2;
+                        ctx.setLineDash([10, 4]);
+                        ctx.beginPath();
+                        ctx.moveTo(lx0, midY);
+                        ctx.lineTo(lx1, midY);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                        // Small guide ticks at extremities
+                        ctx.beginPath();
+                        ctx.moveTo(lx0, ly0 + 3);
+                        ctx.lineTo(lx0, ly1 - 3);
+                        ctx.moveTo(lx1, ly0 + 3);
+                        ctx.lineTo(lx1, ly1 - 3);
+                        ctx.stroke();
+                    }} else {{
+                        // 2D Area Block Mode (Interline bounding space)
+                        ctx.setLineDash([8, 5]);
+                        ctx.strokeRect(lx0, ly0, lx1 - lx0, ly1 - ly0);
+                        ctx.fillRect(lx0, ly0, lx1 - lx0, ly1 - ly0);
+                        ctx.setLineDash([]);
+                    }}
                 }});
             }}
 

@@ -123,7 +123,7 @@ class GlyphSegmenter:
 
         # Build color mask: pigments, colored pencil, wash, paint
         if subfolder == "seraphinianus":
-            is_color = (sat > 0.16) & (chroma > 0.14) & (val < 0.96)
+            is_color = (sat > 0.09) & (chroma > 0.08) & (val < 0.98)
         else:
             is_color = (
                 ((hue >= 0.14) & (hue <= 0.50) & (sat > 0.14)) |  # Green
@@ -132,8 +132,8 @@ class GlyphSegmenter:
                 (chroma > 0.16)
             )
 
-        # Dilate color by 8 iterations to bridge outlines, pencils, and hatching directly touching color
-        color_dil = binary_dilation(is_color, iterations=8)
+        # Dilate color by 12 iterations (~12-18px) to bridge all outlines, black contours, and hatching touching color
+        color_dil = binary_dilation(is_color, iterations=12)
 
         labeled, num_features = label(ink_candidates)
         props = regionprops(labeled)

@@ -116,30 +116,19 @@ class LineSegmenter:
                 off_comp_x = c.bbox[1] - lx0
                 line_mask[off_comp_y:off_comp_y + (c.bbox[2] - c.bbox[0]), off_comp_x:off_comp_x + (c.bbox[3] - c.bbox[1])] |= c_mask
 
+            # Bounding box spanning all ink components on this line with horizontal padding
             abs_y0 = off_y + ly0
             abs_y1 = off_y + ly1
-            abs_x0 = off_x + lx0
-            abs_x1 = off_x + lx1
+            abs_x0 = max(0, off_x + lx0 - 6)
+            abs_x1 = min(work_img.shape[1], off_x + lx1 + 6)
 
             results.append({
                 "line_id": f"L{line_idx:03d}",
-                "bbox": [int(abs_y0), int(abs_x0), int(abs_y1), int(abs_x1)],
+                "bbox": (int(abs_y0), int(abs_x0), int(abs_y1), int(abs_x1)),
                 "image": line_mask
             })
 
-        # Enforce strictly non-overlapping 1D vertical line boundaries
         results.sort(key=lambda item: item["bbox"][0])
-        for i in range(len(results) - 1):
-            curr_b = results[i]["bbox"]
-            next_b = results[i + 1]["bbox"]
-            if curr_b[2] > next_b[0]:
-                split_y = int(round((curr_b[2] + next_b[0]) / 2.0))
-                curr_b[2] = split_y
-                next_b[0] = split_y
-
-        for r in results:
-            r["bbox"] = tuple(r["bbox"])
-
         return results
 
     def segment_words(self, line_ink: np.ndarray, line_offset: Tuple[int, int] = (0, 0), space_gap_min: int = 12, space_threshold: Optional[int] = None) -> List[Dict[str, Any]]:
