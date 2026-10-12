@@ -169,39 +169,7 @@ class VoynicheseRosettaLoader:
         else:
             xml_w, xml_h = xml_canvas
 
-        scan_w, scan_h = scan_image.size
-
-        # High-precision calibrated alignment matrices (sx, sy, tx, ty) measured
-        # directly via Sauvola ink cross-correlation against high-res Yale scans.
-        CALIBRATED_FOLIO_TRANSFORMS: Dict[str, Tuple[float, float, float, float]] = {
-            "f1r": (2.087, 2.087, 241.2, 35.3),
-            "f001r": (2.087, 2.087, 241.2, 35.3),
-            "f1v": (2.148, 2.148, 5.1, 24.8),
-            "f001v": (2.148, 2.148, 5.1, 24.8),
-            "f2r": (1.911, 1.911, 318.5, 0.0),
-            "f002r": (1.911, 1.911, 318.5, 0.0),
-            "f2v": (1.902, 1.902, 134.0, 0.0),
-            "f002v": (1.902, 1.902, 134.0, 0.0),
-            "f3r": (2.209, 2.209, 15.0, 56.2),
-            "f003r": (2.209, 2.209, 15.0, 56.2),
-            "f3v": (1.983, 1.983, 281.8, 325.8),
-            "f003v": (1.983, 1.983, 281.8, 325.8),
-            "f4r": (2.148, 2.148, 120.9, 39.9),
-            "f004r": (2.148, 2.148, 120.9, 39.9),
-            "f4v": (1.965, 1.965, 0.0, 114.4),
-            "f004v": (1.965, 1.965, 0.0, 114.4),
-        }
-
-        if norm_name in CALIBRATED_FOLIO_TRANSFORMS:
-            return CALIBRATED_FOLIO_TRANSFORMS[norm_name]
-
-        # Automated 2D Cross-Correlation Image Registration
-        try:
-            return self.calibrate_affine_by_cross_correlation(folio_id, scan_image, (xml_w, xml_h))
-        except Exception:
-            pass
-
-        # Dynamic fallback based on parchment boundaries
+        # Robust affine mapping based on detected parchment boundaries
         from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
         rgb_arr = np.array(scan_image)
         seg = GlyphSegmenter()
@@ -214,7 +182,7 @@ class VoynicheseRosettaLoader:
         tx = float(px0)
         ty = float(py0)
 
-        return (sx, sy, tx, ty)
+        return (round(float(sx), 4), round(float(sy), 4), round(float(tx), 1), round(float(ty), 1))
 
     def calibrate_affine_by_cross_correlation(
         self,
@@ -322,57 +290,18 @@ class VoynicheseRosettaLoader:
         sx, sy, tx, ty = self.compute_scan_affine_transform(folio_id, scan_image)
         img_w, img_h = scan_image.size
 
-        # Precompute ink mask for fast local snapping
-        from voynich_ductus.ingestion.binarization import Binarizer
-        from scipy.ndimage import label
-        from skimage.measure import regionprops
-        binarizer = Binarizer(method="sauvola")
-        ink_mask = binarizer.binarize(scan_image)
-
         aligned_words: List[RosettaWord] = []
         for w in words:
-            # Map XML bbox to initial parchment coordinates
-            init_x0 = int(tx + w.x_xml * sx)
-            init_y0 = int(ty + w.y_xml * sy)
-            init_x1 = int(tx + (w.x_xml + w.width_xml) * sx)
-            init_y1 = int(ty + (w.y_xml + w.height_xml) * sy)
+            # Map XML bbox strictly to scan coordinates using parchment affine transform
+            init_x0 = max(0, min(img_w - 1, int(round(tx + w.x_xml * sx))))
+            init_y0 = max(0, min(img_h - 1, int(round(ty + w.y_xml * sy))))
+            init_x1 = max(init_x0 + 1, min(img_w, int(round(tx + (w.x_xml + w.width_xml) * sx))))
+            init_y1 = max(init_y0 + 1, min(img_h, int(round(ty + (w.y_xml + w.height_xml) * sy))))
 
-            # Local ink-snapping within a search window around the annotated word
-            w_pad = 12
-            sy0 = max(0, init_y0 - w_pad)
-            sx0 = max(0, init_x0 - w_pad)
-            sy1 = min(img_h, init_y1 + w_pad)
-            sx1 = min(img_w, init_x1 + w_pad)
-
-            sub_ink = ink_mask[sy0:sy1, sx0:sx1]
-            labeled_sub, num_sub = label(sub_ink)
-            if num_sub > 0:
-                props = regionprops(labeled_sub)
-                valid = [p for p in props if p.area >= 12 and (p.bbox[2] - p.bbox[0]) >= 6]
-                if valid:
-                    min_r = min(p.bbox[0] for p in valid)
-                    min_c = min(p.bbox[1] for p in valid)
-                    max_r = max(p.bbox[2] for p in valid)
-                    max_c = max(p.bbox[3] for p in valid)
-                    min_y = max(0, sy0 + min_r - 2)
-                    min_x = max(0, sx0 + min_c - 3)
-                    max_y = min(img_h, sy0 + max_r + 2)
-                    max_x = min(img_w, sx0 + max_c + 3)
-                else:
-                    min_x = max(0, init_x0 - padding_px)
-                    min_y = max(0, init_y0 - padding_px)
-                    max_x = min(img_w, init_x1 + padding_px)
-                    max_y = min(img_h, init_y1 + padding_px)
-            else:
-                min_x = max(0, init_x0 - padding_px)
-                min_y = max(0, init_y0 - padding_px)
-                max_x = min(img_w, init_x1 + padding_px)
-                max_y = min(img_h, init_y1 + padding_px)
-
-            bbox_scan = (min_x, min_y, max_x, max_y)
+            bbox_scan = (init_x0, init_y0, init_x1, init_y1)
             
             # Crop image patch
-            if max_x > min_x and max_y > min_y:
+            if init_x1 > init_x0 and init_y1 > init_y0:
                 patch = scan_image.crop(bbox_scan)
             else:
                 patch = None

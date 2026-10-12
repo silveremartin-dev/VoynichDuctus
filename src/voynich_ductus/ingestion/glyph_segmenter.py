@@ -132,8 +132,8 @@ class GlyphSegmenter:
                 (chroma > 0.16)
             )
 
-        # Dilate color by 4 iterations to bridge any tiny gap between outlines/hatching and color
-        color_dil = binary_dilation(is_color, iterations=4)
+        # Dilate color by 8 iterations to bridge outlines, pencils, and hatching directly touching color
+        color_dil = binary_dilation(is_color, iterations=8)
 
         labeled, num_features = label(ink_candidates)
         props = regionprops(labeled)
@@ -147,12 +147,14 @@ class GlyphSegmenter:
             ph = p.bbox[2] - p.bbox[0]
             pw = p.bbox[3] - p.bbox[1]
 
-            # Drawing exclusion: connected to color, or oversized
+            # Drawing exclusion: connected to color, or excessively tall (drawings/borders)
             if len(ink_touching_color) >= p.label and ink_touching_color[p.label - 1]:
                 continue
-            if p.area > (6000 if subfolder == "seraphinianus" else self.max_drawing_area):
+            # Text lines in Seraphinianus have bounded vertical height ph <= 130 px, but words can be arbitrarily long
+            if ph > 130:
                 continue
-            if ph > 130 or pw > 850:
+            # If area is huge and aspect ratio is square/tall, it's a drawing
+            if p.area > (25000 if subfolder == "seraphinianus" else self.max_drawing_area):
                 continue
             if p.area < 10 or ph < 5 or pw < 2:
                 continue
@@ -782,37 +784,52 @@ class GlyphSegmenter:
         all_page_words = []
         all_page_glyphs = []
         
-        # Sort ground truth words by y (lines) then x
+        # Filter words with valid bbox_scan
         valid_r_words = [rw for rw in rosetta_words if rw.bbox_scan is not None]
-        valid_r_words.sort(key=lambda rw: (rw.bbox_scan[1], rw.bbox_scan[0]))
 
-        # Group words into lines by vertical proximity
+        # Group words into lines using natural sequential reading order (carriage returns)
         line_clusters: List[List[Any]] = []
+        curr_cluster: List[Any] = []
         for rw in valid_r_words:
-            rx0, ry0, rx1, ry1 = rw.bbox_scan
-            rc_y = (ry0 + ry1) / 2.0
-            
-            placed = False
-            for lc in line_clusters:
-                lc_ys = [(w.bbox_scan[1] + w.bbox_scan[3]) / 2.0 for w in lc]
-                mean_y = sum(lc_ys) / len(lc_ys)
-                if abs(rc_y - mean_y) < 30:  # Same line pitch
-                    lc.append(rw)
-                    placed = True
-                    break
-            if not placed:
-                line_clusters.append([rw])
+            if not curr_cluster:
+                curr_cluster.append(rw)
+            else:
+                prev_rw = curr_cluster[-1]
+                # Carriage return condition based on XML coordinate progression
+                if rw.x_xml < prev_rw.x_xml - 35 or (rw.y_xml - prev_rw.y_xml) > 25:
+                    line_clusters.append(curr_cluster)
+                    curr_cluster = [rw]
+                else:
+                    curr_cluster.append(rw)
+        if curr_cluster:
+            line_clusters.append(curr_cluster)
 
-        clean_lines = []
-        for line_idx, lc in enumerate(line_clusters):
-            lc.sort(key=lambda w: w.bbox_scan[0])  # Left to right
-            line_id = f"L{line_idx:02d}"
-            
+        # Sort each line from left to right
+        for lc in line_clusters:
+            lc.sort(key=lambda w: w.bbox_scan[0])
+
+        # Compute strictly non-overlapping 1D vertical line boundaries
+        raw_line_bounds = []
+        for lc in line_clusters:
             ly0 = min(w.bbox_scan[1] for w in lc)
             lx0 = min(w.bbox_scan[0] for w in lc)
             ly1 = max(w.bbox_scan[3] for w in lc)
             lx1 = max(w.bbox_scan[2] for w in lc)
+            raw_line_bounds.append([ly0, lx0, ly1, lx1])
 
+        # Enforce non-overlapping Y extents between consecutive lines:
+        for i in range(len(raw_line_bounds) - 1):
+            curr_b = raw_line_bounds[i]
+            next_b = raw_line_bounds[i + 1]
+            if curr_b[2] > next_b[0]:
+                split_y = int(round((curr_b[2] + next_b[0]) / 2.0))
+                curr_b[2] = split_y
+                next_b[0] = split_y
+
+        clean_lines = []
+        for line_idx, (lc, bounds) in enumerate(zip(line_clusters, raw_line_bounds)):
+            line_id = f"L{line_idx:02d}"
+            ly0, lx0, ly1, lx1 = bounds
             clean_lines.append({
                 "line_id": line_id,
                 "bbox": (int(ly0), int(lx0), int(ly1), int(lx1))

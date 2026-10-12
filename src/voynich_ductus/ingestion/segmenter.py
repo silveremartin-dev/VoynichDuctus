@@ -123,9 +123,22 @@ class LineSegmenter:
 
             results.append({
                 "line_id": f"L{line_idx:03d}",
-                "bbox": (int(abs_y0), int(abs_x0), int(abs_y1), int(abs_x1)),
+                "bbox": [int(abs_y0), int(abs_x0), int(abs_y1), int(abs_x1)],
                 "image": line_mask
             })
+
+        # Enforce strictly non-overlapping 1D vertical line boundaries
+        results.sort(key=lambda item: item["bbox"][0])
+        for i in range(len(results) - 1):
+            curr_b = results[i]["bbox"]
+            next_b = results[i + 1]["bbox"]
+            if curr_b[2] > next_b[0]:
+                split_y = int(round((curr_b[2] + next_b[0]) / 2.0))
+                curr_b[2] = split_y
+                next_b[0] = split_y
+
+        for r in results:
+            r["bbox"] = tuple(r["bbox"])
 
         return results
 

@@ -576,33 +576,6 @@ class CorpusCorrespondenceMatcher:
         Estimates the closest standard corpus match (EVA / Currier / v101 / Voynichese) for an induced Voynich archetype
         using strict topological constraints (stroke count bounds, aspect ratio, and loop compatibility).
         """
-        # Check if cluster has certified ground truth EVA characters from transcriptions
-        if cluster_glyphs:
-            eva_votes = {}
-            for g in cluster_glyphs:
-                ec = (g.get("eva_char") or "").strip().lower()
-                if ec:
-                    eva_votes[ec] = eva_votes.get(ec, 0) + 1
-            if eva_votes:
-                top_eva, vote_count = max(eva_votes.items(), key=lambda item: item[1])
-                ratio = vote_count / max(1, len(cluster_glyphs))
-                if ratio >= 0.25 or vote_count >= 3:
-                    for prof in cls.VOYNICH_STANDARD_PROFILES:
-                        if prof["eva"] == top_eva:
-                            conf = min(0.98, max(0.75, ratio + 0.15))
-                            return {
-                                "system": "EVA / Currier / v101 / Voynichese",
-                                "eva_equivalent": prof["eva"],
-                                "currier_equivalent": prof["currier"],
-                                "v101_equivalent": prof.get("v101", prof["eva"]),
-                                "voynichese_equivalent": prof.get("voynichese", prof["eva"]),
-                                "name": prof["name"],
-                                "category": prof["category"],
-                                "confidence_pct": round(conf * 100, 1),
-                                "description": prof["description"],
-                                "reference_svg": cls.EVA_REFERENCE_SVGS.get(prof["eva"], "")
-                            }
-
         aspect_ratio = mean_width / max(1.0, mean_height)
 
         archetype_has_loop = False
@@ -616,6 +589,56 @@ class CorpusCorrespondenceMatcher:
                     loop_scores.append(False)
             archetype_has_loop = np.mean(loop_scores) >= 0.50 if loop_scores else False
 
+        # Compute topological and morphological distance to profiles
+        profile_scores = {}
+        for prof in cls.VOYNICH_STANDARD_PROFILES:
+            if round(mean_strokes) < prof["min_strokes"]:
+                stroke_pen = 3.5 * (prof["min_strokes"] - mean_strokes)
+            elif round(mean_strokes) > prof["max_strokes"]:
+                stroke_pen = 3.5 * (mean_strokes - prof["max_strokes"])
+            else:
+                stroke_pen = abs(prof["strokes"] - mean_strokes) * 1.0
+
+            aspect_diff = abs(prof["aspect_ratio"] - aspect_ratio) * 1.6
+            rank_diff = abs(prof["relative_freq_rank"] - frequency_rank) / 25.0
+
+            loop_pen = 0.0
+            if prof["has_loop"] and not archetype_has_loop and mean_strokes < 1.8:
+                loop_pen = 3.0
+            elif not prof["has_loop"] and archetype_has_loop and prof["strokes"] <= 1.2:
+                loop_pen = 2.5
+
+            total_dist = stroke_pen + aspect_diff + rank_diff + loop_pen
+            profile_scores[prof["eva"]] = (total_dist, prof)
+
+        # Check if cluster has certified ground truth EVA characters from transcriptions
+        if cluster_glyphs:
+            eva_votes = {}
+            for g in cluster_glyphs:
+                ec = (g.get("eva_char") or "").strip().lower()
+                if ec:
+                    eva_votes[ec] = eva_votes.get(ec, 0) + 1
+            if eva_votes:
+                top_eva, vote_count = max(eva_votes.items(), key=lambda item: item[1])
+                ratio = vote_count / max(1, len(cluster_glyphs))
+                if top_eva in profile_scores and (ratio >= 0.25 or vote_count >= 3):
+                    geom_dist, prof = profile_scores[top_eva]
+                    # Authentic morphological confidence factoring real visual geometry (distance penalizes mismatch)
+                    geom_conf = max(0.20, 1.0 - (geom_dist * 0.16))
+                    combined_conf = (0.50 * ratio) + (0.50 * geom_conf)
+                    conf_pct = round(max(25.0, min(95.0, combined_conf * 100.0)), 1)
+                    return {
+                        "system": "EVA / Currier / v101 / Voynichese",
+                        "eva_equivalent": prof["eva"],
+                        "currier_equivalent": prof["currier"],
+                        "v101_equivalent": prof.get("v101", prof["eva"]),
+                        "voynichese_equivalent": prof.get("voynichese", prof["eva"]),
+                        "name": prof["name"],
+                        "category": prof["category"],
+                        "confidence_pct": conf_pct,
+                        "description": prof["description"],
+                        "reference_svg": cls.EVA_REFERENCE_SVGS.get(prof["eva"], "")
+                    }
         best_match = None
         best_distance = float("inf")
 
@@ -786,18 +809,35 @@ class CorpusCorrespondenceMatcher:
             voynichese_char = base.get("voynichese_equivalent", "o")
             base_conf = base.get("confidence_pct", 75.0)
 
+            # Compute actual geometric profile distances for Voynich
+            profile_scores = {}
+            for prof in cls.VOYNICH_STANDARD_PROFILES:
+                s_pen = abs(prof["strokes"] - mean_strokes) * 1.0
+                a_diff = abs(prof["aspect_ratio"] - aspect_ratio) * 1.6
+                profile_scores[prof["eva"]] = (s_pen + a_diff, prof)
+
+            # 1. EVA Scheme
+            eva_prof = next((p for p in cls.VOYNICH_STANDARD_PROFILES if p["eva"] == eva_char), None)
+            eva_dist = profile_scores[eva_char][0] if eva_char in profile_scores else 2.5
+            eva_conf = round(max(35.0, min(95.0, (1.0 - eva_dist * 0.16) * 100.0)), 1)
             matches["eva"] = {
                 "scheme": "EVA",
                 "label": f"EVA: '{eva_char}'",
                 "symbol": eva_char,
-                "confidence_pct": base_conf,
+                "confidence_pct": eva_conf,
                 "category": base.get("category", "General"),
                 "name": base.get("name", "Grapheme"),
                 "description": base.get("description", ""),
                 "reference_svg": cls.EVA_REFERENCE_SVGS.get(eva_char, "")
             }
-            # Currier scheme: independent confidence score factoring Currier alphabet topology
-            currier_conf = round(min(98.0, max(45.0, base_conf - (5.0 if currier_char == '—' else 2.5))), 1)
+
+            # 2. Currier Scheme: match closest Currier profile based on Currier grapheme topology
+            currier_prof = next((p for p in cls.VOYNICH_STANDARD_PROFILES if p["currier"] == currier_char and p["currier"] != "—"), None)
+            if currier_prof and currier_prof["eva"] in profile_scores:
+                c_dist = profile_scores[currier_prof["eva"]][0]
+                currier_conf = round(max(30.0, min(94.0, (1.0 - c_dist * 0.17) * 100.0)), 1)
+            else:
+                currier_conf = round(max(25.0, eva_conf - 12.0), 1)
             matches["currier"] = {
                 "scheme": "Currier",
                 "label": f"Currier: '{currier_char}'",
@@ -808,8 +848,14 @@ class CorpusCorrespondenceMatcher:
                 "description": f"Currier transliteration standard equivalent for scribal form.",
                 "reference_svg": cls.EVA_REFERENCE_SVGS.get(eva_char, "")
             }
-            # v101 standard scheme
-            v101_conf = round(min(98.0, max(45.0, base_conf - (2.0 if v101_char == eva_char else 6.0))), 1)
+
+            # 3. v101 Standard Scheme: independent phonetic/typographic confidence
+            v101_prof = next((p for p in cls.VOYNICH_STANDARD_PROFILES if p.get("v101") == v101_char), None)
+            if v101_prof and v101_prof["eva"] in profile_scores:
+                v_dist = profile_scores[v101_prof["eva"]][0]
+                v101_conf = round(max(30.0, min(93.0, (1.0 - v_dist * 0.18) * 100.0)), 1)
+            else:
+                v101_conf = round(max(25.0, eva_conf - 10.0), 1)
             matches["v101"] = {
                 "scheme": "v101",
                 "label": f"v101: '{v101_char}'",
@@ -820,8 +866,14 @@ class CorpusCorrespondenceMatcher:
                 "description": f"v101 extended transcription standard equivalent.",
                 "reference_svg": cls.EVA_REFERENCE_SVGS.get(eva_char, "")
             }
-            # Voynichese Ground Truth
-            voynichese_conf = round(min(99.0, max(50.0, base_conf + (3.0 if cluster_glyphs and any(g.get("eva_char") for g in cluster_glyphs) else -2.0))), 1)
+
+            # 4. Voynichese Ground Truth: based on XML transcription voting consistency
+            if cluster_glyphs:
+                v_votes = sum(1 for g in cluster_glyphs if (g.get("eva_char") or "").strip().lower() == voynichese_char.lower())
+                v_ratio = v_votes / max(1, len(cluster_glyphs))
+                voynichese_conf = round(max(35.0, min(96.0, (0.60 * v_ratio + 0.40 * (eva_conf / 100.0)) * 100.0)), 1)
+            else:
+                voynichese_conf = eva_conf
             matches["voynichese"] = {
                 "scheme": "Voynichese (2014)",
                 "label": f"Voynichese: '{voynichese_char}'",

@@ -7,12 +7,15 @@ featuring interactive Zoom/Pan, Minimap, Auto-Zoom on glyph click, and 3-way vis
 """
 
 import os
+import sys
 import json
 import shutil
 from pathlib import Path
 from typing import List, Dict, Any
 from PIL import Image
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
 from voynich_ductus.ingestion.pdf_loader import PDFScanLoader
