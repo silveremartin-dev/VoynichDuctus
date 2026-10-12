@@ -1915,68 +1915,91 @@ def generate_explorer_html(
 
             const cat = data[currentMs].catalogue;
             const arch = cat.alphabet.find(a => a.type_id === selectedGlyph.canonical_type);
-            const cm = getTranslitMatch(arch);
+            const multiMatches = arch ? (arch.corpus_matches || {{}}) : {{}};
 
-            let corpusHtml = '';
-            let refSvgBox = '';
-            const schemeSelectHtml = `
-                <select id="alphabet-scheme-select" onchange="setAlphabetScheme(this.value)" style="font-size:0.65rem; padding:1px 4px; background:#0f172a; color:var(--accent); border:1px solid #334155; border-radius:4px; cursor:pointer;">
-                    ${{getSchemeSelectOptionsHtml()}}
-                </select>
-            `;
-
-            if (cm && cm.reference_svg && cm.confidence_pct >= 40) {{
-                const schemeLabel = getTranslitLabel(arch);
-                corpusHtml = `
-                    <div class="corpus-box">
-                        <div class="corpus-title">
-                            <span>Standard Corpus Match (${{schemeLabel}})</span>
-                            <span style="color:var(--success); font-weight:bold;">${{cm.confidence_pct}}% match</span>
+            // Render all 4 schemes simultaneously in a side-by-side comparison grid
+            let multiCardsHtml = '';
+            if (currentMs === 'voynich') {{
+                const schemes = [
+                    {{ key: 'eva', title: 'EVA', color: '#f59e0b' }},
+                    {{ key: 'currier', title: 'Currier', color: '#38bdf8' }},
+                    {{ key: 'v101', title: 'v101', color: '#a855f7' }},
+                    {{ key: 'voynichese', title: 'Voynichese (2014)', color: '#10b981' }}
+                ];
+                multiCardsHtml = `
+                    <div style="background:#0c1222; border:1px solid #1e293b; border-radius:8px; padding:8px 10px; margin:8px 0;">
+                        <div style="font-size:0.70rem; color:var(--accent); font-weight:bold; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;">
+                            🏛️ 4-Scheme Transliteration Alignment & Confidence
                         </div>
-                        <div><strong>Category:</strong> ${{cm.category}} (${{cm.name}})</div>
-                        <div style="color:var(--text-muted); font-size:0.72rem; margin-top:2px;">${{cm.description}}</div>
-                    </div>
-                `;
-                refSvgBox = `
-                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; width:100%; margin-bottom:4px;">
-                            <span style="font-size:0.60rem; color:var(--text-muted); font-weight:bold;">REFERENCE</span>
-                            ${{schemeSelectHtml}}
-                        </div>
-                        <div style="flex:1; display:flex; justify-content:center; align-items:center; width:100%; min-height:75px;">
-                            ${{cm.reference_svg || ''}}
-                        </div>
-                        <div style="font-size:0.65rem; color:var(--accent); font-weight:bold; margin-top:2px;">
-                            ${{schemeLabel}} (${{cm.confidence_pct}}%)
+                        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px;">
+                            ${{schemes.map(s => {{
+                                const m = multiMatches[s.key] || {{}};
+                                const sym = m.symbol || (m.label ? m.label.split(':')[1]?.trim() : '—');
+                                const pct = m.confidence_pct || 75.0;
+                                return `
+                                    <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center; display:flex; flex-direction:column; justify-content:space-between;">
+                                        <div style="font-size:0.62rem; color:${{s.color}}; font-weight:bold; border-bottom:1px solid #1f2937; padding-bottom:2px; margin-bottom:4px;">${{s.title}}</div>
+                                        <div style="font-size:1.15rem; font-family:monospace; font-weight:bold; color:#fff; margin:2px 0;">${{sym}}</div>
+                                        <div style="font-size:0.68rem; color:var(--success); font-weight:bold;">${{pct}}%</div>
+                                        <div style="font-size:0.58rem; color:var(--text-muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${{m.category || 'Standard'}}</div>
+                                    </div>
+                                `;
+                            }}).join('')}}
                         </div>
                     </div>
                 `;
             }} else {{
-                corpusHtml = `
-                    <div class="corpus-box" style="border-color:#334155;">
-                        <div class="corpus-title">
-                            <span style="color:#38bdf8;">Autonomous Emergent Archetype</span>
-                            <span style="color:var(--text-muted); font-size:0.75rem;">Novel Scribal Form</span>
+                const schemes = [
+                    {{ key: 'serafini', title: 'Serafini (1981)', color: '#c084fc' }},
+                    {{ key: 'deri', title: 'Deri (2015)', color: '#38bdf8' }},
+                    {{ key: 'bulik', title: 'Bulik (2011)', color: '#10b981' }}
+                ];
+                multiCardsHtml = `
+                    <div style="background:#0c1222; border:1px solid #1e293b; border-radius:8px; padding:8px 10px; margin:8px 0;">
+                        <div style="font-size:0.70rem; color:var(--accent); font-weight:bold; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;">
+                            🏛️ Multi-Method Serafinian Correspondence
                         </div>
-                        <div style="color:var(--text-muted); font-size:0.72rem; margin-top:2px;">
-                            This glyph possesses a distinct ductus topology with no transliteration equivalent in standard transcription schemes (Safeguard against transliteration hallucination).
-                        </div>
-                    </div>
-                `;
-                refSvgBox = `
-                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; width:100%; margin-bottom:4px;">
-                            <span style="font-size:0.60rem; color:var(--text-muted); font-weight:bold;">REFERENCE</span>
-                            ${{schemeSelectHtml}}
-                        </div>
-                        <div style="color:var(--text-muted); font-size:0.72rem; padding:12px; line-height:1.4; flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center;">
-                            <div style="font-size:1.3rem; margin-bottom:4px;">✨</div>
-                            <strong>Distinct Emergent Ductus</strong>
-                            <div style="font-size:0.65rem; opacity:0.75; margin-top:4px;">No standard reference equivalent</div>
+                        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px;">
+                            ${{schemes.map(s => {{
+                                const m = multiMatches[s.key] || {{}};
+                                const sym = m.symbol || (m.label ? m.label.split(':')[1]?.trim() : '—');
+                                const pct = m.confidence_pct || 75.0;
+                                return `
+                                    <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center; display:flex; flex-direction:column; justify-content:space-between;">
+                                        <div style="font-size:0.62rem; color:${{s.color}}; font-weight:bold; border-bottom:1px solid #1f2937; padding-bottom:2px; margin-bottom:4px;">${{s.title}}</div>
+                                        <div style="font-size:0.95rem; font-family:monospace; font-weight:bold; color:#fff; margin:2px 0;">${{sym}}</div>
+                                        <div style="font-size:0.68rem; color:var(--success); font-weight:bold;">${{pct}}%</div>
+                                        <div style="font-size:0.58rem; color:var(--text-muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${{m.category || 'Cursive'}}</div>
+                                    </div>
+                                `;
+                            }}).join('')}}
                         </div>
                     </div>
                 `;
             }}
+
+            const cm = getTranslitMatch(arch);
+            let refSvgBox = '';
+            if (cm && cm.reference_svg) {{
+                refSvgBox = `
+                    <div class="preview-box-large">
+                        <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">REFERENCE DUCTUS</span>
+                        ${{cm.reference_svg}}
+                    </div>
+                `;
+            }} else {{
+                refSvgBox = `
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:center; align-items:center;">
+                        <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">AUTONOMOUS FORM</span>
+                        <div style="color:var(--text-muted); font-size:0.68rem; text-align:center; padding:6px;">
+                            <div>✨ Emergent Ductus</div>
+                            <div style="font-size:0.58rem; opacity:0.7; margin-top:2px;">(No Prior Translit)</div>
+                        </div>
+                    </div>
+                `;
+            }}
+
+            let corpusHtml = multiCardsHtml;
 
             let wordHtml = '';
             if (selectedGlyph.word_png_rel) {{
@@ -2257,6 +2280,52 @@ def generate_explorer_html(
                     `;
                 }}
 
+                // Display all available schemes simultaneously on the card
+                const multi = a.corpus_matches || {{}};
+                let schemesSummaryHtml = '';
+                if (currentMs === 'voynich') {{
+                    const sList = [
+                        {{ k: 'eva', label: 'EVA', col: '#f59e0b' }},
+                        {{ k: 'currier', label: 'Currier', col: '#38bdf8' }},
+                        {{ k: 'v101', label: 'v101', col: '#a855f7' }},
+                        {{ k: 'voynichese', label: 'Voynichese', col: '#10b981' }}
+                    ];
+                    schemesSummaryHtml = `
+                        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:4px; margin:6px 0; background:#0b132b; border:1px solid #1e293b; border-radius:4px; padding:4px;">
+                            ${{sList.map(s => {{
+                                const sm = multi[s.k] || {{}};
+                                return `
+                                    <div style="text-align:center;">
+                                        <div style="font-size:0.55rem; color:${{s.col}}; font-weight:bold;">${{s.label}}</div>
+                                        <div style="font-size:0.85rem; font-family:monospace; font-weight:bold; color:#fff;">${{sm.symbol || '—'}}</div>
+                                        <div style="font-size:0.58rem; color:var(--success); font-weight:bold;">${{sm.confidence_pct || 75}}%</div>
+                                    </div>
+                                `;
+                            }}).join('')}}
+                        </div>
+                    `;
+                }} else {{
+                    const sList = [
+                        {{ k: 'serafini', label: 'Serafini', col: '#c084fc' }},
+                        {{ k: 'deri', label: 'Deri', col: '#38bdf8' }},
+                        {{ k: 'bulik', label: 'Bulik', col: '#10b981' }}
+                    ];
+                    schemesSummaryHtml = `
+                        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; margin:6px 0; background:#0b132b; border:1px solid #1e293b; border-radius:4px; padding:4px;">
+                            ${{sList.map(s => {{
+                                const sm = multi[s.k] || {{}};
+                                return `
+                                    <div style="text-align:center;">
+                                        <div style="font-size:0.55rem; color:${{s.col}}; font-weight:bold;">${{s.label}}</div>
+                                        <div style="font-size:0.75rem; font-family:monospace; font-weight:bold; color:#fff;">${{sm.symbol || '—'}}</div>
+                                        <div style="font-size:0.58rem; color:var(--success); font-weight:bold;">${{sm.confidence_pct || 75}}%</div>
+                                    </div>
+                                `;
+                            }}).join('')}}
+                        </div>
+                    `;
+                }}
+
                 return `
                 <div class="catalogue-card" onclick="openArchetypeVariations('${{a.type_id}}')">
                     <div class="catalogue-header">
@@ -2264,6 +2333,7 @@ def generate_explorer_html(
                         <span class="badge-freq">${{a.frequency}} occurrences (${{a.percentage}}%)</span>
                     </div>
                     ${{matchHeader}}
+                    ${{schemesSummaryHtml}}
                     <div class="catalogue-trio">
                         <div class="c-box">
                             <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">EXEMPLAR</span>

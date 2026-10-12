@@ -120,12 +120,23 @@ class GlyphSegmenter:
         val = hsv[:, :, 2]
         chroma = np.max(rgb_float, axis=2) - np.min(rgb_float, axis=2)
 
-        # Build comprehensive drawing/illustration exclusion envelope
-        # Any continuous colored region (sat > 0.18, chroma > 0.15) or large illustration texture
-        # is dilated by a safety margin to guarantee no line of drawing is mistaken for cursive script.
+        # Build connected-component drawing / illustration exclusion masks.
+        # Connected illustration regions (drawings, colored figures, wash areas)
+        # are isolated as discrete blocks to prevent dilations from invading text columns.
+        drawing_mask = np.zeros((H, W), dtype=bool)
         if subfolder == "seraphinianus":
-            is_colored_pixel = (sat > 0.18) | (chroma > 0.15)
-            drawing_envelope = binary_dilation(is_colored_pixel, iterations=16)
+            is_colored_pixel = (sat > 0.22) & (chroma > 0.18)
+            labeled_draw, num_draw = label(is_colored_pixel)
+            if num_draw > 0:
+                draw_props = regionprops(labeled_draw)
+                for dp in draw_props:
+                    if dp.area >= 150:
+                        # Mask tight bounding box with minimal 2px padding
+                        by0 = max(0, dp.bbox[0] - 2)
+                        bx0 = max(0, dp.bbox[1] - 2)
+                        by1 = min(H, dp.bbox[2] + 2)
+                        bx1 = min(W, dp.bbox[3] + 2)
+                        drawing_mask[by0:by1, bx0:bx1] = True
         else:
             is_paint_pixel = (
                 ((hue >= 0.14) & (hue <= 0.50) & (sat > 0.14)) |  # Green
@@ -133,7 +144,16 @@ class GlyphSegmenter:
                 (((hue >= 0.85) | (hue <= 0.06)) & (sat > 0.16)) |  # Red
                 (chroma > 0.16)
             )
-            drawing_envelope = binary_dilation(is_paint_pixel, iterations=8)
+            labeled_draw, num_draw = label(is_paint_pixel)
+            if num_draw > 0:
+                draw_props = regionprops(labeled_draw)
+                for dp in draw_props:
+                    if dp.area >= 100:
+                        by0 = max(0, dp.bbox[0] - 3)
+                        bx0 = max(0, dp.bbox[1] - 3)
+                        by1 = min(H, dp.bbox[2] + 3)
+                        bx1 = min(W, dp.bbox[3] + 3)
+                        drawing_mask[by0:by1, bx0:bx1] = True
 
         labeled, num_features = label(ink_candidates)
         props = regionprops(labeled)
@@ -146,17 +166,17 @@ class GlyphSegmenter:
             aspect = pw / max(1, ph)
 
             # Geometry filtering: reject giant drawings, full plate frames, or border smears
-            max_area = 10000 if subfolder == "seraphinianus" else self.max_drawing_area
+            max_area = 12000 if subfolder == "seraphinianus" else self.max_drawing_area
             if p.area > max_area:
                 continue
-            if ph > self.max_glyph_height * 3.2:
+            if ph > self.max_glyph_height * 3.5:
                 continue
 
             c_mask = (labeled[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] == p.label)
 
-            # Reject component if it intersects the illustration drawing envelope by > 12%
-            c_env = drawing_envelope[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
-            if len(c_env) > 0 and np.mean(c_env) > 0.12:
+            # Reject component if it is embedded inside an illustration drawing block
+            c_env = drawing_mask[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
+            if len(c_env) > 0 and np.mean(c_env) > 0.35:
                 continue
 
             # Pigment and illustration color filtering on component ink pixels
@@ -174,7 +194,7 @@ class GlyphSegmenter:
                         (((c_hue >= 0.82) | (c_hue <= 0.08)) & (c_sat > 0.24) & (c_chroma > 0.16)) |  # Red
                         ((c_hue >= 0.48) & (c_hue <= 0.82) & (c_sat > 0.22) & (c_chroma > 0.15))     # Blue
                     )
-                    if np.mean(is_vibrant | is_pigment) > 0.18:
+                    if np.mean(is_vibrant | is_pigment) > 0.25:
                         continue
                 else:
                     # Voynich: reject colored paint washes
@@ -189,14 +209,16 @@ class GlyphSegmenter:
 
             clean_text_mask[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] |= c_mask
 
-        # Check if text lines run vertically across the page (sideways landscape plate)
+        # Check if text lines run vertically across the page (sideways landscape plate, e.g. Seraphinianus p40)
         was_rotated = False
         if subfolder == "seraphinianus":
             row_proj = np.sum(clean_text_mask, axis=1)
             col_proj = np.sum(clean_text_mask, axis=0)
             var_row = np.var(row_proj)
             var_col = np.var(col_proj)
-            if var_col > 2.2 * max(1e-5, var_row):
+            # If vertical projection variance significantly exceeds horizontal projection variance,
+            # text is oriented perpendicular to the page format.
+            if var_col > 1.8 * max(1e-5, var_row):
                 # Rotate 270° (90° clockwise) to bring text lines into standard horizontal reading orientation
                 clean_text_mask = np.rot90(clean_text_mask, k=3)
                 rgb_arr = np.rot90(rgb_arr, k=3)
