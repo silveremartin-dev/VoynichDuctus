@@ -346,6 +346,17 @@ class GlyphCatalogue:
                 elif eva_eq and eva_eq != "—":
                     assigned_standard_codes.add(eva_eq)
 
+            # Compute multi-scheme independent matches
+            multi_matches = CorpusCorrespondenceMatcher.match_all_schemes(
+                corpus_type=corpus_type,
+                archetype_id=type_name,
+                mean_strokes=mean_strokes,
+                mean_width=mean_width,
+                mean_height=mean_height,
+                frequency_rank=rank,
+                cluster_glyphs=cluster_glyphs
+            )
+
             # Collect full occurrences / spatial instances across all pages
             all_instances = []
             for g in cluster_glyphs:
@@ -376,6 +387,7 @@ class GlyphCatalogue:
                 "mean_height": mean_height,
                 "mean_width": mean_width,
                 "corpus_match": corpus_match,
+                "corpus_matches": multi_matches,
                 "total_instances_count": len(all_instances),
                 "all_instances": all_instances,
                 "sample_instances": [g["glyph_id"] for g in cluster_glyphs[:20]]

@@ -113,11 +113,27 @@ class GlyphSegmenter:
 
         # 3. Component-level color and geometry discrimination
         from skimage.color import rgb2hsv
+        from scipy.ndimage import binary_dilation
         hsv = rgb2hsv(rgb_float)
         hue = hsv[:, :, 0]
         sat = hsv[:, :, 1]
         val = hsv[:, :, 2]
         chroma = np.max(rgb_float, axis=2) - np.min(rgb_float, axis=2)
+
+        # Build comprehensive drawing/illustration exclusion envelope
+        # Any continuous colored region (sat > 0.18, chroma > 0.15) or large illustration texture
+        # is dilated by a safety margin to guarantee no line of drawing is mistaken for cursive script.
+        if subfolder == "seraphinianus":
+            is_colored_pixel = (sat > 0.18) | (chroma > 0.15)
+            drawing_envelope = binary_dilation(is_colored_pixel, iterations=16)
+        else:
+            is_paint_pixel = (
+                ((hue >= 0.14) & (hue <= 0.50) & (sat > 0.14)) |  # Green
+                ((hue >= 0.50) & (hue <= 0.80) & (sat > 0.14)) |  # Blue
+                (((hue >= 0.85) | (hue <= 0.06)) & (sat > 0.16)) |  # Red
+                (chroma > 0.16)
+            )
+            drawing_envelope = binary_dilation(is_paint_pixel, iterations=8)
 
         labeled, num_features = label(ink_candidates)
         props = regionprops(labeled)
@@ -130,14 +146,20 @@ class GlyphSegmenter:
             aspect = pw / max(1, ph)
 
             # Geometry filtering: reject giant drawings, full plate frames, or border smears
-            max_area = 15000 if subfolder == "seraphinianus" else self.max_drawing_area
+            max_area = 10000 if subfolder == "seraphinianus" else self.max_drawing_area
             if p.area > max_area:
                 continue
-            if ph > self.max_glyph_height * 3.5:
+            if ph > self.max_glyph_height * 3.2:
+                continue
+
+            c_mask = (labeled[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] == p.label)
+
+            # Reject component if it intersects the illustration drawing envelope by > 12%
+            c_env = drawing_envelope[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
+            if len(c_env) > 0 and np.mean(c_env) > 0.12:
                 continue
 
             # Pigment and illustration color filtering on component ink pixels
-            c_mask = (labeled[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] == p.label)
             c_sat = sat[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
             c_hue = hue[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
             c_val = val[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]][c_mask]
@@ -146,26 +168,23 @@ class GlyphSegmenter:
             if len(c_sat) > 0:
                 if subfolder == "seraphinianus":
                     # In Seraphinianus: discriminate dark scribal ink from vibrant pencil drawings
-                    # Pure drawings have saturated color pigments (sat > 0.35, chroma > 0.22)
-                    # Scribal text ink has low saturation and chroma.
-                    is_vibrant = (c_sat > 0.35) & (c_chroma > 0.22)
+                    is_vibrant = (c_sat > 0.28) & (c_chroma > 0.18)
                     is_pigment = (
-                        ((c_hue >= 0.18) & (c_hue <= 0.48) & (c_sat > 0.28) & (c_chroma > 0.18)) |  # Green
-                        (((c_hue >= 0.85) | (c_hue <= 0.06)) & (c_sat > 0.30) & (c_chroma > 0.20)) |  # Red
-                        ((c_hue >= 0.50) & (c_hue <= 0.82) & (c_sat > 0.28) & (c_chroma > 0.18))     # Blue
+                        ((c_hue >= 0.16) & (c_hue <= 0.50) & (c_sat > 0.22) & (c_chroma > 0.15)) |  # Green
+                        (((c_hue >= 0.82) | (c_hue <= 0.08)) & (c_sat > 0.24) & (c_chroma > 0.16)) |  # Red
+                        ((c_hue >= 0.48) & (c_hue <= 0.82) & (c_sat > 0.22) & (c_chroma > 0.15))     # Blue
                     )
-                    # Discard only if component is predominantly colored drawing
-                    if np.mean(is_vibrant | is_pigment) > 0.25:
+                    if np.mean(is_vibrant | is_pigment) > 0.18:
                         continue
                 else:
                     # Voynich: reject colored paint washes
                     is_paint = (
-                        ((c_hue >= 0.14) & (c_hue <= 0.50) & (c_sat > 0.16)) |  # Green
-                        ((c_hue >= 0.50) & (c_hue <= 0.80) & (c_sat > 0.16)) |  # Blue
-                        (((c_hue >= 0.85) | (c_hue <= 0.06)) & (c_sat > 0.18)) |  # Red
-                        (c_chroma > 0.18)  # Saturated washes
+                        ((c_hue >= 0.14) & (c_hue <= 0.50) & (c_sat > 0.15)) |  # Green
+                        ((c_hue >= 0.50) & (c_hue <= 0.80) & (c_sat > 0.15)) |  # Blue
+                        (((c_hue >= 0.85) | (c_hue <= 0.06)) & (c_sat > 0.16)) |  # Red
+                        (c_chroma > 0.16)  # Saturated washes
                     )
-                    if np.mean(is_paint) > 0.20 and p.area > 25:
+                    if np.mean(is_paint) > 0.15 and p.area > 20:
                         continue
 
             clean_text_mask[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] |= c_mask
@@ -214,6 +233,8 @@ class GlyphSegmenter:
             return []
 
         # 2. Cluster components that belong to the same character (e.g. loops, crossbars, accents)
+        # In cursive writing (Seraphinianus), a glyph is connected ink, or a body with an accent above/below.
+        # It must NEVER be composed of far-apart disjoint elements horizontally!
         clusters: List[List[Any]] = []
         for comp in valid_comps:
             cy0, cx0, cy1, cx1 = comp.bbox
@@ -224,14 +245,18 @@ class GlyphSegmenter:
                 cl_y0 = min(c.bbox[0] for c in cl)
                 cl_y1 = max(c.bbox[2] for c in cl)
 
-                overlap = max(0, min(cl_x1, cx1) - max(cl_x0, cx0))
-                gap = max(0, max(cx0 - cl_x1, cl_x0 - cx1))
-                
+                overlap_x = max(0, min(cl_x1, cx1) - max(cl_x0, cx0))
+                gap_x = max(0, max(cx0 - cl_x1, cl_x0 - cx1))
+
+                # Vertical alignment test (for diacritics / accents above or below the main stem)
+                is_vertical_diacritic = (overlap_x > 0) or (gap_x <= 3)
+
                 comb_w = max(cl_x1, cx1) - min(cl_x0, cx0)
                 comb_h = max(cl_y1, cy1) - min(cl_y0, cy0)
 
-                # Merge if overlapping or tight horizontal gap <= 6px (preserving characters up to 65px)
-                if (overlap > 0 or gap <= 6) and comb_w <= max(65, int(comb_h * 1.6)):
+                # Only merge if physically connected, overlapping, or a strict vertical accent
+                # Never merge horizontally disjoint components separated by a gap > 3px
+                if (overlap_x > 0 or gap_x <= 3) and is_vertical_diacritic and comb_w <= max(45, int(comb_h * 1.3)):
                     cl.append(comp)
                     merged = True
                     break
@@ -482,9 +507,11 @@ class GlyphSegmenter:
 
         if not ordered_strokes:
             return None
+        # Absolute paleographic safeguard: a single glyph cannot have more than 6 pen strokes.
+        # Any component with > 6 strokes (e.g. 112 or 25 strokes) is an illustration drawing or texture!
+        if len(ordered_strokes) > 6:
+            return None
         if strict:
-            if len(ordered_strokes) > 6:
-                return None
             if sum(len(s.get("points", [])) for s in ordered_strokes) < 8:
                 return None
 

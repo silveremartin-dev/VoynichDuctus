@@ -1078,8 +1078,20 @@ def generate_explorer_html(
             }}
         }}
 
-        function getTranslitLabel(cm) {{
-            if (!cm) return 'Emergent';
+        function getTranslitMatch(arch) {{
+            if (!arch) return null;
+            if (arch.corpus_matches && arch.corpus_matches[activeAlphabetScheme]) {{
+                return arch.corpus_matches[activeAlphabetScheme];
+            }}
+            return arch.corpus_match || null;
+        }}
+
+        function getTranslitLabel(archOrCm) {{
+            if (!archOrCm) return 'Emergent';
+            if (archOrCm.corpus_matches && archOrCm.corpus_matches[activeAlphabetScheme]) {{
+                return archOrCm.corpus_matches[activeAlphabetScheme].label || archOrCm.corpus_matches[activeAlphabetScheme].scheme;
+            }}
+            const cm = archOrCm.corpus_match || archOrCm;
             if (currentMs === 'voynich') {{
                 if (activeAlphabetScheme === 'currier') return `Currier: '${{cm.currier_equivalent || '?'}}'`;
                 if (activeAlphabetScheme === 'v101') return `v101: '${{cm.v101_equivalent || cm.eva_equivalent || '?'}}'`;
@@ -1903,7 +1915,7 @@ def generate_explorer_html(
 
             const cat = data[currentMs].catalogue;
             const arch = cat.alphabet.find(a => a.type_id === selectedGlyph.canonical_type);
-            const cm = arch?.corpus_match;
+            const cm = getTranslitMatch(arch);
 
             let corpusHtml = '';
             let refSvgBox = '';
@@ -1913,8 +1925,8 @@ def generate_explorer_html(
                 </select>
             `;
 
-            if (cm && cm.reference_svg && cm.confidence_pct >= 60) {{
-                const schemeLabel = getTranslitLabel(cm);
+            if (cm && cm.reference_svg && cm.confidence_pct >= 40) {{
+                const schemeLabel = getTranslitLabel(arch);
                 corpusHtml = `
                     <div class="corpus-box">
                         <div class="corpus-title">
@@ -1935,7 +1947,7 @@ def generate_explorer_html(
                             ${{cm.reference_svg || ''}}
                         </div>
                         <div style="font-size:0.65rem; color:var(--accent); font-weight:bold; margin-top:2px;">
-                            ${{schemeLabel}}
+                            ${{schemeLabel}} (${{cm.confidence_pct}}%)
                         </div>
                     </div>
                 `;
@@ -2223,15 +2235,15 @@ def generate_explorer_html(
             const cat = data[currentMs].catalogue;
             const grid = document.getElementById('catalogue-grid');
             grid.innerHTML = cat.alphabet.map(a => {{
-                const cm = a.corpus_match;
+                const cm = getTranslitMatch(a);
                 let matchHeader = '';
                 let refSvgElem = '';
-                if (cm && cm.reference_svg && cm.confidence_pct >= 60) {{
-                    const schemeLabel = getTranslitLabel(cm);
+                if (cm && cm.reference_svg && cm.confidence_pct >= 40) {{
+                    const schemeLabel = getTranslitLabel(a);
                     matchHeader = `<div style="color:var(--accent); font-size:0.85rem; font-weight:bold;">${{schemeLabel}} <span style="font-size:0.75rem; color:var(--success); font-weight:normal;">(${{cm.confidence_pct}}% match)</span></div>`;
                     refSvgElem = `
                         <div class="c-box">
-                            <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">STANDARD REF</span>
+                            <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">STANDARD REF (${{cm.scheme || activeAlphabetScheme.toUpperCase()}})</span>
                             ${{cm.reference_svg || ''}}
                         </div>
                     `;
