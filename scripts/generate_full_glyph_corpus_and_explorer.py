@@ -2571,12 +2571,25 @@ def main():
     iiif_client = IIIFClient(cache_dir="data/scans/voynich/yale")
     voynich_folios = ["f001r", "f001v", "f002r", "f002v", "f003r", "f003v", "f004r", "f004v"]
 
+    voynichese_scans_dir = Path("data/scans/voynich/voynichese_scans")
+    voynichese_scans_dir.mkdir(parents=True, exist_ok=True)
+
     for folio_id in voynich_folios:
         try:
-            print(f"[*] Downloading / Loading Yale Beinecke HD scan for '{folio_id}' (2400px)...")
-            f_path = iiif_client.download_folio(folio_id, max_width=2400)
-            img = Image.open(f_path)
-            print(f"[*] Extracting all glyphs on Voynich HD '{folio_id}' ({img.width}x{img.height} px)...")
+            norm_id = rosetta_loader._normalize_folio_id(folio_id)
+            v_scan_path = voynichese_scans_dir / f"{norm_id}.jpg"
+            if not v_scan_path.exists():
+                import urllib.request
+                g_url = f"https://www.voynichese.com/2/data/folio/image/glance/color/large/{norm_id}.jpg"
+                req = urllib.request.Request(g_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req) as resp, open(v_scan_path, "wb") as f_out:
+                    f_out.write(resp.read())
+
+            print(f"[*] Loading Voynichese reference scan for '{folio_id}' ({norm_id}.jpg)...")
+            raw_v_img = Image.open(v_scan_path)
+            # 2x Lanczos upscale for crisp high-resolution ductus vectorization (1272x1800)
+            img = raw_v_img.resize((raw_v_img.width * 2, raw_v_img.height * 2), Image.Resampling.LANCZOS)
+            print(f"[*] Extracting all glyphs on Voynich '{folio_id}' ({img.width}x{img.height} px)...")
             
             # Check for Voynichese Rosetta Ground Truth annotations
             r_words = None

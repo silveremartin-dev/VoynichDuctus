@@ -169,6 +169,14 @@ class VoynicheseRosettaLoader:
         else:
             xml_w, xml_h = xml_canvas
 
+        img_w, img_h = scan_image.size
+        # When scan_image is the native Voynichese viewport plate (width ~ 636px or upscaled 2x ~ 1272px):
+        # The XML annotations are defined directly on this image canvas.
+        if img_w <= 1400 and (img_w / img_h < 0.76):
+            sx = img_w / xml_w
+            sy = img_h / xml_h
+            return (round(float(sx), 4), round(float(sy), 4), 0.0, 0.0)
+
         # Certified affine transforms measured via 2D normalized cross-correlation / template-matching
         # directly between the Voynichese glance viewports and Yale Beinecke HD scans.
         EXACT_VOYNICHESE_ALIGNED_TRANSFORMS: Dict[str, Tuple[float, float, float, float]] = {

@@ -125,13 +125,23 @@ class GlyphSegmenter:
         from scipy.ndimage import sum as ndi_sum
 
         if subfolder == "seraphinianus":
-            # True pigment/pencil/wash detection: distinct from creamy background paper (sat~0.07, val~0.98)
-            is_color = (sat > 0.15) & (chroma > 0.13) & (val < 0.96)
-            # Form contiguous solid illustration blobs via 2D morphological closing
-            struct_col = np.ones((35, 35), dtype=bool)
-            closed_color = binary_closing(is_color, structure=struct_col)
+            # 1. Genuine non-paper pigments (distinguish colored pencils/paints from creamy paper background)
+            # Paper background has hue around 0.10..0.18 (yellow/ochre) with sat < 0.35.
+            # Non-paper pigments are:
+            # - Non-yellow hues: green, blue, purple, red, cyan
+            is_non_yellow_pigment = ((hue < 0.08) | (hue > 0.22)) & (sat > 0.18) & (val < 0.95)
+            # - Highly saturated pigments (vivid yellow, orange):
+            is_vivid_pigment = (sat > 0.45) & (val < 0.95)
+            # - Dark colored washes/inks:
+            is_dark_pigment = (sat > 0.28) & (val < 0.70)
+
+            is_figure_pigment = is_non_yellow_pigment | is_vivid_pigment | is_dark_pigment
+
+            # Form solid figure blobs from pigments via 2D morphological closing
+            struct_col = np.ones((25, 25), dtype=bool)
+            closed_col = binary_closing(is_figure_pigment, structure=struct_col)
             # Dilate illustration envelope by 25px to engulf all black outlines, contours, and connected shading
-            color_envelope = binary_dilation(closed_color, iterations=18)
+            color_envelope = binary_dilation(closed_col, iterations=16)
         else:
             is_color = (
                 ((hue >= 0.14) & (hue <= 0.50) & (sat > 0.14)) |  # Green
@@ -156,14 +166,18 @@ class GlyphSegmenter:
             # Drawing exclusion: inside or connected to illustration envelope
             if len(ink_touching_color) >= p.label and ink_touching_color[p.label - 1]:
                 continue
-            # Text lines in Seraphinianus have bounded vertical height ph <= 140 px, but words can be arbitrarily long
-            if ph > 140:
-                continue
-            # If area is huge and aspect ratio is square/tall, it's a drawing
-            if p.area > (25000 if subfolder == "seraphinianus" else self.max_drawing_area):
-                continue
-            if p.area < 10 or ph < 5 or pw < 2:
-                continue
+
+            if subfolder == "seraphinianus":
+                # Macro drawing / frame / illustration (even monochrome black)
+                if (p.area > 15000) or (ph > 180 and pw > 150) or (ph > 250):
+                    continue
+                if p.area < 8 or ph < 4 or pw < 2:
+                    continue
+            else:
+                if ph > 140 or p.area > self.max_drawing_area:
+                    continue
+                if p.area < 10 or ph < 5 or pw < 2:
+                    continue
 
             c_mask = (labeled[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] == p.label)
             clean_text_mask[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] |= c_mask
@@ -576,8 +590,12 @@ class GlyphSegmenter:
             # Validate word lexical sanity
             w_w = abs_wx1 - abs_wx0
             w_h = abs_wy1 - abs_wy0
-            if w_w < 14 or w_h < 12 or np.sum(w_img) < 30:
-                continue
+            if subfolder == "seraphinianus":
+                if w_w < 6 or w_h < 6 or np.sum(w_img) < 10:
+                    continue
+            else:
+                if w_w < 14 or w_h < 12 or np.sum(w_img) < 30:
+                    continue
 
             # Save word crop with generous padding (6px)
             word_png_rel = ""
