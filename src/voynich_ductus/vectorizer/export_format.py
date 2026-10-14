@@ -4,7 +4,7 @@ Exporters for standardized vector stroke datasets (SVG with scribal metadata, JS
 
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Tuple, Optional
 
 
 class VectorExporter:

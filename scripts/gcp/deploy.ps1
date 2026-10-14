@@ -3,12 +3,13 @@
 # Automates: Build -> Cloud Execution (Spot VM / Cloud Run) -> VM Shutdown -> Data Repatriation
 # ==============================================================================
 param (
-    [string]$Mode = "spot-vm",
+    [string]$Mode = "cloud-run",
     [string]$ProjectId = "ether-509812",
     [string]$Region = "europe-west1",
     [string]$BucketName = "ether-509812-voynich-atlas",
     [int]$VoynichLimit = 0,
-    [int]$SerafiniLimit = 0
+    [int]$SerafiniLimit = 0,
+    [switch]$SkipBuild
 )
 
 $env:CLOUDSDK_CORE_PROJECT = $ProjectId
@@ -27,13 +28,17 @@ Write-Host " GCS Bucket:      gs://$BucketName"
 Write-Host "=================================================================="
 
 # ------------------------------------------------------------------------------
-# Step 1: Submit Container Build to Google Cloud Build
+# Step 1: Submit Container Build to Google Cloud Build (or reuse existing)
 # ------------------------------------------------------------------------------
-Write-Host "`n[*] Step 1: Submitting build to Google Cloud Build..." -ForegroundColor Yellow
-gcloud builds submit . --project=$ProjectId --config=scripts/gcp/cloudbuild.yaml --substitutions=_IMAGE_TAG=$ImageTag
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Cloud Build failed! Aborting."
-    exit 1
+if ($SkipBuild) {
+    Write-Host "`n[*] Step 1: Skipping build (reusing existing image: $ImageTag)..." -ForegroundColor Yellow
+} else {
+    Write-Host "`n[*] Step 1: Submitting build to Google Cloud Build..." -ForegroundColor Yellow
+    gcloud builds submit . --project=$ProjectId --config=scripts/gcp/cloudbuild.yaml --substitutions=_IMAGE_TAG=$ImageTag
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Cloud Build failed! Aborting."
+        exit 1
+    }
 }
 
 # ------------------------------------------------------------------------------
@@ -49,8 +54,9 @@ if (-not $bucketExists) {
 }
 
 # Construct Container Arguments
+$workers = if ($Mode -eq "cloud-run") { 8 } else { 16 }
 $containerArgs = @(
-    "--workers=16",
+    "--workers=$workers",
     "--gcs-bucket=$BucketName",
     "--gcs-prefix=voynich_ductus/atlas_dataset"
 )
@@ -76,6 +82,7 @@ if ($Mode -eq "spot-vm") {
         "--zone=$zone " +
         "--machine-type=c2d-standard-16 " +
         "--preemptible " +
+        "--boot-disk-size=50GB " +
         "--service-account=$ServiceAccount " +
         "--scopes=cloud-platform " +
         "--container-image=$ImageTag " +
@@ -83,7 +90,7 @@ if ($Mode -eq "spot-vm") {
         "--tags=voynich-batch"
 
     foreach ($arg in $containerArgs) {
-        $createCmd += " --container-arg=`"$arg`""
+        $createCmd += " `"--container-arg=$arg`""
     }
 
     Invoke-Expression $createCmd
@@ -99,41 +106,44 @@ if ($Mode -eq "spot-vm") {
     $maxWaitMinutes = 60
     $startTime = Get-Date
 
-    while ($true) {
-        Start-Sleep -Seconds 15
-        $elapsed = [math]::Round(((Get-Date) - $startTime).TotalMinutes, 1)
+    try {
+        while ($true) {
+            Start-Sleep -Seconds 15
+            $elapsed = [math]::Round(((Get-Date) - $startTime).TotalMinutes, 1)
 
-        # Check if the job finished by checking GCS for the generated explorer
-        $hasExplorer = gsutil -q stat $explorerBlob
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "`n[+] Detection: Batch run successfully completed and uploaded to GCS! ($elapsed min elapsed)" -ForegroundColor Green
-            # Allow 10 seconds for any final blob flush
-            Start-Sleep -Seconds 10
-            break
-        }
+            # Check if the job finished by checking GCS for the generated explorer
+            $hasExplorer = gsutil -q stat $explorerBlob
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "`n[+] Detection: Batch run successfully completed and uploaded to GCS! ($elapsed min elapsed)" -ForegroundColor Green
+                # Allow 10 seconds for any final blob flush
+                Start-Sleep -Seconds 10
+                break
+            }
 
-        # Check VM status
-        $vmStatus = (gcloud compute instances describe $vmName --project=$ProjectId --zone=$zone --format="value(status)" 2>$null)
-        Write-Host "    [$elapsed min] VM Status: $vmStatus | Waiting for GCS batch completion..." -ForegroundColor Gray
+            # Check VM status
+            $vmStatus = (gcloud compute instances describe $vmName --project=$ProjectId --zone=$zone --format="value(status)" 2>$null)
+            Write-Host "    [$elapsed min] VM Status: $vmStatus | Waiting for GCS batch completion..." -ForegroundColor Gray
 
-        if ($vmStatus -eq "TERMINATED" -or $vmStatus -eq "STOPPED") {
-            Write-Host "    [!] VM stopped. Checking final completion..."
-            Start-Sleep -Seconds 5
-            break
-        }
+            if ($vmStatus -eq "TERMINATED" -or $vmStatus -eq "STOPPED") {
+                Write-Host "    [!] VM stopped. Checking final completion..."
+                Start-Sleep -Seconds 5
+                break
+            }
 
-        if ($elapsed -gt $maxWaitMinutes) {
-            Write-Warning "Execution exceeded $maxWaitMinutes minutes timeout. Proceeding to shutdown."
-            break
+            if ($elapsed -gt $maxWaitMinutes) {
+                Write-Warning "Execution exceeded $maxWaitMinutes minutes timeout. Proceeding to shutdown."
+                break
+            }
         }
     }
-
-    # --------------------------------------------------------------------------
-    # Step 4: SHUT DOWN & DELETE THE VM (No lingering charges!)
-    # --------------------------------------------------------------------------
-    Write-Host "`n[*] Step 4: Deleting VM $vmName to ensure ZERO ongoing costs..." -ForegroundColor Yellow
-    gcloud compute instances delete $vmName --project=$ProjectId --zone=$zone --quiet
-    Write-Host "  [+] Compute Engine Spot VM $vmName successfully terminated and deleted." -ForegroundColor Green
+    finally {
+        # ----------------------------------------------------------------------
+        # Step 4: SHUT DOWN & DELETE THE VM (No lingering charges!)
+        # ----------------------------------------------------------------------
+        Write-Host "`n[*] Step 4: Deleting VM $vmName to ensure ZERO ongoing costs..." -ForegroundColor Yellow
+        gcloud compute instances delete $vmName --project=$ProjectId --zone=$zone --quiet
+        Write-Host "  [+] Compute Engine Spot VM $vmName successfully terminated and deleted." -ForegroundColor Green
+    }
 }
 elseif ($Mode -eq "cloud-run") {
     Write-Host "`n[*] Step 3: Deploying Cloud Run Job (8 vCPUs, 16 GiB RAM)..." -ForegroundColor Green
