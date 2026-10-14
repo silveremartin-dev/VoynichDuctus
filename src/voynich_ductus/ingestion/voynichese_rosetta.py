@@ -8,10 +8,13 @@ ground truth corpus of 35,000+ words with EVA transliterations.
 from typing import List, Dict, Tuple, Any, Optional, Union
 import os
 import re
+import json
+import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import numpy as np
 from PIL import Image
+
 
 
 class RosettaWord:
@@ -74,10 +77,13 @@ class VoynicheseRosettaLoader:
         self,
         annotations_dir: Union[str, Path] = "data/annotations/voynichese",
         scans_dir: Union[str, Path] = "data/scans/voynich/yale",
+        js_cache_dir: Optional[Union[str, Path]] = None,
     ):
         self.annotations_dir = Path(annotations_dir)
         self.scans_dir = Path(scans_dir)
+        self.js_cache_dir = Path(js_cache_dir) if js_cache_dir is not None else (self.annotations_dir / "js_cache")
         self._cache_folios: Dict[str, List[RosettaWord]] = {}
+        self._cache_js_folios: Dict[str, List[RosettaWord]] = {}
         self._folio_canvas_meta: Dict[str, Tuple[float, float, int]] = {}
 
     def list_available_folios(self) -> List[str]:
@@ -148,17 +154,89 @@ class VoynicheseRosettaLoader:
         self._cache_folios[norm_name] = words
         return words
 
+    def load_folio_words_from_js(self, folio_id: str) -> List[RosettaWord]:
+        """
+        Loads word annotations directly from the Voynichese .js folio script files.
+        Coordinates in .js are direct pixel coordinates for the 636x900 glance image:
+            https://www.voynichese.com/2/data/folio/image/glance/color/large/{folio_id}.jpg
+        Downloads and caches the .js file locally under data/annotations/voynichese/js_cache/.
+        """
+        norm_name = self._normalize_folio_id(folio_id)
+        if norm_name in self._cache_js_folios:
+            return self._cache_js_folios[norm_name]
+
+        self.js_cache_dir.mkdir(parents=True, exist_ok=True)
+        js_path = self.js_cache_dir / f"{norm_name}.js"
+
+        if not js_path.exists():
+            url = f"https://www.voynichese.com/2/data/folio/script/{norm_name}.js"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req) as resp:
+                content = resp.read().decode("utf-8")
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(content)
+        else:
+            with open(js_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+        data = json.loads(content)
+        words_dict = data[0]
+        boxes = data[1]
+
+        # Record canvas metadata (native Voynichese glance image is 636x900)
+        self._folio_canvas_meta[norm_name] = (636.0, 900.0, len(boxes))
+
+        words: List[RosettaWord] = []
+        for i, box in enumerate(boxes):
+            # Each box is [word_dict_idx, left, top, width, height]
+            word_dict_idx = int(box[0])
+            left = float(box[1])
+            top = float(box[2])
+            width = float(box[3])
+            height = float(box[4])
+            eva_text = words_dict[word_dict_idx][0] if 0 <= word_dict_idx < len(words_dict) else ""
+
+            bbox_scan = (
+                int(round(left)),
+                int(round(top)),
+                int(round(left + width)),
+                int(round(top + height)),
+            )
+
+            word_obj = RosettaWord(
+                folio=norm_name,
+                index=i,
+                eva_text=eva_text,
+                x_xml=left,
+                y_xml=top,
+                width_xml=width,
+                height_xml=height,
+                bbox_scan=bbox_scan,
+            )
+            words.append(word_obj)
+
+        self._cache_js_folios[norm_name] = words
+        return words
+
     def compute_scan_affine_transform(
         self,
         folio_id: str,
         scan_image: Image.Image,
         xml_canvas: Optional[Tuple[float, float]] = None,
+        use_js: bool = True,
     ) -> Tuple[float, float, float, float]:
         """
         Computes the affine scaling and offset parameters (sx, sy, tx, ty) to map
-        Voynichese XML coordinates (x_xml, y_xml) to scan image coordinates:
-            x_scan = tx + x_xml * sx
-            y_scan = ty + y_xml * sy
+        word coordinates (x, y) to scan image coordinates:
+            x_scan = tx + x * sx
+            y_scan = ty + y * sy
+
+        For the small-image case (native voynichese scan <= 1400px wide):
+        - When using JS coordinates:
+          - returns (1.0, 1.0, 0.0, 0.0) for native 636x900 image
+          - returns (2.0, 2.0, 0.0, 0.0) for 2x upscaled 1272x1800 image
+        - When using XML coordinates (use_js=False):
+          - returns scaling relative to XML canvas: sx = img_w / xml_w, sy = img_h / xml_h
         """
         norm_name = self._normalize_folio_id(folio_id)
         if xml_canvas is None:
@@ -171,11 +249,19 @@ class VoynicheseRosettaLoader:
 
         img_w, img_h = scan_image.size
         # When scan_image is the native Voynichese viewport plate (width ~ 636px or upscaled 2x ~ 1272px):
-        # The XML annotations are defined directly on this image canvas.
-        if img_w <= 1400 and (img_w / img_h < 0.76):
-            sx = img_w / xml_w
-            sy = img_h / xml_h
-            return (round(float(sx), 4), round(float(sy), 4), 0.0, 0.0)
+        if img_w <= 1400:
+            if use_js:
+                if img_w == 636 and img_h == 900:
+                    return (1.0, 1.0, 0.0, 0.0)
+                elif img_w == 1272 and img_h == 1800:
+                    return (2.0, 2.0, 0.0, 0.0)
+                else:
+                    return (round(float(img_w / 636.0), 4), round(float(img_h / 900.0), 4), 0.0, 0.0)
+            else:
+                sx = img_w / xml_w
+                sy = img_h / xml_h
+                return (round(float(sx), 4), round(float(sy), 4), 0.0, 0.0)
+
 
         # Certified affine transforms measured via 2D normalized cross-correlation / template-matching
         # directly between the Voynichese glance viewports and Yale Beinecke HD scans.
@@ -199,6 +285,18 @@ class VoynicheseRosettaLoader:
         }
 
         if norm_name in EXACT_VOYNICHESE_ALIGNED_TRANSFORMS:
+            base_sx, base_sy, base_tx, base_ty = EXACT_VOYNICHESE_ALIGNED_TRANSFORMS[norm_name]
+            if use_js:
+                # Scale relative to JS glance canvas (636x900) instead of XML canvas (1090x1500)
+                # and adapt to scan image resolution (baseline 2400px wide)
+                js_to_xml_x = 1090.0 / 636.0
+                js_to_xml_y = 1500.0 / 900.0
+                res_factor = float(img_w) / 2400.0
+                sx = base_sx * js_to_xml_x * res_factor
+                sy = base_sy * js_to_xml_y * res_factor
+                tx = base_tx * res_factor
+                ty = base_ty * res_factor
+                return (round(sx, 4), round(sy, 4), round(tx, 1), round(ty, 1))
             return EXACT_VOYNICHESE_ALIGNED_TRANSFORMS[norm_name]
 
         # Dynamic fallback based on parchment boundaries
@@ -306,32 +404,55 @@ class VoynicheseRosettaLoader:
         folio_id: str,
         scan_image: Optional[Image.Image] = None,
         padding_px: int = 4,
+        prefer_js: bool = True,
     ) -> List[RosettaWord]:
         """
-        Extracts all words for a folio with high-res bounding boxes and cropped image patches,
-        using ink-locking alignment to lock onto the exact ink contours.
+        Extracts all words for a folio with high-res bounding boxes and cropped image patches.
+        When the scan image is the native Voynichese glance image (636x900) or 2x upscale (1272x1800),
+        it uses the .js pixel coordinates directly.
+        When the scan image is a Yale HD scan (img_w > 1400), it falls back to the XML + affine approach.
         """
-        words = self.load_folio_words(folio_id)
         if scan_image is None:
             scan_path = self._find_scan_path(folio_id)
             if scan_path and scan_path.exists():
                 scan_image = Image.open(scan_path)
             else:
-                return words
+                if prefer_js:
+                    try:
+                        return self.load_folio_words_from_js(folio_id)
+                    except Exception:
+                        return self.load_folio_words(folio_id)
+                else:
+                    return self.load_folio_words(folio_id)
 
-        sx, sy, tx, ty = self.compute_scan_affine_transform(folio_id, scan_image)
         img_w, img_h = scan_image.size
+        is_voynichese_glance = (img_w <= 1400)
+
+        use_js = False
+        words: List[RosettaWord] = []
+        if prefer_js and is_voynichese_glance:
+            try:
+                words = self.load_folio_words_from_js(folio_id)
+                use_js = True
+            except Exception:
+                words = self.load_folio_words(folio_id)
+                use_js = False
+        else:
+            words = self.load_folio_words(folio_id)
+            use_js = False
+
+        sx, sy, tx, ty = self.compute_scan_affine_transform(folio_id, scan_image, use_js=use_js)
 
         aligned_words: List[RosettaWord] = []
         for w in words:
-            # Map XML bbox strictly to scan coordinates using parchment affine transform
+            # Map word bbox to scan coordinates
             init_x0 = max(0, min(img_w - 1, int(round(tx + w.x_xml * sx))))
             init_y0 = max(0, min(img_h - 1, int(round(ty + w.y_xml * sy))))
             init_x1 = max(init_x0 + 1, min(img_w, int(round(tx + (w.x_xml + w.width_xml) * sx))))
             init_y1 = max(init_y0 + 1, min(img_h, int(round(ty + (w.y_xml + w.height_xml) * sy))))
 
             bbox_scan = (init_x0, init_y0, init_x1, init_y1)
-            
+
             # Crop image patch
             if init_x1 > init_x0 and init_y1 > init_y0:
                 patch = scan_image.crop(bbox_scan)
@@ -420,7 +541,7 @@ class VoynicheseRosettaLoader:
         Standardizes folio id: 'f001r' -> 'f1r', 'f102v1' -> 'f102v1'
         """
         clean = folio_id.strip().lower()
-        clean = re.sub(r"\.(xml|jpg|jpeg|png)$", "", clean)
+        clean = re.sub(r"\.(xml|jpg|jpeg|png|js)$", "", clean)
         match = re.match(r"f0*(\d+)([rv]\d*)?", clean)
         if match:
             num = match.group(1)
@@ -430,24 +551,30 @@ class VoynicheseRosettaLoader:
 
     def _find_scan_path(self, folio_id: str) -> Optional[Path]:
         """
-        Locates the corresponding scan image file in scans_dir.
+        Locates the corresponding scan image file in scans_dir or voynichese_scans.
         """
         norm_name = self._normalize_folio_id(folio_id)
         # Try both f001r and f1r formatting
         match = re.match(r"f(\d+)([rv]\d*)?", norm_name)
         candidates = []
+        voynichese_scans = Path("data/scans/voynich/voynichese_scans")
         if match:
             num = int(match.group(1))
             side = match.group(2) or ""
             padded = f"f{num:03d}{side}"
             candidates.extend([
+                voynichese_scans / f"{norm_name}.jpg",
+                voynichese_scans / f"{padded}.jpg",
                 self.scans_dir / f"{padded}.jpg",
                 self.scans_dir / f"{norm_name}.jpg",
                 self.scans_dir.parent / f"{padded}.jpg",
                 self.scans_dir.parent / f"{norm_name}.jpg",
             ])
         else:
-            candidates.append(self.scans_dir / f"{norm_name}.jpg")
+            candidates.extend([
+                voynichese_scans / f"{norm_name}.jpg",
+                self.scans_dir / f"{norm_name}.jpg",
+            ])
 
         for p in candidates:
             if p.exists():

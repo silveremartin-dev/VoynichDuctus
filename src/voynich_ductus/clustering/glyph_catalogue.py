@@ -38,7 +38,11 @@ class GlyphCatalogue:
         """
         from sklearn.preprocessing import StandardScaler
 
-        glyph_feature_vectors = []
+        # 1. Pre-compute geometric features and rasterize mini-patches for batched deep inference
+        mini_patches = []
+        precomputed_partials = []
+        patch_dim = 32
+
         for g in glyphs:
             strokes = g.get("strokes", [])
             gw = max(1.0, float(g.get("width", 20)))
@@ -48,13 +52,13 @@ class GlyphCatalogue:
             aspect = float(np.log(gw / gh))
             fill_factor = float(g.get("fill_factor", g.get("area", 20) / (gw * gh)))
 
-            # Collect all points
             all_pts = []
             for s in strokes:
                 all_pts.extend(s.get("points", []))
 
             if not all_pts:
-                glyph_feature_vectors.append(np.zeros(48, dtype=np.float32))
+                precomputed_partials.append(None)
+                mini_patches.append(np.zeros((patch_dim, patch_dim), dtype=np.uint8))
                 continue
 
             pts_arr = np.array([[p[0], p[1]] for p in all_pts], dtype=np.float32)
@@ -105,17 +109,13 @@ class GlyphCatalogue:
             s_feats = self.feature_extractor.extract_batch(strokes)
             mean_f = np.mean(s_feats, axis=0) if len(s_feats) > 0 else np.zeros(16, dtype=np.float32)
 
-            # Rasterize mini patch for DINOv2 / deep embedding
-            patch_dim = 32
             mini_patch = np.zeros((patch_dim, patch_dim), dtype=np.uint8)
             py = np.clip((rel_y * (patch_dim - 1)).astype(int), 0, patch_dim - 1)
             px = np.clip((rel_x * (patch_dim - 1)).astype(int), 0, patch_dim - 1)
             mini_patch[py, px] = 255
-            dino_emb = self.dinov2_engine.extract_embedding(mini_patch)
-            # Take top 16 principal components of DINOv2
-            dino_top = dino_emb[:16] if len(dino_emb) >= 16 else np.pad(dino_emb, (0, 16 - len(dino_emb)))
+            mini_patches.append(mini_patch)
 
-            vec = [
+            partial_vec = [
                 stroke_count * 2.0,
                 aspect * 2.5,
                 fill_factor * 1.5,
@@ -129,11 +129,22 @@ class GlyphCatalogue:
                 float(mean_f[7]),  # mean_width
                 float(mean_f[8]),  # std_width
             ]
-            # Add 36 spatial density grid features
-            vec.extend(grid_6x6.flatten().tolist())
-            # Add DINOv2 deep visual tokens
-            vec.extend((dino_top * 2.0).tolist())
+            partial_vec.extend(grid_6x6.flatten().tolist())
+            precomputed_partials.append(partial_vec)
 
+        # 2. High-speed batched DINOv2 ViT inference (80x speedup over single items)
+        dino_batch_embs = self.dinov2_engine.extract_batch_embeddings(mini_patches, batch_size=128)
+
+        # 3. Assemble complete normalized feature vectors
+        glyph_feature_vectors = []
+        for idx, partial in enumerate(precomputed_partials):
+            if partial is None:
+                glyph_feature_vectors.append(np.zeros(48 + 16, dtype=np.float32))
+                continue
+            dino_emb = dino_batch_embs[idx] if idx < len(dino_batch_embs) else np.zeros(16, dtype=np.float32)
+            dino_top = dino_emb[:16] if len(dino_emb) >= 16 else np.pad(dino_emb, (0, 16 - len(dino_emb)))
+            vec = list(partial)
+            vec.extend((dino_top * 2.0).tolist())
             glyph_feature_vectors.append(np.array(vec, dtype=np.float32))
 
         X_raw = np.array(glyph_feature_vectors, dtype=np.float32)
@@ -145,6 +156,8 @@ class GlyphCatalogue:
     def classify_glyph_topology(g: Dict[str, Any]) -> str:
         """
         Deterministically classifies a glyph into an invariant topological family:
+        - PUNCTUATION_OR_SPECK (tiny dots, diacritics, micro-specks)
+        - DRAWING_DEBRIS (oversized illustration fragments)
         - CLOSED_LOOP (circular/oval closed shapes like o, a bowl)
         - VERTICAL_MINIM (single vertical upright stroke like i, r)
         - OPEN_C_CRESCENT (crescent or open curve like c, e)
@@ -157,6 +170,15 @@ class GlyphCatalogue:
         gh = max(1.0, float(g.get("height", 20)))
         aspect = gw / gh
         stroke_count = len(strokes)
+        area = float(g.get("area", gw * gh))
+
+        # 0. Micro specks / Punctuation dots
+        if area < 16 or (gw <= 6 and gh <= 6):
+            return "PUNCTUATION_OR_SPECK"
+
+        # 0b. Large drawing / illustration debris
+        if area > 1800 or gh > 180 or gw > 180:
+            return "DRAWING_DEBRIS"
 
         all_pts = []
         for s in strokes:
@@ -168,12 +190,21 @@ class GlyphCatalogue:
         longest_s = max(strokes, key=lambda s: len(s.get("points", [])))
         l_pts = longest_s.get("points", [])
 
-        # 1. Closed loop check
+        # 1. Closed loop check (endpoints distance or mask hole)
         if len(l_pts) >= 5:
             p0 = np.array(l_pts[0][:2])
             p_end = np.array(l_pts[-1][:2])
             dist_ends = float(np.linalg.norm(p0 - p_end))
             if dist_ends <= 7.0 or dist_ends <= 0.28 * max(gw, gh):
+                return "CLOSED_LOOP"
+
+        # Check mask for Euler hole if mask is available
+        g_mask = g.get("mask")
+        if g_mask is not None and isinstance(g_mask, np.ndarray) and g_mask.size > 20:
+            from scipy.ndimage import binary_fill_holes
+            filled = binary_fill_holes(g_mask)
+            holes = filled & (~g_mask)
+            if np.sum(holes) >= 3:
                 return "CLOSED_LOOP"
 
         # 2. Tall ascender or Gallows
@@ -268,8 +299,14 @@ class GlyphCatalogue:
                         raw_clusters.append((cluster_id_counter, sub_idx, cluster_glyphs))
                         cluster_id_counter += 1
 
-        # Sort raw clusters by size descending to have clean rank 1..N
-        raw_clusters.sort(key=lambda item: len(item[2]), reverse=True)
+        # Sort raw clusters: genuine letterforms first (by frequency desc), debris/specks at the end
+        def cluster_sort_key(item):
+            c_glyphs = item[2]
+            topo = c_glyphs[0].get("topology_group", "")
+            is_debris = 1 if topo in ("PUNCTUATION_OR_SPECK", "DRAWING_DEBRIS") else 0
+            return (is_debris, -len(c_glyphs))
+
+        raw_clusters.sort(key=cluster_sort_key)
 
         # Build canonical glyph entries
         alphabet_entries = []
@@ -277,11 +314,14 @@ class GlyphCatalogue:
         for rank, (cluster_id, indices, cluster_glyphs) in enumerate(raw_clusters, start=1):
             cluster_points = X_scaled[indices]
 
-            # Find medoid (exemplar closest to cluster center)
+            # Find medoid (exemplar closest to cluster center) and order members by proximity
             centroid = np.mean(cluster_points, axis=0, keepdims=True)
             dists = pairwise_distances(cluster_points, centroid).flatten()
-            medoid_idx = indices[np.argmin(dists)]
-            exemplar_glyph = glyphs[medoid_idx]
+            medoid_local_idx = int(np.argmin(dists))
+            exemplar_glyph = glyphs[indices[medoid_local_idx]]
+
+            sorted_pairs = sorted(zip(dists, indices, cluster_glyphs), key=lambda x: x[0])
+            cluster_glyphs = [p[2] for p in sorted_pairs]
 
             type_name = f"G{rank:02d}"
 

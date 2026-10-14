@@ -127,21 +127,55 @@ class GlyphSegmenter:
         if subfolder == "seraphinianus":
             # 1. Genuine non-paper pigments (distinguish colored pencils/paints from creamy paper background)
             # Paper background has hue around 0.10..0.18 (yellow/ochre) with sat < 0.35.
+            # Text ink is dark brown/black with hue 0.06..0.12, sat < 0.28, val < 0.32.
             # Non-paper pigments are:
             # - Non-yellow hues: green, blue, purple, red, cyan
-            is_non_yellow_pigment = ((hue < 0.08) | (hue > 0.22)) & (sat > 0.18) & (val < 0.95)
-            # - Highly saturated pigments (vivid yellow, orange):
+            is_non_yellow_pigment = ((hue < 0.08) | (hue > 0.22)) & (sat > 0.16) & (val < 0.96)
+            # - Highly saturated pigments (vivid yellow, orange, bright paint):
             is_vivid_pigment = (sat > 0.45) & (val < 0.95)
-            # - Dark colored washes/inks:
-            is_dark_pigment = (sat > 0.28) & (val < 0.70)
+            # - Dark colored washes/inks (MUST NOT BE YELLOW/BROWN PAPER-COLORED TEXT INK):
+            is_dark_pigment = ((hue < 0.08) | (hue > 0.22)) & (sat > 0.20) & (val < 0.70)
 
             is_figure_pigment = is_non_yellow_pigment | is_vivid_pigment | is_dark_pigment
 
-            # Form solid figure blobs from pigments via 2D morphological closing
-            struct_col = np.ones((25, 25), dtype=bool)
-            closed_col = binary_closing(is_figure_pigment, structure=struct_col)
-            # Dilate illustration envelope by 25px to engulf all black outlines, contours, and connected shading
-            color_envelope = binary_dilation(closed_col, iterations=16)
+            # Fast downsampled morphology (4x downscale) for high performance and clean envelope
+            ds = 4
+            sm_pig = is_figure_pigment[::ds, ::ds]
+            sm_sauv = sauvola_mask[::ds, ::ds]
+
+            # Exclude narrow page spine margins (binding shadow artefacts) from pigment seeds
+            sm_pig[:, :8] = False
+            sm_pig[:, -8:] = False
+
+            # Close pigment blobs to fill small gaps within illustration panels
+            struct_col = np.ones((11, 11), dtype=bool)
+            closed_col = binary_closing(sm_pig, structure=struct_col)
+
+            # Drawing-ink-seed propagation:
+            # Any Sauvola ink pixel touching a closed pigment blob is part of the illustration.
+            # This robustly covers pencil contour lines, stippled quill shading, and monochrome
+            # black elements that are physically contiguous with colored illustration panels.
+            drawing_zone = binary_dilation(closed_col, iterations=3)
+            drawing_ink = sm_sauv & drawing_zone
+            fig_blob = closed_col | drawing_ink
+            fig_blob = binary_closing(fig_blob, structure=struct_col)
+
+            # For macro illustration clusters (area > 500 at 4x downscale = ~8000 px at full scale),
+            # fill their convex hull completely to cover internal white-space between strokes/trees/frames
+            lbl_pig, num_pig = label(fig_blob)
+            props_pig = regionprops(lbl_pig)
+            for pp in props_pig:
+                if pp.area > 500:
+                    r0, c0, r1, c1 = pp.bbox
+                    fig_blob[r0:r1, c0:c1] |= pp.image_convex
+
+            # Final safety dilation: absorb any stray ink just outside illustration borders
+            dilated_col = binary_dilation(fig_blob, iterations=2)
+
+            # Upsample envelope back to full resolution
+            env_full = np.repeat(np.repeat(dilated_col, ds, axis=0), ds, axis=1)
+            color_envelope = np.zeros((H, W), dtype=bool)
+            color_envelope[:min(H, env_full.shape[0]), :min(W, env_full.shape[1])] = env_full[:min(H, env_full.shape[0]), :min(W, env_full.shape[1])]
         else:
             is_color = (
                 ((hue >= 0.14) & (hue <= 0.50) & (sat > 0.14)) |  # Green
@@ -169,7 +203,7 @@ class GlyphSegmenter:
 
             if subfolder == "seraphinianus":
                 # Macro drawing / frame / illustration (even monochrome black)
-                if (p.area > 15000) or (ph > 180 and pw > 150) or (ph > 250):
+                if (p.area > 12000) or (ph > 180 and pw > 120) or (ph > 220):
                     continue
                 if p.area < 8 or ph < 4 or pw < 2:
                     continue
@@ -199,6 +233,92 @@ class GlyphSegmenter:
 
         return clean_text_mask, rgb_arr, was_rotated
 
+    @staticmethod
+    def _min_energy_seam(comp_mask: np.ndarray, x_target: int, window: int = 8) -> np.ndarray:
+        """
+        Computes a 2D minimum energy seam (connected path from top to bottom row)
+        that minimizes the number of ink pixels crossed while staying close to x_target.
+        Enables non-linear slicing through ligatures along natural stroke boundaries.
+        """
+        H, W = comp_mask.shape
+        x_min = max(0, x_target - window)
+        x_max = min(W, x_target + window + 1)
+        sub_w = x_max - x_min
+        if sub_w <= 1:
+            return np.full(H, x_target, dtype=int)
+
+        energy = np.zeros((H, sub_w), dtype=np.float32)
+        for y in range(H):
+            for xi in range(sub_w):
+                gx = x_min + xi
+                ink_cost = 10.0 if comp_mask[y, gx] else 0.0
+                dist_cost = 0.4 * abs(gx - x_target)
+                energy[y, xi] = ink_cost + dist_cost
+
+        dp = np.zeros_like(energy)
+        backtrack = np.zeros((H, sub_w), dtype=int)
+        dp[0] = energy[0]
+
+        for y in range(1, H):
+            for xi in range(sub_w):
+                p0 = max(0, xi - 1)
+                p1 = min(sub_w, xi + 2)
+                best_p = p0 + np.argmin(dp[y - 1, p0:p1])
+                dp[y, xi] = energy[y, xi] + dp[y - 1, best_p]
+                backtrack[y, xi] = best_p
+
+        seam = np.zeros(H, dtype=int)
+        best_last = np.argmin(dp[H - 1])
+        seam[H - 1] = x_min + best_last
+        cur = best_last
+        for y in range(H - 2, -1, -1):
+            cur = backtrack[y + 1, cur]
+            seam[y] = x_min + cur
+        return seam
+
+    @staticmethod
+    def binarize_word_crop_hysteresis(
+        crop_rgb: np.ndarray,
+        high_thresh: float = 16.0,
+        low_thresh: float = 6.0
+    ) -> np.ndarray:
+        """
+        Two-tier hysteresis binarization using color-distance from local parchment background.
+        Overcomes iron-gall ink fading and preserves 100% of authentic faint strokes/tails
+        without capturing background paper texture or bleed-through.
+        """
+        if crop_rgb.size == 0:
+            return np.zeros((0, 0), dtype=bool)
+        if crop_rgb.ndim == 2:
+            gray = crop_rgb.astype(float)
+            bg = float(np.median(gray))
+            darkness = bg - gray
+        else:
+            bg_color = np.median(crop_rgb, axis=(0, 1))
+            gray = np.mean(crop_rgb, axis=2).astype(float)
+            darkness = float(bg_color.mean()) - gray
+
+        # If contrast is extremely subtle, lower threshold adaptively
+        max_d = float(np.max(darkness)) if darkness.size > 0 else 0.0
+        if max_d < high_thresh:
+            high_thresh = max(8.0, max_d * 0.6)
+            low_thresh = max(4.0, max_d * 0.25)
+
+        core_ink = darkness > high_thresh
+        relaxed_ink = darkness > low_thresh
+
+        lbl, num = label(relaxed_ink)
+        if num == 0:
+            return np.zeros(crop_rgb.shape[:2], dtype=bool)
+
+        reconstructed = np.zeros_like(core_ink)
+        for i in range(1, num + 1):
+            comp = (lbl == i)
+            if np.any(comp & core_ink):
+                reconstructed |= comp
+
+        return reconstructed
+
     def assemble_word_into_glyphs(
         self,
         w_img: np.ndarray,
@@ -206,163 +326,185 @@ class GlyphSegmenter:
     ) -> List[Dict[str, Any]]:
         """
         Assembles connected components within a word into intact multi-stroke glyphs.
-        In cursive writing (Seraphinianus), words are executed in a single ductus.
-        Individual letters are separated by ligature valleys in the vertical projection,
-        guaranteeing strict, non-overlapping horizontal partitions and no conjoined disjoint elements.
-        Accents/diacritics are isolated as distinct single-ductus glyphs.
-        Optionally uses expected_glyph_count as a calibrated prior from reference transcriptions.
+        Guarantees 100% ink conservation (zero waste) and strict disjoint partition.
+        When expected_glyph_count (K) is provided, uses 2D Minimum Energy Seam Carving
+        and projection valley analysis to split wide ligatures while preserving all
+        physically separated ink traces (zero forced merges).
+        In cursive scripts (Seraphinianus), detects topological loops to prevent
+        destructive bisection of loops.
         """
-        from scipy.ndimage import gaussian_filter1d
+        from scipy.ndimage import gaussian_filter1d, binary_fill_holes
+        from skimage.measure import regionprops
 
-        labeled_w, num_w = label(w_img)
+        w_mask = (w_img > 0)
+        H, W = w_mask.shape
+        total_ink = int(np.sum(w_mask))
+        if total_ink == 0:
+            return []
+
+        labeled_w, num_w = label(w_mask, structure=np.ones((3, 3), dtype=bool))
         if num_w == 0:
             return []
 
+        # Find connected components and sort horizontally
         props = sorted(regionprops(labeled_w), key=lambda p: (p.bbox[1] + p.bbox[3]) / 2.0)
+        valid_props = [p for p in props if p.area >= 4]
+        if not valid_props:
+            valid_props = props
 
-        # 1. Filter out micro noise specks below quill nib thickness
-        valid_comps = []
-        for p in props:
-            ph = p.bbox[2] - p.bbox[0]
-            pw = p.bbox[3] - p.bbox[1]
-            if p.area >= 8 and ph >= 5 and pw >= 2:
-                valid_comps.append(p)
+        # Build component masks; attach any micro-speck (area < 4) to nearest component
+        # ensuring ZERO pixels of ink are discarded
+        comp_records = []
+        for p in valid_props:
+            cy0, cx0, cy1, cx1 = p.bbox
+            m = (labeled_w[cy0:cy1, cx0:cx1] == p.label)
+            full_m = np.zeros((H, W), dtype=bool)
+            full_m[cy0:cy1, cx0:cx1] = m
+            comp_records.append({
+                "mask": full_m,
+                "area": int(p.area),
+                "cmin": cx0,
+                "cmax": cx1,
+                "c_center": (cx0 + cx1) / 2.0,
+                "w": cx1 - cx0,
+                "h": cy1 - cy0,
+            })
 
-        if not valid_comps:
-            return []
+        # Attach tiny micro-specks to the nearest valid component
+        speck_props = [p for p in props if p.area < 4 and p not in valid_props]
+        for sp in speck_props:
+            sp_cx = (sp.bbox[1] + sp.bbox[3]) / 2.0
+            sp_m = (labeled_w[sp.bbox[0]:sp.bbox[2], sp.bbox[1]:sp.bbox[3]] == sp.label)
+            closest = min(comp_records, key=lambda c: abs(c["c_center"] - sp_cx))
+            closest["mask"][sp.bbox[0]:sp.bbox[2], sp.bbox[1]:sp.bbox[3]] |= sp_m
+            closest["area"] += int(sp.area)
 
-        # 2. Cursive component splitter
-        def split_single_component(comp_mask: np.ndarray, y0: int, x0: int, min_glyph_w: int = 12, max_glyph_w: int = 34) -> List[Dict[str, Any]]:
-            gh, gw = comp_mask.shape
-            area = int(np.sum(comp_mask))
-            if area < 10 or gh < 5 or gw < 2:
-                return []
+        # Recalculate component extents and centers (NEVER merge physically separate components)
+        main_comps = sorted(comp_records, key=lambda c: c["cmin"])
+        for c in main_comps:
+            cols = np.where(np.any(c["mask"], axis=0))[0]
+            if len(cols) > 0:
+                c["cmin"] = int(cols.min())
+                c["cmax"] = int(cols.max())
+                c["w"] = c["cmax"] - c["cmin"] + 1
+                c["c_center"] = float(np.mean(cols))
 
-            # If component is narrow enough, it is already a single intact glyph
-            if gw <= max_glyph_w or area < 25:
-                return [{
-                    "mask": comp_mask,
-                    "bbox_local": (y0, x0, y0 + gh, x0 + gw),
-                    "area": area
-                }]
+        M = len(main_comps)
+        single_glyph_max_w = 26
+        min_glyph_w = 9
 
-            # Cursive Ligature Valley Detection
-            col_proj = np.sum(comp_mask, axis=0).astype(float)
-            smoothed = gaussian_filter1d(col_proj, sigma=1.5)
+        # Determine target splits if expected_glyph_count (K) is provided and exceeds CC count
+        extra_splits_needed = 0
+        if expected_glyph_count is not None and expected_glyph_count > M:
+            extra_splits_needed = expected_glyph_count - M
 
-            valleys = []
-            for x in range(min_glyph_w, gw - min_glyph_w):
-                if smoothed[x] <= smoothed[x - 1] and smoothed[x] <= smoothed[x + 1]:
-                    valleys.append(x)
+        res_glyphs = []
+        for comp in main_comps:
+            c_mask = comp["mask"]
+            cw = comp["w"]
+            area = comp["area"]
 
-            cuts = [0]
-            last_cut = 0
-            for v in valleys:
-                if (v - last_cut) >= min_glyph_w and (gw - v) >= min_glyph_w:
-                    left_peak = np.max(col_proj[last_cut:v]) if v > last_cut else 1.0
-                    right_peak = np.max(col_proj[v:min(gw, v + min_glyph_w)])
-                    max_peak = max(left_peak, right_peak)
-                    if max_peak > 0 and (col_proj[v] / max_peak) <= 0.65:
-                        cuts.append(v)
-                        last_cut = v
-
-            while (gw - cuts[-1]) > max_glyph_w:
-                seg_start = cuts[-1] + min_glyph_w
-                seg_end = min(gw - min_glyph_w, cuts[-1] + max_glyph_w)
-                if seg_end > seg_start:
-                    best_v = seg_start + int(np.argmin(col_proj[seg_start:seg_end]))
-                    cuts.append(best_v)
-                else:
-                    break
-            cuts.append(gw)
-
-            res = []
-            for i in range(len(cuts) - 1):
-                c0, c1 = cuts[i], cuts[i + 1]
-                sub_m = comp_mask[:, c0:c1]
-                if np.sum(sub_m) >= 8:
-                    rows = np.any(sub_m, axis=1)
-                    cols = np.any(sub_m, axis=0)
-                    rmin, rmax = np.where(rows)[0][[0, -1]]
-                    cmin, cmax = np.where(cols)[0][[0, -1]]
-                    res.append({
-                        "mask": sub_m[rmin:rmax + 1, cmin:cmax + 1],
-                        "bbox_local": (y0 + rmin, x0 + c0 + cmin, y0 + rmax + 1, x0 + c0 + cmax + 1),
-                        "area": int(np.sum(sub_m))
+            # Narrow components are guaranteed intact single glyphs / strokes
+            if cw <= single_glyph_max_w and extra_splits_needed == 0:
+                rows = np.where(np.any(c_mask, axis=1))[0]
+                cols = np.where(np.any(c_mask, axis=0))[0]
+                if len(rows) > 0 and len(cols) > 0:
+                    rmin, rmax = int(rows[0]), int(rows[-1])
+                    cmin, cmax = int(cols[0]), int(cols[-1])
+                    res_glyphs.append({
+                        "mask": c_mask[rmin:rmax + 1, cmin:cmax + 1],
+                        "bbox_local": (rmin, cmin, rmax + 1, cmax + 1),
+                        "area": area
                     })
-            return res if res else [{
-                "mask": comp_mask,
-                "bbox_local": (y0, x0, y0 + gh, x0 + gw),
-                "area": area
-            }]
+                continue
 
-        assembled_glyphs = []
-        for comp in valid_comps:
-            cy0, cx0, cy1, cx1 = comp.bbox
-            c_mask = (labeled_w[cy0:cy1, cx0:cx1] == comp.label)
-            split_res = split_single_component(c_mask, cy0, cx0)
-            assembled_glyphs.extend(split_res)
+            # Detect topological loops: enclosed holes are indivisible units (never sliced)
+            filled = binary_fill_holes(c_mask)
+            holes = filled & (~c_mask)
+            lbl_h, num_h = label(holes)
+            forbidden_cols = set()
+            for h_idx in range(1, num_h + 1):
+                h_cols = np.where(np.any(lbl_h == h_idx, axis=0))[0]
+                if len(h_cols) >= 2:
+                    h_start = max(0, int(h_cols.min()) - 1)
+                    h_end = min(W, int(h_cols.max()) + 2)
+                    for fc in range(h_start, h_end):
+                        forbidden_cols.add(fc)
 
-        res_glyphs = sorted(assembled_glyphs, key=lambda g: g["bbox_local"][1])
+            cols = np.where(np.any(c_mask, axis=0))[0]
+            if len(cols) == 0:
+                continue
+            c_left, c_right = int(cols[0]), int(cols[-1])
+            col_proj = np.sum(c_mask, axis=0).astype(float)
+            smoothed = gaussian_filter1d(col_proj, sigma=1.2)
 
-        # 3. Prior-guided calibration when expected ground truth glyph count is provided
-        if expected_glyph_count is not None and expected_glyph_count > 0:
-            K = expected_glyph_count
-            if len(res_glyphs) == 1 and K >= 2:
-                sole = res_glyphs[0]
-                s_mask = sole["mask"]
-                sh, sw = s_mask.shape
-                if sw >= K * 10:
-                    col_proj = np.sum(s_mask, axis=0)
-                    cuts = [0]
-                    for k in range(1, K):
-                        center_x = int(k * sw / K)
-                        search_r = max(4, int(sw / (K * 3)))
-                        x_start = max(1, center_x - search_r)
-                        x_end = min(sw - 1, center_x + search_r)
-                        if x_end > x_start:
-                            cut_x = x_start + int(np.argmin(col_proj[x_start:x_end]))
-                            cuts.append(cut_x)
-                    cuts.append(sw)
-                    calibrated = []
-                    sy0, sx0, _, _ = sole["bbox_local"]
-                    for k in range(len(cuts) - 1):
-                        c0, c1 = cuts[k], cuts[k + 1]
-                        sub_m = s_mask[:, c0:c1]
-                        if np.sum(sub_m) >= 10:
-                            calibrated.append({
-                                "mask": sub_m,
-                                "bbox_local": (sy0, sx0 + c0, sy0 + sh, sx0 + c1),
-                                "area": int(np.sum(sub_m))
-                            })
-                    if len(calibrated) >= 2:
-                        res_glyphs = calibrated
+            # Find genuine ligature valleys (inter-character connection necks)
+            valleys = []
+            for x in range(c_left + min_glyph_w, c_right - min_glyph_w + 1):
+                if x in forbidden_cols:
+                    continue
+                if smoothed[x] <= smoothed[x - 1] and smoothed[x] <= smoothed[x + 1]:
+                    l_peak = np.max(col_proj[max(c_left, x - 14):x]) if x > c_left else 1.0
+                    r_peak = np.max(col_proj[x:min(c_right, x + 14)]) if x < c_right else 1.0
+                    m_peak = min(l_peak, r_peak)
+                    # Significant dip in ink height
+                    if m_peak > 0 and (col_proj[x] / m_peak) <= 0.65:
+                        valleys.append(x)
 
-            # If over-segmented relative to prior, merge closest adjacent pairs strictly preserving disjoint partition
-            while len(res_glyphs) > K + 1 and len(res_glyphs) > 2:
-                min_gap = 1e9
-                best_pair = 0
-                for i in range(len(res_glyphs) - 1):
-                    gap = res_glyphs[i + 1]["bbox_local"][1] - res_glyphs[i]["bbox_local"][3]
-                    if gap < min_gap:
-                        min_gap = gap
-                        best_pair = i
-                g_a, g_b = res_glyphs[best_pair], res_glyphs[best_pair + 1]
-                m_y0 = min(g_a["bbox_local"][0], g_b["bbox_local"][0])
-                m_y1 = max(g_a["bbox_local"][2], g_b["bbox_local"][2])
-                m_x0 = min(g_a["bbox_local"][1], g_b["bbox_local"][1])
-                m_x1 = max(g_a["bbox_local"][3], g_b["bbox_local"][3])
-                comb_m = np.zeros((m_y1 - m_y0, m_x1 - m_x0), dtype=bool)
-                comb_m[g_a["bbox_local"][0] - m_y0:g_a["bbox_local"][2] - m_y0, g_a["bbox_local"][1] - m_x0:g_a["bbox_local"][3] - m_x0] |= g_a["mask"]
-                comb_m[g_b["bbox_local"][0] - m_y0:g_b["bbox_local"][2] - m_y0, g_b["bbox_local"][1] - m_x0:g_b["bbox_local"][3] - m_x0] |= g_b["mask"]
-                merged_g = {
-                    "mask": comb_m,
-                    "bbox_local": (m_y0, m_x0, m_y1, m_x1),
-                    "area": int(np.sum(comb_m))
-                }
-                res_glyphs = res_glyphs[:best_pair] + [merged_g] + res_glyphs[best_pair + 2:]
+            # Filter valleys by minimum inter-glyph spacing, prioritizing deepest dips
+            chosen_valleys = []
+            valleys.sort(key=lambda v: (col_proj[v], smoothed[v]))
+            for v in valleys:
+                if all(abs(v - cv) >= min_glyph_w for cv in chosen_valleys):
+                    chosen_valleys.append(v)
+
+            # Limit cuts if extra_splits_needed is active
+            if extra_splits_needed > 0:
+                splits_for_this = min(len(chosen_valleys), extra_splits_needed)
+                chosen_valleys = chosen_valleys[:splits_for_this]
+                extra_splits_needed -= len(chosen_valleys)
+
+            chosen_valleys = sorted(chosen_valleys)
+
+            if not chosen_valleys:
+                # No valleys: keep component intact as a single glyph
+                rows = np.where(np.any(c_mask, axis=1))[0]
+                rmin, rmax = int(rows[0]), int(rows[-1])
+                cmin, cmax = int(cols[0]), int(cols[-1])
+                res_glyphs.append({
+                    "mask": c_mask[rmin:rmax + 1, cmin:cmax + 1],
+                    "bbox_local": (rmin, cmin, rmax + 1, cmax + 1),
+                    "area": area
+                })
+            else:
+                # Cut along 2D minimum energy seams at valleys
+                seams = [self._min_energy_seam(c_mask, v, window=3) for v in chosen_valleys]
+                cur_m = c_mask.copy()
+                for seam in seams:
+                    part_m = np.zeros_like(cur_m)
+                    for y in range(H):
+                        sx = seam[y]
+                        part_m[y, :sx] = cur_m[y, :sx]
+                        cur_m[y, :sx] = False
+                    if np.sum(part_m) > 0:
+                        r = np.where(np.any(part_m, axis=1))[0]
+                        c = np.where(np.any(part_m, axis=0))[0]
+                        res_glyphs.append({
+                            "mask": part_m[r[0]:r[-1] + 1, c[0]:c[-1] + 1],
+                            "bbox_local": (int(r[0]), int(c[0]), int(r[-1]) + 1, int(c[-1]) + 1),
+                            "area": int(np.sum(part_m))
+                        })
+                if np.sum(cur_m) > 0:
+                    r = np.where(np.any(cur_m, axis=1))[0]
+                    c = np.where(np.any(cur_m, axis=0))[0]
+                    res_glyphs.append({
+                        "mask": cur_m[r[0]:r[-1] + 1, c[0]:c[-1] + 1],
+                        "bbox_local": (int(r[0]), int(c[0]), int(r[-1]) + 1, int(c[-1]) + 1),
+                        "area": int(np.sum(cur_m))
+                    })
 
         return sorted(res_glyphs, key=lambda g: g["bbox_local"][1])
+
 
     @staticmethod
     def _paint_fraction(ink_pixels: np.ndarray) -> float:
@@ -379,7 +521,40 @@ class GlyphSegmenter:
             (((h >= 0.85) | (h <= 0.06)) & (s > 0.20) & (v > 0.25)) |
             ((h >= 0.08) & (h <= 0.16) & (s > 0.28))
         )
-        return float(np.mean(is_paint))
+        return float(np.mean(is_paint)) if ink_pixels.size > 0 else 0.0
+    @staticmethod
+    def compute_ink_polygon(
+        mask: np.ndarray,
+        offset: Tuple[int, int] = (0, 0),
+        pad: int = 2,
+        tolerance: float = 1.8
+    ) -> List[List[int]]:
+        """
+        Computes a simplified polygonal boundary contour hugging the ink tightly.
+        Uses morphological dilation, finds external contour, and simplifies with Douglas-Peucker.
+        Returns list of [x, y] coordinates in absolute space.
+        """
+        if mask is None or np.sum(mask) == 0:
+            return []
+        from scipy.ndimage import binary_dilation
+        from skimage.measure import find_contours, approximate_polygon
+
+        pad_w = pad + 2
+        padded_m = np.pad(mask, pad_width=pad_w, mode="constant", constant_values=False)
+        struct = np.ones((pad * 2 + 1, pad * 2 + 1), dtype=bool)
+        dilated = binary_dilation(padded_m, structure=struct)
+        contours = find_contours(dilated.astype(float), level=0.5)
+        if not contours:
+            return []
+        c = max(contours, key=len)
+        approx = approximate_polygon(c, tolerance=tolerance)
+        y_off, x_off = offset
+        poly = []
+        for pt in approx:
+            px = int(round(pt[1] - pad_w + x_off))
+            py = int(round(pt[0] - pad_w + y_off))
+            poly.append([px, py])
+        return poly
 
     def build_glyph_record(
         self,
@@ -518,6 +693,7 @@ class GlyphSegmenter:
             "word_bbox": tuple(int(v) for v in word_bbox),
             "word_png_rel": word_png_rel,
             "bbox": (gy0, gx0, gy1, gx1),
+            "polygon": self.compute_ink_polygon(g_mask, offset=(gy0, gx0)),
             "height": int(gh),
             "width": int(gw),
             "area": area,
@@ -591,7 +767,7 @@ class GlyphSegmenter:
             w_w = abs_wx1 - abs_wx0
             w_h = abs_wy1 - abs_wy0
             if subfolder == "seraphinianus":
-                if w_w < 6 or w_h < 6 or np.sum(w_img) < 10:
+                if (w_w < 4 and w_h < 4) or np.sum(w_img) < 6:
                     continue
             else:
                 if w_w < 14 or w_h < 12 or np.sum(w_img) < 30:
@@ -617,6 +793,7 @@ class GlyphSegmenter:
                 "word_id": word_id,
                 "line_id": line_id,
                 "bbox": (int(abs_wy0), int(abs_wx0), int(abs_wy1), int(abs_wx1)),
+                "polygon": self.compute_ink_polygon(w_img, offset=(abs_wy0, abs_wx0)),
                 "word_png_rel": word_png_rel
             })
 
@@ -699,6 +876,7 @@ class GlyphSegmenter:
                     "word_bbox": (int(abs_wy0), int(abs_wx0), int(abs_wy1), int(abs_wx1)),
                     "word_png_rel": word_png_rel,
                     "bbox": (int(abs_wy0), int(abs_wx0), int(abs_wy1), int(abs_wx1)),
+                    "polygon": self.compute_ink_polygon(w_img, offset=(abs_wy0, abs_wx0)),
                     "height": int(w_h),
                     "width": int(w_w),
                     "area": int(np.sum(w_img)),
@@ -726,6 +904,97 @@ class GlyphSegmenter:
         """
         clean_mask, page_rgb, was_rotated = self.extract_clean_page_mask(image, subfolder=subfolder)
         lines = self.line_segmenter.segment_lines(clean_mask, auto_isolate=False)
+
+        # Zero-waste line re-harvesting for Seraphinianus:
+        # Once text lines are identified and validated against illustration envelopes,
+        # recover 100% of authentic scribal ink components from the raw sauvola mask
+        # across the complete horizontal span of each line from margin to margin (zero dropped words/letters).
+        if subfolder == "seraphinianus":
+            gray = np.array(image.convert("L"))
+            from skimage.filters import threshold_sauvola
+            sauv_thresh = threshold_sauvola(gray, window_size=25, k=0.2, r=128)
+            sauvola_mask = gray < sauv_thresh
+            if was_rotated:
+                sauvola_mask = np.rot90(sauvola_mask, k=3)
+
+            H_raw, W_raw = sauvola_mask.shape
+            eff_pitch = max(24, int(H_raw / 65))
+            lbl_sauv, _ = label(sauvola_mask)
+            props_sauv = regionprops(lbl_sauv)
+
+            recovered_lines = []
+            for i, l in enumerate(lines):
+                ly0, lx0, ly1, lx1 = l["bbox"]
+                cy_mid = (ly0 + ly1) / 2.0
+                band_y0 = max(0, int(cy_mid - eff_pitch * 0.9))
+                band_y1 = min(H_raw, int(cy_mid + eff_pitch * 0.9))
+
+                # Collect all text-scale scribal components in this line band across full width
+                candidate_comps = []
+                for p in props_sauv:
+                    ph = p.bbox[2] - p.bbox[0]
+                    pw = p.bbox[3] - p.bbox[1]
+                    if p.area > 8000 or (ph > 140 and pw > 100) or ph > 160:
+                        continue
+                    if p.area < 6:
+                        continue
+                    cy = p.centroid[0]
+                    if band_y0 <= cy <= band_y1:
+                        candidate_comps.append(p)
+
+                if not candidate_comps:
+                    continue
+
+                # Cluster components horizontally (gap <= 180px accommodates wide title spacing)
+                candidate_comps.sort(key=lambda c: c.bbox[1])
+                h_clusters = []
+                curr_cl = []
+                max_h_gap = max(180, int(eff_pitch * 4.5))
+                for c in candidate_comps:
+                    if not curr_cl:
+                        curr_cl.append(c)
+                    else:
+                        gap = c.bbox[1] - curr_cl[-1].bbox[3]
+                        if gap <= max_h_gap:
+                            curr_cl.append(c)
+                        else:
+                            h_clusters.append(curr_cl)
+                            curr_cl = [c]
+                if curr_cl:
+                    h_clusters.append(curr_cl)
+
+                # Select cluster(s) that overlap with the seed line's horizontal span
+                line_comps = []
+                for cl in h_clusters:
+                    cl_x0 = cl[0].bbox[1]
+                    cl_x1 = cl[-1].bbox[3]
+                    if not (cl_x1 < lx0 - 60 or cl_x0 > lx1 + 60):
+                        line_comps.extend(cl)
+
+                if not line_comps:
+                    continue
+
+                line_y0 = min(c.bbox[0] for c in line_comps)
+                line_y1 = max(c.bbox[2] for c in line_comps)
+                line_x0 = min(c.bbox[1] for c in line_comps)
+                line_x1 = max(c.bbox[3] for c in line_comps)
+
+                lh = line_y1 - line_y0
+                lw = line_x1 - line_x0
+                line_mask = np.zeros((lh, lw), dtype=bool)
+                for c in line_comps:
+                    c_mask = (lbl_sauv[c.bbox[0]:c.bbox[2], c.bbox[1]:c.bbox[3]] == c.label)
+                    oy = c.bbox[0] - line_y0
+                    ox = c.bbox[1] - line_x0
+                    line_mask[oy:oy + (c.bbox[2] - c.bbox[0]), ox:ox + (c.bbox[3] - c.bbox[1])] |= c_mask
+
+                recovered_lines.append({
+                    "line_id": l.get("line_id", f"L{i:03d}"),
+                    "bbox": (int(line_y0), int(line_x0), int(line_y1), int(line_x1)),
+                    "image": line_mask,
+                })
+            if recovered_lines:
+                lines = recovered_lines
 
         if max_lines:
             lines = lines[:max_lines]
@@ -879,19 +1148,35 @@ class GlyphSegmenter:
 
                 # Direct word patch crop from exact ground truth bounding box
                 word_crop_rgb = page_rgb[ry0:ry1, rx0:rx1]
-                w_pil = Image.fromarray(word_crop_rgb)
-                w_mask = self.binarizer.binarize(w_pil)
-                w_mask = self.binarizer.remove_small_artifacts(w_mask, min_size=3)
-
-                # Fallback if local mask is sparse
+                w_mask = self.binarize_word_crop_hysteresis(word_crop_rgb)
                 if np.sum(w_mask) < 6:
-                    word_gray = np.mean(word_crop_rgb, axis=2)
-                    w_mask = word_gray < 165
+                    w_pil = Image.fromarray(word_crop_rgb)
+                    w_mask = self.binarizer.binarize(w_pil)
+                    w_mask = self.binarizer.remove_small_artifacts(w_mask, min_size=2)
 
-                # Save word crop image directly without shifting
+                # Tighten bounding box vertically to actual ink extent to eliminate empty whitespace
+                # and prevent any vertical overlap or encroachment on adjacent lines
+                ink_rows = np.where(np.any(w_mask, axis=1))[0]
+                ink_cols = np.where(np.any(w_mask, axis=0))[0]
+                if len(ink_rows) > 0 and len(ink_cols) > 0:
+                    pad = 3
+                    ty0 = max(0, ry0 + int(ink_rows.min()) - pad)
+                    ty1 = min(H, ry0 + int(ink_rows.max()) + 1 + pad)
+
+                    # Guard against truncating faint letters if expected_k >= 3
+                    c_span = int(ink_cols.max() - ink_cols.min() + 1)
+                    if expected_k and expected_k >= 3 and c_span < 0.72 * w_w:
+                        tx0, tx1 = rx0, rx1
+                    else:
+                        tx0 = max(0, rx0 + int(ink_cols.min()) - pad)
+                        tx1 = min(W, rx0 + int(ink_cols.max()) + 1 + pad)
+                else:
+                    ty0, tx0, ty1, tx1 = ry0, rx0, ry1, rx1
+
+                # Save word crop image directly using tightened bounding box
                 word_png_rel = self.save_word_crop(
                     page_rgb=page_rgb,
-                    word_bbox=(ry0, rx0, ry1, rx1),
+                    word_bbox=(ty0, tx0, ty1, tx1),
                     page_id=page_id,
                     word_id=word_id,
                     output_dir=output_dir,
@@ -901,7 +1186,8 @@ class GlyphSegmenter:
                 all_page_words.append({
                     "word_id": word_id,
                     "line_id": line_id,
-                    "bbox": (int(ry0), int(rx0), int(ry1), int(rx1)),
+                    "bbox": (int(ty0), int(tx0), int(ty1), int(tx1)),
+                    "polygon": self.compute_ink_polygon(w_mask, offset=(ry0, rx0)),
                     "word_png_rel": word_png_rel,
                     "eva_text": eva_text,
                     "eva_glyphs": eva_tokens

@@ -71,3 +71,20 @@ Thumbs.db
 tmp/
 .tmp/
 scratch/
+
+# Google Cloud Platform (GCP) & Credentials
+scripts/gcp/credentials/
+scripts/gcp/keys/
+scripts/gcp/*.json
+scripts/gcp/*.key
+scripts/gcp/.env*
+scripts/gcp/storage/
+scripts/gcp/outputs/
+/gcp/
+*service_account*.json
+*service-account*.json
+*gcp-key*.json
+*credentials*.json
+
+# Annotations cache
+data/annotations/voynichese/js_cache/

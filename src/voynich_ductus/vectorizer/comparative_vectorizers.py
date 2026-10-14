@@ -206,6 +206,37 @@ class DINOv2EmbeddingEngine:
         norm = np.linalg.norm(feat_vec)
         return feat_vec / norm if norm > 0 else feat_vec
 
+    def extract_batch_embeddings(self, patches: List[np.ndarray], batch_size: int = 64) -> np.ndarray:
+        """
+        Extracts 768-D deep ViT embedding vectors in high-speed batches for entire folios/corpora.
+        """
+        if not patches:
+            return np.empty((0, 768), dtype=np.float32)
+
+        self._init_model()
+        if self._model != "fallback_deep_projector" and self._model is not None:
+            try:
+                import torch
+                from torchvision import transforms
+                tf = transforms.Compose([
+                    transforms.Resize((224, 224)),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                ])
+                all_feats = []
+                for i in range(0, len(patches), batch_size):
+                    batch_patches = patches[i:i + batch_size]
+                    tensors = [tf(Image.fromarray(p).convert("RGB")) for p in batch_patches]
+                    batch_tensor = torch.stack(tensors)
+                    with torch.no_grad():
+                        feats = self._model(batch_tensor).cpu().numpy()
+                    all_feats.append(feats)
+                return np.vstack(all_feats)
+            except Exception:
+                pass
+
+        return np.array([self.extract_embedding(p) for p in patches], dtype=np.float32)
+
     def process(self, binary_mask: np.ndarray, raw_patch: Optional[np.ndarray] = None) -> Dict[str, Any]:
         t0 = time.perf_counter()
         patch_to_use = raw_patch if raw_patch is not None else (binary_mask.astype(np.uint8) * 255)

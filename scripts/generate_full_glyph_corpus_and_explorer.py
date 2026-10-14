@@ -40,6 +40,7 @@ def clean_page_data_for_json(pages_data: List[Dict[str, Any]]) -> List[Dict[str,
                 "word_id": w["word_id"],
                 "line_id": w.get("line_id", ""),
                 "bbox": [int(x) for x in w["bbox"]],
+                "polygon": w.get("polygon", []),
                 "word_png_rel": w.get("word_png_rel", ""),
                 "eva_text": w.get("eva_text", ""),
                 "eva_glyphs": w.get("eva_glyphs", []),
@@ -54,6 +55,7 @@ def clean_page_data_for_json(pages_data: List[Dict[str, Any]]) -> List[Dict[str,
                 "word_bbox": [int(x) for x in g.get("word_bbox", g["bbox"])],
                 "word_png_rel": g.get("word_png_rel", ""),
                 "bbox": [int(x) for x in g["bbox"]],
+                "polygon": g.get("polygon", []),
                 "height": int(g["height"]),
                 "width": int(g["width"]),
                 "area": int(g["area"]),
@@ -1416,35 +1418,47 @@ def generate_explorer_html(
             const wordThickness = Math.max(2.4, 3.0 / Math.sqrt(currentZoom));
             const glyphThickness = Math.max(2.0, 2.6 / Math.sqrt(currentZoom));
 
+            // Helper function to render tight ink polygon contour or fallback to bounding box
+            function renderShape(item, isFill, isStroke) {{
+                if (item.polygon && item.polygon.length >= 3) {{
+                    ctx.beginPath();
+                    ctx.moveTo(item.polygon[0][0], item.polygon[0][1]);
+                    for (let p = 1; p < item.polygon.length; p++) {{
+                        ctx.lineTo(item.polygon[p][0], item.polygon[p][1]);
+                    }}
+                    ctx.closePath();
+                    if (isFill) ctx.fill();
+                    if (isStroke) ctx.stroke();
+                }} else if (item.bbox) {{
+                    const [y0, x0, y1, x1] = item.bbox;
+                    if (isFill) ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+                    if (isStroke) ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+                }}
+            }}
+
             // If Focus Mode is active and an item is selected, ONLY draw the focused selection!
             if (focusMode && (selectedGlyph || selectedWord)) {{
                 if (selectedWord) {{
-                    const [wy0, wx0, wy1, wx1] = selectedWord.bbox;
                     ctx.strokeStyle = '#10b981';
                     ctx.lineWidth = wordThickness * 1.5;
                     ctx.fillStyle = 'rgba(16, 185, 129, 0.35)';
-                    ctx.fillRect(wx0, wy0, wx1 - wx0, wy1 - wy0);
-                    ctx.strokeRect(wx0, wy0, wx1 - wx0, wy1 - wy0);
+                    renderShape(selectedWord, true, true);
 
                     // Also highlight constituent child glyphs inside focused word
                     if (page.glyphs) {{
                         page.glyphs.filter(g => g.word_id === selectedWord.word_id).forEach(g => {{
-                            const [gy0, gx0, gy1, gx1] = g.bbox;
                             ctx.strokeStyle = '#38bdf8';
                             ctx.lineWidth = glyphThickness * 1.3;
                             ctx.fillStyle = 'rgba(56, 189, 248, 0.25)';
-                            ctx.fillRect(gx0, gy0, gx1 - gx0, gy1 - gy0);
-                            ctx.strokeRect(gx0, gy0, gx1 - gx0, gy1 - gy0);
+                            renderShape(g, true, true);
                         }});
                     }}
                 }}
                 if (selectedGlyph) {{
-                    const [gy0, gx0, gy1, gx1] = selectedGlyph.bbox;
                     ctx.strokeStyle = '#00e5ff';
                     ctx.lineWidth = glyphThickness * 2.0;
                     ctx.fillStyle = 'rgba(0, 229, 255, 0.40)';
-                    ctx.fillRect(gx0 - 3, gy0 - 3, (gx1 - gx0) + 6, (gy1 - gy0) + 6);
-                    ctx.strokeRect(gx0 - 3, gy0 - 3, (gx1 - gx0) + 6, (gy1 - gy0) + 6);
+                    renderShape(selectedGlyph, true, true);
                 }}
                 return;
             }}
@@ -1489,10 +1503,9 @@ def generate_explorer_html(
                 }});
             }}
 
-            // 2. Layer 2: Lexical Words (🟢 Emerald Green)
+            // 2. Layer 2: Lexical Words (🟢 Emerald Green - Tight Ink Hull Polygon)
             if (showWords && page.words) {{
                 page.words.forEach(w => {{
-                    const [wy0, wx0, wy1, wx1] = w.bbox;
                     const isSelectedWord = selectedWord && selectedWord.word_id === w.word_id;
                     const isParentWord = selectedGlyph && selectedGlyph.word_id === w.word_id;
                     if (isSelectedWord) {{
@@ -1508,34 +1521,28 @@ def generate_explorer_html(
                         ctx.lineWidth = wordThickness;
                         ctx.fillStyle = 'rgba(16, 185, 129, 0.12)';
                     }}
-                    ctx.fillRect(wx0, wy0, wx1 - wx0, wy1 - wy0);
-                    ctx.strokeRect(wx0, wy0, wx1 - wx0, wy1 - wy0);
+                    renderShape(w, true, true);
                 }});
             }}
 
-            // 3. Layer 3: Extracted Glyphs (🔵 Cyan / ⚡ Glowing Active)
+            // 3. Layer 3: Extracted Glyphs (🔵 Cyan - Pure Atomic Ink Contour)
             if (showGlyphs && page.glyphs) {{
                 page.glyphs.forEach(g => {{
                     if (archetypeFilterVal !== 'ALL' && g.canonical_type !== archetypeFilterVal) {{
                         return;
                     }}
 
-                    const [y0, x0, y1, x1] = g.bbox;
                     const isSelected = selectedGlyph && selectedGlyph.glyph_id === g.glyph_id;
-
                     if (isSelected) {{
                         ctx.strokeStyle = '#00e5ff';
                         ctx.lineWidth = glyphThickness * 1.8;
                         ctx.fillStyle = 'rgba(0, 229, 255, 0.40)';
-                        ctx.fillRect(x0 - 2, y0 - 2, (x1 - x0) + 4, (y1 - y0) + 4);
-                        ctx.strokeRect(x0 - 2, y0 - 2, (x1 - x0) + 4, (y1 - y0) + 4);
                     }} else {{
                         ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
                         ctx.lineWidth = glyphThickness;
                         ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
-                        ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
-                        ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
                     }}
+                    renderShape(g, true, true);
                 }});
             }}
         }}
@@ -1694,24 +1701,42 @@ def generate_explorer_html(
                 const page = data[currentMs].pages[currentPageIdx];
                 if (!page) return;
 
-                // 1. If Glyphs layer is visible and clicked inside a glyph bounding box
+                // Ray-casting point-in-polygon test
+                function pointInPoly(px, py, poly) {{
+                    if (!poly || poly.length < 3) return false;
+                    let inside = false;
+                    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {{
+                        const xi = poly[i][0], yi = poly[i][1];
+                        const xj = poly[j][0], yj = poly[j][1];
+                        const intersect = ((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+                        if (intersect) inside = !inside;
+                    }}
+                    return inside;
+                }}
+
+                function isHit(item, x, y) {{
+                    if (item.polygon && item.polygon.length >= 3) {{
+                        if (pointInPoly(x, y, item.polygon)) return true;
+                    }}
+                    if (item.bbox) {{
+                        const [y0, x0, y1, x1] = item.bbox;
+                        return x >= x0 - 3 && x <= x1 + 3 && y >= y0 - 3 && y <= y1 + 3;
+                    }}
+                    return false;
+                }}
+
+                // 1. If Glyphs layer is visible and clicked inside a glyph contour
                 if (showGlyphs && page.glyphs) {{
-                    const hit = page.glyphs.find(g => {{
-                        const [y0, x0, y1, x1] = g.bbox;
-                        return clickCanvasX >= x0 - 4 && clickCanvasX <= x1 + 4 && clickCanvasY >= y0 - 4 && clickCanvasY <= y1 + 4;
-                    }});
+                    const hit = page.glyphs.find(g => isHit(g, clickCanvasX, clickCanvasY));
                     if (hit) {{
                         selectGlyph(hit, false);
                         return;
                     }}
                 }}
 
-                // 2. If Words layer is visible and clicked inside a word bounding box
+                // 2. If Words layer is visible and clicked inside a word polygon
                 if (showWords && page.words) {{
-                    const hitWord = page.words.find(w => {{
-                        const [y0, x0, y1, x1] = w.bbox;
-                        return clickCanvasX >= x0 - 4 && clickCanvasX <= x1 + 4 && clickCanvasY >= y0 - 4 && clickCanvasY <= y1 + 4;
-                    }});
+                    const hitWord = page.words.find(w => isHit(w, clickCanvasX, clickCanvasY));
                     if (hitWord) {{
                         selectWord(hitWord, false);
                         return;

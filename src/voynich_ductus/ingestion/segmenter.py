@@ -106,6 +106,30 @@ class LineSegmenter:
             if (lx1 - lx0) < 10 or (ly1 - ly0) < 8:
                 continue
 
+            # Ensure candidate line contains genuine character-sized, roughly isometric glyph components.
+            # This rejects lines consisting solely of:
+            # - Fine stippling / background hatching (tiny components, area < threshold)
+            # - Illustration quill/spine shading (components that are tall & narrow, h/w >> 1)
+            # Genuine scribal glyphs are roughly square or wider than tall (h/w ≤ 1.8).
+            min_glyph_h = max(8, int(eff_pitch * 0.35))
+            min_glyph_area = max(16, int(eff_pitch * 0.9))
+            valid_glyph_count = sum(
+                1 for c in line_comps
+                if (
+                    (c.bbox[2] - c.bbox[0] >= min_glyph_h)
+                    and (c.bbox[3] - c.bbox[1] >= 5)
+                    and (c.area >= min_glyph_area)
+                    and ((c.bbox[2] - c.bbox[0]) / max(1, c.bbox[3] - c.bbox[1]) <= 1.8)
+                )
+            )
+            # Must have at least 1 valid glyph component.
+            # If line is crowded with components (>=8 components, typical of stippled shading/drawings),
+            # it must contain at least 2 glyphs and a glyph density of at least 8%.
+            if valid_glyph_count < 1:
+                continue
+            if len(line_comps) >= 8 and (valid_glyph_count < 2 or (valid_glyph_count / len(line_comps) < 0.08)):
+                continue
+
             # Construct clean composite mask with ONLY this line's intact components
             lh = ly1 - ly0
             lw = lx1 - lx0
@@ -177,7 +201,7 @@ class LineSegmenter:
 
             wh = wy1 - wy0
             ww = wx1 - wx0
-            if ww < 8 or wh < 8:
+            if (ww < 4 and wh < 4) or (ww < 3 or wh < 3):
                 continue
 
             w_crop = np.zeros((wh, ww), dtype=bool)

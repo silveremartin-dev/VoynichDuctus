@@ -96,3 +96,42 @@ def test_corpus_statistics(rosetta_loader):
     assert stats["unique_glyphs"] > 20
     assert len(stats["top_words"]) == 25
     assert len(stats["top_glyphs"]) == 25
+
+
+def test_load_folio_words_from_js(rosetta_loader):
+    words = rosetta_loader.load_folio_words_from_js("f1r")
+    assert len(words) == 210
+    w0 = words[0]
+    assert w0.index == 0
+    assert w0.eva_text == "fachys"
+    assert w0.x_xml == 12.0
+    assert w0.y_xml == 24.0
+    assert w0.width_xml == 81.0
+    assert w0.height_xml == 75.0
+    assert w0.bbox_scan == (12, 24, 93, 99)
+
+    w_last = words[-1]
+    assert w_last.eva_text == "dchaiin"
+    assert w_last.x_xml == 459.0
+    assert w_last.y_xml == 825.0
+
+
+def test_glance_affine_and_extraction(rosetta_loader):
+    # Native glance 636x900 image
+    native_img = Image.new("RGB", (636, 900), color=(240, 230, 200))
+    t_native = rosetta_loader.compute_scan_affine_transform("f1r", native_img)
+    assert t_native == (1.0, 1.0, 0.0, 0.0)
+
+    aligned_native = rosetta_loader.extract_aligned_words("f1r", scan_image=native_img)
+    assert len(aligned_native) == 210
+    assert aligned_native[0].bbox_scan == (12, 24, 93, 99)
+
+    # 2x upscaled 1272x1800 image
+    upscaled_img = Image.new("RGB", (1272, 1800), color=(240, 230, 200))
+    t_up = rosetta_loader.compute_scan_affine_transform("f1r", upscaled_img)
+    assert t_up == (2.0, 2.0, 0.0, 0.0)
+
+    aligned_up = rosetta_loader.extract_aligned_words("f1r", scan_image=upscaled_img)
+    assert len(aligned_up) == 210
+    assert aligned_up[0].bbox_scan == (24, 48, 186, 198)
+
