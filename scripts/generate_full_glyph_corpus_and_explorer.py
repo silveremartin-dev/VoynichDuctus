@@ -1623,7 +1623,6 @@ def generate_explorer_html(
             if (pIdx !== -1 && pIdx !== currentPageIdx) {{
                 currentPageIdx = pIdx;
                 renderPagesTab();
-                return;
             }}
 
             drawCanvasOverlay();
@@ -1632,6 +1631,13 @@ def generate_explorer_html(
             }}
             renderCurrentGrid();
             renderInspector();
+        }}
+
+        function selectGlyphById(glyphId, shouldAutoZoom = true) {{
+            const page = data[currentMs].pages[currentPageIdx];
+            if (!page || !page.glyphs) return;
+            const g = page.glyphs.find(x => x.glyph_id === glyphId);
+            if (g) selectGlyph(g, shouldAutoZoom);
         }}
 
         function selectWord(word, shouldAutoZoom = true) {{
@@ -1647,6 +1653,13 @@ def generate_explorer_html(
             }}
             renderCurrentGrid();
             renderInspectorWord(word);
+        }}
+
+        function selectWordById(wordId, shouldAutoZoom = true) {{
+            const page = data[currentMs].pages[currentPageIdx];
+            if (!page || !page.words) return;
+            const w = page.words.find(x => x.word_id === wordId);
+            if (w) selectWord(w, shouldAutoZoom);
         }}
 
         // Setup Interactive Mouse Zoom & Pan
@@ -1714,31 +1727,53 @@ def generate_explorer_html(
                     return inside;
                 }}
 
+                function getDistSq(item, x, y) {{
+                    let cx = 0, cy = 0;
+                    if (item.bbox) {{
+                        const [y0, x0, y1, x1] = item.bbox;
+                        cx = (x0 + x1) / 2;
+                        cy = (y0 + y1) / 2;
+                    }}
+                    return (x - cx) * (x - cx) + (y - cy) * (y - cy);
+                }}
+
                 function isHit(item, x, y) {{
                     if (item.polygon && item.polygon.length >= 3) {{
                         if (pointInPoly(x, y, item.polygon)) return true;
                     }}
                     if (item.bbox) {{
                         const [y0, x0, y1, x1] = item.bbox;
-                        return x >= x0 - 3 && x <= x1 + 3 && y >= y0 - 3 && y <= y1 + 3;
+                        return x >= x0 - 2 && x <= x1 + 2 && y >= y0 - 2 && y <= y1 + 2;
                     }}
                     return false;
                 }}
 
-                // 1. If Glyphs layer is visible and clicked inside a glyph contour
+                // 1. If Glyphs layer is visible: find ALL candidate hits, pick the closest one to click!
                 if (showGlyphs && page.glyphs) {{
-                    const hit = page.glyphs.find(g => isHit(g, clickCanvasX, clickCanvasY));
-                    if (hit) {{
-                        selectGlyph(hit, false);
+                    const hits = page.glyphs.filter(g => isHit(g, clickCanvasX, clickCanvasY));
+                    if (hits.length > 0) {{
+                        // Priority 1: exact point in polygon
+                        const polyHits = hits.filter(g => g.polygon && g.polygon.length >= 3 && pointInPoly(clickCanvasX, clickCanvasY, g.polygon));
+                        let bestHit;
+                        if (polyHits.length > 0) {{
+                            bestHit = polyHits.reduce((best, g) => (g.area < best.area ? g : best), polyHits[0]);
+                        }} else {{
+                            bestHit = hits.reduce((best, g) => (getDistSq(g, clickCanvasX, clickCanvasY) < getDistSq(best, clickCanvasX, clickCanvasY) ? g : best), hits[0]);
+                        }}
+                        selectGlyph(bestHit, false);
                         return;
                     }}
                 }}
 
                 // 2. If Words layer is visible and clicked inside a word polygon
                 if (showWords && page.words) {{
-                    const hitWord = page.words.find(w => isHit(w, clickCanvasX, clickCanvasY));
-                    if (hitWord) {{
-                        selectWord(hitWord, false);
+                    const hits = page.words.filter(w => isHit(w, clickCanvasX, clickCanvasY));
+                    if (hits.length > 0) {{
+                        const polyHits = hits.filter(w => w.polygon && w.polygon.length >= 3 && pointInPoly(clickCanvasX, clickCanvasY, w.polygon));
+                        let bestWord = polyHits.length > 0 
+                            ? polyHits[0]
+                            : hits.reduce((best, w) => (getDistSq(w, clickCanvasX, clickCanvasY) < getDistSq(best, clickCanvasX, clickCanvasY) ? w : best), hits[0]);
+                        selectWord(bestWord, false);
                         return;
                     }}
                 }}
@@ -1861,7 +1896,7 @@ def generate_explorer_html(
             
             const grid = document.getElementById('glyphs-grid');
             grid.innerHTML = filteredGlyphs.map(g => `
-                <div class="glyph-card ${{selectedGlyph && selectedGlyph.glyph_id === g.glyph_id ? 'selected' : ''}}" onclick='selectGlyph(${{JSON.stringify(g)}}, true)'>
+                <div class="glyph-card ${{selectedGlyph && selectedGlyph.glyph_id === g.glyph_id ? 'selected' : ''}}" onclick="selectGlyphById('${{g.glyph_id}}', true)">
                     <img src="${{g.png_rel}}" alt="${{g.glyph_id}}">
                     <span class="gid">${{g.glyph_id.split('_').slice(-2).join('_')}}</span>
                     <span class="badge-type" onclick="event.stopPropagation(); openArchetypeVariations('${{g.canonical_type}}')">${{g.canonical_type || 'G??'}}</span>
@@ -1899,7 +1934,7 @@ def generate_explorer_html(
                 const childGlyphs = (page.glyphs || []).filter(g => g.word_id === w.word_id);
                 const wordLabel = w.word_id.split('_').slice(-2).join('_');
                 return `
-                    <div class="word-card ${{isSelected ? 'selected' : ''}}" onclick='selectWord(${{JSON.stringify(w)}}, true)'>
+                    <div class="word-card ${{isSelected ? 'selected' : ''}}" onclick="selectWordById('${{w.word_id}}', true)">
                         <img src="${{w.word_png_rel}}" alt="${{w.word_id}}">
                         <span class="gid" style="color:var(--text-main); font-weight:600;">${{wordLabel}}</span>
                         <span class="badge-freq" style="font-size:0.60rem; padding:1px 5px; margin-top:2px;">${{childGlyphs.length}} glyphs</span>
@@ -1925,7 +1960,7 @@ def generate_explorer_html(
                         </div>
                         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(70px, 1fr)); gap:6px;">
                             ${{childGlyphs.map(g => `
-                                <div class="glyph-card" style="padding:4px;" onclick='selectGlyph(${{JSON.stringify(g)}}, true)'>
+                                <div class="glyph-card" style="padding:4px;" onclick="selectGlyphById('${{g.glyph_id}}', true)">
                                     <img src="${{g.png_rel}}" alt="${{g.glyph_id}}" style="height:36px;">
                                     <span class="gid">${{g.glyph_id.split('_').slice(-1)[0]}}</span>
                                     <span class="badge-type">${{g.canonical_type || 'G??'}}</span>
@@ -2669,18 +2704,16 @@ def main():
     serafini_pdf = Path("data/scans/seraphinianus/Codex Seraphinianus.pdf")
     if serafini_pdf.exists():
         loader_s = PDFScanLoader(serafini_pdf)
-        for p_idx in [15, 20, 25, 30, 35, 40]:
+        for p_idx in [30, 35, 40]:
             try:
                 page_id = f"serafini_p{p_idx:03d}"
-                print(f"[*] Extracting all glyphs on Seraphinianus page {p_idx} (with x1.5 upscale)...")
+                print(f"[*] Extracting all glyphs on Seraphinianus page {p_idx} (HD 2000px)...")
                 p_img = loader_s.get_page_image(p_idx, target_min_dim=2000)
                 # Auto-orient landscape plates if width significantly exceeds height
                 if p_img.width > p_img.height * 1.15:
                     print(f"  [i] Auto-orienting landscape page {p_idx} by 270°...")
                     p_img = p_img.rotate(270, expand=True)
-                # Lanczos 1.5x upscaling for razor-sharp pen contours
-                p_img_hd = p_img.resize((int(p_img.width * 1.5), int(p_img.height * 1.5)), Image.Resampling.LANCZOS)
-                res_s = segmenter.extract_page_glyphs(page_id, p_img_hd, output_dir=base_out, subfolder="seraphinianus")
+                res_s = segmenter.extract_page_glyphs(page_id, p_img, output_dir=base_out, subfolder="seraphinianus")
                 print(f"  [+] Identified {res_s['line_count']} lines, {res_s['word_count']} words, extracted {res_s['glyph_count']} pure isolated glyphs.")
                 serafini_pages_data.append(res_s)
                 all_serafini_glyphs.extend(res_s["glyphs"])
