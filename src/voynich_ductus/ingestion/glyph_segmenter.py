@@ -570,6 +570,7 @@ class GlyphSegmenter:
         output_dir: Optional[Path] = None,
         subfolder: str = "voynich",
         strict: bool = True,
+        save_individual_crops: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Validates, vectorizes and exports a single glyph candidate.
@@ -668,8 +669,17 @@ class GlyphSegmenter:
         # Unique hierarchical glyph identifier: Page_Line_Word_G##
         glyph_id = f"{page_id}_{line_id}_{word_id}_G{glyph_idx:02d}"
 
-        png_rel, svg_rel, svg_str = "", "", ""
-        if output_dir:
+        # Absolute page coordinates on strokes for direct canvas overlay without offset math
+        strokes_with_page = []
+        for s in ordered_strokes:
+            s_dict = dict(s)
+            s_dict["page_points"] = [[p[0] + gy0, p[1] + gx0, p[2]] for p in s.get("points", [])]
+            strokes_with_page.append(s_dict)
+
+        png_rel, svg_rel = "", ""
+        svg_str = VectorExporter.to_svg(ordered_strokes, width=gw, height=gh) if ordered_strokes else ""
+
+        if output_dir and save_individual_crops:
             (output_dir / subfolder / "glyphs" / "png").mkdir(parents=True, exist_ok=True)
             (output_dir / subfolder / "glyphs" / "svg").mkdir(parents=True, exist_ok=True)
             png_filename = f"{glyph_id}.png"
@@ -681,7 +691,8 @@ class GlyphSegmenter:
                 raw_patch, contrast_gain=1.35, unsharp_radius=1.0, unsharp_amount=1.6
             )
             Image.fromarray(save_patch).save(png_path)
-            svg_str = VectorExporter.to_svg(ordered_strokes, width=gw, height=gh, output_path=svg_path)
+            with open(svg_path, "w", encoding="utf-8") as f_svg:
+                f_svg.write(svg_str)
             png_rel = f"{subfolder}/glyphs/png/{png_filename}"
             svg_rel = f"{subfolder}/glyphs/svg/{svg_filename}"
 
@@ -700,7 +711,7 @@ class GlyphSegmenter:
             "fill_factor": round(float(fill_factor), 3),
             "paint_fraction": round(float(paint_fraction), 3),
             "stroke_count": len(ordered_strokes),
-            "strokes": ordered_strokes,
+            "strokes": strokes_with_page,
             "png_rel": png_rel,
             "svg_rel": svg_rel,
             "svg_content": svg_str,
@@ -741,7 +752,8 @@ class GlyphSegmenter:
         page_id: str,
         line_id: str,
         output_dir: Optional[Path] = None,
-        subfolder: str = "voynich"
+        subfolder: str = "voynich",
+        save_individual_crops: bool = False,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Segments a single text line into verified words, and words into intact assembled glyphs with SVG ductus.
@@ -773,9 +785,9 @@ class GlyphSegmenter:
                 if w_w < 14 or w_h < 12 or np.sum(w_img) < 30:
                     continue
 
-            # Save word crop with generous padding (6px)
+            # Save word crop with generous padding (6px) only if explicitly enabled
             word_png_rel = ""
-            if output_dir:
+            if output_dir and save_individual_crops:
                 (output_dir / subfolder / "words" / "png").mkdir(parents=True, exist_ok=True)
                 w_pad = 6
                 cwy0, cwx0 = max(0, abs_wy0 - w_pad), max(0, abs_wx0 - w_pad)
@@ -822,6 +834,7 @@ class GlyphSegmenter:
                     output_dir=output_dir,
                     subfolder=subfolder,
                     strict=(subfolder != "seraphinianus"),
+                    save_individual_crops=save_individual_crops,
                 )
                 if record is None:
                     continue
@@ -844,9 +857,19 @@ class GlyphSegmenter:
                     continue
 
                 glyph_id = f"{page_id}_{line_id}_{word_id}_G00"
-                png_rel, svg_rel, svg_str = "", "", ""
                 wh_m, ww_m = w_img.shape
-                if output_dir:
+
+                # Absolute page coordinates on strokes
+                strokes_with_page = []
+                for s in ordered_strokes:
+                    s_dict = dict(s)
+                    s_dict["page_points"] = [[p[0] + abs_wy0, p[1] + abs_wx0, p[2]] for p in s.get("points", [])]
+                    strokes_with_page.append(s_dict)
+
+                png_rel, svg_rel = "", ""
+                svg_str = VectorExporter.to_svg(ordered_strokes, width=ww_m, height=wh_m) if ordered_strokes else ""
+
+                if output_dir and save_individual_crops:
                     (output_dir / subfolder / "glyphs" / "png").mkdir(parents=True, exist_ok=True)
                     (output_dir / subfolder / "glyphs" / "svg").mkdir(parents=True, exist_ok=True)
 
@@ -861,9 +884,8 @@ class GlyphSegmenter:
                     raw_patch = page_rgb[cy0:cy1, cx0:cx1]
                     save_patch = self.normalizer.enhance_contrast_and_sharpness(raw_patch, contrast_gain=1.35, unsharp_radius=1.0, unsharp_amount=1.6)
                     Image.fromarray(save_patch).save(png_path)
-
-                    if ordered_strokes:
-                        svg_str = VectorExporter.to_svg(ordered_strokes, width=ww_m, height=wh_m, output_path=svg_path)
+                    with open(svg_path, "w", encoding="utf-8") as f_svg:
+                        f_svg.write(svg_str)
 
                     png_rel = f"{subfolder}/glyphs/png/{png_filename}"
                     svg_rel = f"{subfolder}/glyphs/svg/{svg_filename}"
@@ -882,7 +904,7 @@ class GlyphSegmenter:
                     "area": int(np.sum(w_img)),
                     "fill_factor": round(float(np.sum(w_img) / max(1, w_h * w_w)), 3),
                     "stroke_count": len(ordered_strokes),
-                    "strokes": ordered_strokes,
+                    "strokes": strokes_with_page,
                     "png_rel": png_rel,
                     "svg_rel": svg_rel,
                     "svg_content": svg_str
@@ -896,7 +918,8 @@ class GlyphSegmenter:
         image: Image.Image,
         output_dir: Optional[Path] = None,
         subfolder: str = "voynich",
-        max_lines: Optional[int] = None
+        max_lines: Optional[int] = None,
+        save_individual_crops: bool = False,
     ) -> Dict[str, Any]:
         """
         Processes an entire manuscript page, extracting all lines, words, and individual glyphs.
@@ -1027,12 +1050,13 @@ class GlyphSegmenter:
                 page_id=page_id,
                 line_id=line["line_id"],
                 output_dir=output_dir,
-                subfolder=subfolder
+                subfolder=subfolder,
+                save_individual_crops=save_individual_crops,
             )
             all_page_glyphs.extend(l_glyphs)
             all_page_words.extend(l_words)
 
-        return {
+        page_dict = {
             "page_id": page_id,
             "page_img_rel": page_img_rel,
             "image_width": page_img_for_explorer.width,
@@ -1044,6 +1068,14 @@ class GlyphSegmenter:
             "words": all_page_words,
             "glyphs": all_page_glyphs
         }
+        if output_dir:
+            pages_dir = output_dir / subfolder / "pages"
+            pages_dir.mkdir(parents=True, exist_ok=True)
+            import json
+            with open(pages_dir / f"{page_id}.json", "w", encoding="utf-8") as f_json:
+                json.dump(page_dict, f_json, ensure_ascii=False)
+
+        return page_dict
 
     def extract_page_glyphs_with_ground_truth(
         self,
@@ -1051,7 +1083,8 @@ class GlyphSegmenter:
         image: Image.Image,
         rosetta_words: List[Any],
         output_dir: Optional[Path] = None,
-        subfolder: str = "voynich"
+        subfolder: str = "voynich",
+        save_individual_crops: bool = False,
     ) -> Dict[str, Any]:
         """
         Extracts words and glyphs strictly guided by Voynichese Rosetta Ground Truth annotations:
@@ -1173,15 +1206,17 @@ class GlyphSegmenter:
                 else:
                     ty0, tx0, ty1, tx1 = ry0, rx0, ry1, rx1
 
-                # Save word crop image directly using tightened bounding box
-                word_png_rel = self.save_word_crop(
-                    page_rgb=page_rgb,
-                    word_bbox=(ty0, tx0, ty1, tx1),
-                    page_id=page_id,
-                    word_id=word_id,
-                    output_dir=output_dir,
-                    subfolder=subfolder
-                )
+                # Save word crop image directly using tightened bounding box (only if requested)
+                word_png_rel = ""
+                if output_dir and save_individual_crops:
+                    word_png_rel = self.save_word_crop(
+                        page_rgb=page_rgb,
+                        word_bbox=(ty0, tx0, ty1, tx1),
+                        page_id=page_id,
+                        word_id=word_id,
+                        output_dir=output_dir,
+                        subfolder=subfolder
+                    )
 
                 all_page_words.append({
                     "word_id": word_id,
@@ -1220,6 +1255,7 @@ class GlyphSegmenter:
                         output_dir=output_dir,
                         subfolder=subfolder,
                         strict=False,  # Certified by ground truth
+                        save_individual_crops=save_individual_crops,
                     )
                     if record is None:
                         continue
@@ -1252,13 +1288,14 @@ class GlyphSegmenter:
                         output_dir=output_dir,
                         subfolder=subfolder,
                         strict=False,
+                        save_individual_crops=save_individual_crops,
                     )
                     if record is not None:
                         record["eva_char"] = eva_tokens[0] if eva_tokens else ""
                         record["ref_eva_text"] = eva_text
                         all_page_glyphs.append(record)
 
-        return {
+        page_dict = {
             "page_id": page_id,
             "page_img_rel": page_img_rel,
             "image_width": W,
@@ -1270,5 +1307,13 @@ class GlyphSegmenter:
             "words": all_page_words,
             "glyphs": all_page_glyphs
         }
+        if output_dir:
+            pages_dir = output_dir / subfolder / "pages"
+            pages_dir.mkdir(parents=True, exist_ok=True)
+            import json
+            with open(pages_dir / f"{page_id}.json", "w", encoding="utf-8") as f_json:
+                json.dump(page_dict, f_json, ensure_ascii=False)
+
+        return page_dict
 
 

@@ -107,28 +107,45 @@ def process_single_serafini_page(
     return res_s
 
 
-def sync_to_gcs(local_dir: Path, bucket_name: str, gcs_prefix: str = "voynich_ductus/atlas_dataset"):
-    """Recursively uploads the output dataset to a Google Cloud Storage bucket."""
+def sync_to_gcs(local_dir: Path, bucket_name: str, gcs_prefix: str = "voynich_ductus/atlas_dataset", max_workers: int = 16):
+    """Fast multi-threaded upload of dataset assets to Google Cloud Storage."""
     try:
         from google.cloud import storage
+        from concurrent.futures import ThreadPoolExecutor
         client = storage.Client()
         bucket = client.bucket(bucket_name)
-        
-        print(f"\n[GCS] Syncing {local_dir} to gs://{bucket_name}/{gcs_prefix} ...")
-        uploaded_count = 0
+
+        files_to_upload = []
         for root, _, files in os.walk(local_dir):
             for file in files:
                 local_file = Path(root) / file
                 rel_path = local_file.relative_to(local_dir).as_posix()
                 blob_path = f"{gcs_prefix}/{rel_path}"
-                blob = bucket.blob(blob_path)
-                
-                content_type = "text/html" if file.endswith(".html") else "application/json" if file.endswith(".json") else "image/png" if file.endswith(".png") else "image/svg+xml" if file.endswith(".svg") else "image/jpeg"
-                blob.upload_from_filename(str(local_file), content_type=content_type)
-                uploaded_count += 1
-                if uploaded_count % 500 == 0:
-                    print(f"  [GCS] Uploaded {uploaded_count} objects...")
-        print(f"[GCS] Successfully uploaded {uploaded_count} objects to gs://{bucket_name}/{gcs_prefix}")
+                content_type = (
+                    "text/html" if file.endswith(".html")
+                    else "application/json" if file.endswith(".json")
+                    else "image/jpeg" if file.endswith(".jpg") or file.endswith(".jpeg")
+                    else "image/png" if file.endswith(".png")
+                    else "image/svg+xml" if file.endswith(".svg")
+                    else "application/octet-stream"
+                )
+                files_to_upload.append((local_file, blob_path, content_type))
+
+        print(f"\n[GCS] Syncing {len(files_to_upload)} files from {local_dir} to gs://{bucket_name}/{gcs_prefix} (parallel workers={max_workers})...")
+        def _upload_file(item):
+            loc_path, b_path, c_type = item
+            blob = bucket.blob(b_path)
+            blob.upload_from_filename(str(loc_path), content_type=c_type)
+            return 1
+
+        uploaded = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for _ in pool.map(_upload_file, files_to_upload):
+                uploaded += 1
+                if uploaded % 100 == 0 or uploaded == len(files_to_upload):
+                    print(f"  [GCS] Uploaded {uploaded}/{len(files_to_upload)} objects...")
+
+        print(f"[GCS] Successfully uploaded {uploaded} objects to gs://{bucket_name}/{gcs_prefix}")
     except Exception as e:
         print(f"[-] GCS upload notice: {e}")
 
@@ -158,15 +175,12 @@ def main():
     print(f"  Workers: {args.workers} parallel processes | Manuscripts: {args.manuscripts}")
     print("=" * 65)
 
-    # 1. Clean output directories
+    # 1. Clean output directories (lean architecture: master page JPGs and coordinate JSONs only)
     for sub in ["voynich", "seraphinianus"]:
         sub_dir = base_out / sub
         if sub_dir.exists():
             shutil.rmtree(sub_dir)
         (base_out / sub / "pages").mkdir(parents=True, exist_ok=True)
-        (base_out / sub / "words" / "png").mkdir(parents=True, exist_ok=True)
-        (base_out / sub / "glyphs" / "png").mkdir(parents=True, exist_ok=True)
-        (base_out / sub / "glyphs" / "svg").mkdir(parents=True, exist_ok=True)
 
     do_voynich = "voynich" in args.manuscripts.lower()
     do_serafini = "seraphinianus" in args.manuscripts.lower()

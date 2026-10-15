@@ -146,7 +146,7 @@ if ($Mode -eq "spot-vm") {
     }
 }
 elseif ($Mode -eq "cloud-run") {
-    Write-Host "`n[*] Step 3: Deploying Cloud Run Job (8 vCPUs, 16 GiB RAM)..." -ForegroundColor Green
+    Write-Host "`n[*] Step 3: Deploying Cloud Run Job (8 vCPUs, 32 GiB RAM, 24h timeout)..." -ForegroundColor Green
     $runArgs = [string]::Join(",", $containerArgs)
     
     gcloud run jobs create voynich-batch-job `
@@ -154,8 +154,8 @@ elseif ($Mode -eq "cloud-run") {
         --image=$ImageTag `
         --region=$Region `
         --cpu=8 `
-        --memory=16Gi `
-        --task-timeout=3600 `
+        --memory=32Gi `
+        --task-timeout=86400s `
         --max-retries=1 `
         --service-account=$ServiceAccount `
         --args="$runArgs" 2>$null
@@ -166,13 +166,14 @@ elseif ($Mode -eq "cloud-run") {
             --image=$ImageTag `
             --region=$Region `
             --cpu=8 `
-            --memory=16Gi `
+            --memory=32Gi `
+            --task-timeout=86400s `
             --service-account=$ServiceAccount `
             --args="$runArgs"
     }
 
-    Write-Host "  [+] Executing Cloud Run Job and waiting for completion..." -ForegroundColor Green
-    gcloud run jobs execute voynich-batch-job --project=$ProjectId --region=$Region --wait
+    Write-Host "  [+] Executing Cloud Run Job (async/autonomous for overnight run)..." -ForegroundColor Green
+    gcloud run jobs execute voynich-batch-job --project=$ProjectId --region=$Region --async
 }
 
 # ------------------------------------------------------------------------------

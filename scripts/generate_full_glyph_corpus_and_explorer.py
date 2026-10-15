@@ -1289,6 +1289,38 @@ def generate_explorer_html(
             renderPagesTab();
         }}
 
+        const cropCache = new Map();
+        function getOnTheFlyCrop(bbox, pad = 6) {{
+            if (!pageImageObj || !pageImageObj.complete || !pageImageObj.naturalWidth || !bbox) return '';
+            const page = data[currentMs].pages[currentPageIdx];
+            const pageId = page ? page.page_id : 'curr';
+            const key = `${{currentMs}}_${{pageId}}_${{bbox.join('_')}}_${{pad}}`;
+            if (cropCache.has(key)) return cropCache.get(key);
+
+            const [y0, x0, y1, x1] = bbox;
+            const cy0 = Math.max(0, y0 - pad);
+            const cx0 = Math.max(0, x0 - pad);
+            const cy1 = Math.min(pageImageObj.naturalHeight, y1 + pad);
+            const cx1 = Math.min(pageImageObj.naturalWidth, x1 + pad);
+            const w = cx1 - cx0;
+            const h = cy1 - cy0;
+            if (w <= 0 || h <= 0) return '';
+
+            try {{
+                const cvs = document.createElement('canvas');
+                cvs.width = w;
+                cvs.height = h;
+                const ctx = cvs.getContext('2d');
+                ctx.filter = 'contrast(135%) brightness(105%)';
+                ctx.drawImage(pageImageObj, cx0, cy0, w, h, 0, 0, w, h);
+                const url = cvs.toDataURL('image/jpeg', 0.90);
+                cropCache.set(key, url);
+                return url;
+            }} catch (e) {{
+                return '';
+            }}
+        }}
+
         function loadPageImageAndDraw() {{
             const page = data[currentMs].pages[currentPageIdx];
             if (page.page_img_rel) {{
@@ -1298,10 +1330,13 @@ def generate_explorer_html(
                     fitCanvasToWrapper();
                     drawCanvasOverlay();
                     drawMinimap();
+                    renderCurrentGrid();
                     if (selectedGlyph) {{
                         autoZoomOnGlyph(selectedGlyph);
+                        renderInspector();
                     }} else if (selectedWord) {{
                         autoZoomOnWord(selectedWord);
+                        renderInspectorWord(selectedWord);
                     }}
                 }};
             }}
@@ -1895,13 +1930,19 @@ def generate_explorer_html(
             document.getElementById('items-title').innerText = `${{page.page_id}}${{lineTitleSuffix}} — ${{filteredGlyphs.length}} Glyphs`;
             
             const grid = document.getElementById('glyphs-grid');
-            grid.innerHTML = filteredGlyphs.map(g => `
-                <div class="glyph-card ${{selectedGlyph && selectedGlyph.glyph_id === g.glyph_id ? 'selected' : ''}}" onclick="selectGlyphById('${{g.glyph_id}}', true)">
-                    <img src="${{g.png_rel}}" alt="${{g.glyph_id}}">
+            grid.innerHTML = filteredGlyphs.map(g => {{
+                const isSelected = selectedGlyph && selectedGlyph.glyph_id === g.glyph_id;
+                const cropSrc = g.png_rel || getOnTheFlyCrop(g.bbox, 4);
+                const visualContent = cropSrc
+                    ? `<img src="${{cropSrc}}" alt="${{g.glyph_id}}">`
+                    : `<div style="max-height:48px; display:flex; align-items:center; justify-content:center;">${{g.svg_content || ''}}</div>`;
+                return `
+                <div class="glyph-card ${{isSelected ? 'selected' : ''}}" onclick="selectGlyphById('${{g.glyph_id}}', true)">
+                    ${{visualContent}}
                     <span class="gid">${{g.glyph_id.split('_').slice(-2).join('_')}}</span>
                     <span class="badge-type" onclick="event.stopPropagation(); openArchetypeVariations('${{g.canonical_type}}')">${{g.canonical_type || 'G??'}}</span>
                 </div>
-            `).join('');
+            `;}}).join('');
         }}
 
         function renderWordGrid() {{
@@ -1933,9 +1974,10 @@ def generate_explorer_html(
                 const isSelected = selectedWord && selectedWord.word_id === w.word_id;
                 const childGlyphs = (page.glyphs || []).filter(g => g.word_id === w.word_id);
                 const wordLabel = w.word_id.split('_').slice(-2).join('_');
+                const cropSrc = w.word_png_rel || getOnTheFlyCrop(w.bbox, 6);
                 return `
                     <div class="word-card ${{isSelected ? 'selected' : ''}}" onclick="selectWordById('${{w.word_id}}', true)">
-                        <img src="${{w.word_png_rel}}" alt="${{w.word_id}}">
+                        <img src="${{cropSrc}}" alt="${{w.word_id}}">
                         <span class="gid" style="color:var(--text-main); font-weight:600;">${{wordLabel}}</span>
                         <span class="badge-freq" style="font-size:0.60rem; padding:1px 5px; margin-top:2px;">${{childGlyphs.length}} glyphs</span>
                     </div>
@@ -1959,13 +2001,16 @@ def generate_explorer_html(
                             Constituent Glyphs (${{childGlyphs.length}}) — Click to Inspect
                         </div>
                         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(70px, 1fr)); gap:6px;">
-                            ${{childGlyphs.map(g => `
+                            ${{childGlyphs.map(g => {{
+                                const gCrop = g.png_rel || getOnTheFlyCrop(g.bbox, 4);
+                                const gVisual = gCrop ? `<img src="${{gCrop}}" alt="${{g.glyph_id}}" style="height:36px;">` : `<div style="height:36px; display:flex; align-items:center;">${{g.svg_content || ''}}</div>`;
+                                return `
                                 <div class="glyph-card" style="padding:4px;" onclick="selectGlyphById('${{g.glyph_id}}', true)">
-                                    <img src="${{g.png_rel}}" alt="${{g.glyph_id}}" style="height:36px;">
+                                    ${{gVisual}}
                                     <span class="gid">${{g.glyph_id.split('_').slice(-1)[0]}}</span>
                                     <span class="badge-type">${{g.canonical_type || 'G??'}}</span>
                                 </div>
-                            `).join('')}}
+                            `;}}).join('')}}
                         </div>
                     </div>
                 `;
@@ -1973,6 +2018,7 @@ def generate_explorer_html(
                 childGlyphsHtml = `<p style="color:var(--text-muted); font-size:0.72rem; margin-top:6px;">No constituent glyphs indexed for this word.</p>`;
             }}
 
+            const wordCropSrc = word.word_png_rel || getOnTheFlyCrop(word.bbox, 6);
             ins.innerHTML = `
                 <div style="background:#064e3b; border:1px solid #10b981; border-radius:8px; padding:10px; margin-bottom:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -1980,7 +2026,7 @@ def generate_explorer_html(
                         <span class="badge-freq">${{childGlyphs.length}} Glyphs</span>
                     </div>
                     <div style="text-align:center; background:#000; border-radius:6px; padding:8px; border:1px solid var(--border);">
-                        <img src="${{word.word_png_rel}}" alt="${{word.word_id}}" style="max-height:100px; max-width:100%; object-fit:contain;">
+                        <img src="${{wordCropSrc}}" alt="${{word.word_id}}" style="max-height:100px; max-width:100%; object-fit:contain;">
                     </div>
                 </div>
 
@@ -2110,8 +2156,11 @@ def generate_explorer_html(
 
             let corpusHtml = multiCardsHtml;
 
+            const glyphCropSrc = selectedGlyph.png_rel || getOnTheFlyCrop(selectedGlyph.bbox, 6);
+            const wordCropSrc = selectedGlyph.word_png_rel || (selectedGlyph.word_bbox ? getOnTheFlyCrop(selectedGlyph.word_bbox, 6) : '');
+
             let wordHtml = '';
-            if (selectedGlyph.word_png_rel) {{
+            if (wordCropSrc) {{
                 wordHtml = `
                     <div style="background:#0b1329; border:1px solid #1e3a8a; border-radius:8px; padding:8px 10px; margin-bottom:10px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
@@ -2119,11 +2168,13 @@ def generate_explorer_html(
                             <span style="font-size:0.65rem; color:var(--text-muted);">Word BBox: [${{selectedGlyph.word_bbox ? selectedGlyph.word_bbox.join(', ') : ''}}]</span>
                         </div>
                         <div style="text-align:center; background:#000; border-radius:6px; padding:6px; border:1px solid var(--border);">
-                            <img src="${{selectedGlyph.word_png_rel}}" alt="${{selectedGlyph.word_id}}" style="max-height:60px; max-width:100%; object-fit:contain;">
+                            <img src="${{wordCropSrc}}" alt="${{selectedGlyph.word_id}}" style="max-height:60px; max-width:100%; object-fit:contain;">
                         </div>
                     </div>
                 `;
             }}
+
+            const svgDownloadHref = selectedGlyph.svg_rel || ('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(selectedGlyph.svg_content || ''));
 
             ins.innerHTML = `
                 ${{wordHtml}}
@@ -2132,7 +2183,7 @@ def generate_explorer_html(
                 <div class="inspector-trio">
                     <div class="preview-box-large">
                         <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">ORIGINAL SCAN CROP</span>
-                        <img src="${{selectedGlyph.png_rel}}" alt="${{selectedGlyph.glyph_id}}">
+                        ${{glyphCropSrc ? `<img src="${{glyphCropSrc}}" alt="${{selectedGlyph.glyph_id}}">` : `<div style="color:var(--text-muted); font-size:0.7rem; padding:10px;">(Scan Crop Loading...)</div>`}}
                     </div>
                     <div class="preview-box-large">
                         <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">KINEMATIC DUCTUS</span>
@@ -2184,7 +2235,7 @@ def generate_explorer_html(
                 </div>
 
                 <button class="btn-variations" onclick="openArchetypeVariations('${{selectedGlyph.canonical_type}}')">🔍 View All ${{arch?.total_instances_count || ''}} Variations of ${{selectedGlyph.canonical_type}}</button>
-                <a href="${{selectedGlyph.svg_rel}}" download class="btn-toggle" style="text-decoration:none; margin-top:2px; text-align:center;">⬇ Download Glyph SVG</a>
+                <a href="${{svgDownloadHref}}" download="${{selectedGlyph.glyph_id}}.svg" class="btn-toggle" style="text-decoration:none; margin-top:2px; text-align:center;">⬇ Download Glyph SVG</a>
             `;
         }}
 
@@ -2306,9 +2357,10 @@ def generate_explorer_html(
                 }}
             }}
 
+            const dinoCropSrc = selectedGlyph.png_rel || getOnTheFlyCrop(selectedGlyph.bbox, 6);
             dinoBox.innerHTML = `
                 <div style="position:relative; width:100%; height:120px; display:flex; justify-content:center; align-items:center; background:#050811; border-radius:6px; overflow:hidden; padding:4px;">
-                    <img src="${{selectedGlyph.png_rel}}" alt="Glyph" style="max-height:90px; max-width:85%; object-fit:contain; opacity:0.60; filter:contrast(140%) brightness(90%);">
+                    <img src="${{dinoCropSrc}}" alt="Glyph" style="max-height:90px; max-width:85%; object-fit:contain; opacity:0.60; filter:contrast(140%) brightness(90%);">
                     <svg style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;" viewBox="0 0 ${{gw + 12}} ${{gh + 12}}" preserveAspectRatio="xMidYMid meet">
                         <!-- 8x8 Patch Grid Overlay -->
                         <line x1="${{(gw+12)*0.25}}" y1="2" x2="${{(gw+12)*0.25}}" y2="${{gh+10}}" stroke="rgba(192, 132, 252, 0.25)" stroke-dasharray="2,2"/>
