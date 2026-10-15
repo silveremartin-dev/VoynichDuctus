@@ -98,15 +98,14 @@ def process_single_serafini_page(
     page_id = f"serafini_p{page_idx:03d}"
     
     loader_s = PDFScanLoader(Path(pdf_path_str))
-    p_img = loader_s.get_page_image(page_idx, target_min_dim=2000)
+    # 1600px is crystal clear for digital PDF cursive and avoids multi-gigabyte memory spikes
+    p_img = loader_s.get_page_image(page_idx, target_min_dim=1600)
     
     # Auto-orient landscape plates if width exceeds height
     if p_img.width > p_img.height * 1.15:
         p_img = p_img.rotate(270, expand=True)
         
-    # 1.5x Lanczos upscale
-    p_img_hd = p_img.resize((int(p_img.width * 1.5), int(p_img.height * 1.5)), Image.Resampling.LANCZOS)
-    res_s = segmenter.extract_page_glyphs(page_id, p_img_hd, output_dir=base_out, subfolder="seraphinianus")
+    res_s = segmenter.extract_page_glyphs(page_id, p_img, output_dir=base_out, subfolder="seraphinianus")
     return res_s
 
 
@@ -178,12 +177,9 @@ def main():
     print(f"  Workers: {args.workers} parallel processes | Manuscripts: {args.manuscripts}")
     print("=" * 65)
 
-    # 1. Clean output directories (lean architecture: master page JPGs and coordinate JSONs only)
-    for sub in ["voynich", "seraphinianus"]:
-        sub_dir = base_out / sub
-        if sub_dir.exists():
-            shutil.rmtree(sub_dir)
-        (base_out / sub / "pages").mkdir(parents=True, exist_ok=True)
+    # 1. Clean output directories
+    (base_out / "voynich" / "pages").mkdir(parents=True, exist_ok=True)
+    (base_out / "seraphinianus" / "pages").mkdir(parents=True, exist_ok=True)
 
     do_voynich = "voynich" in args.manuscripts.lower()
     do_serafini = "seraphinianus" in args.manuscripts.lower()
@@ -191,6 +187,38 @@ def main():
     voynich_pages_data = []
     all_voynich_glyphs = []
     voynich_catalogue = {"canonical_alphabet_size": 0, "alphabet": []}
+
+    # Check if Voynich is already complete on GCS
+    voy_cat_file = base_out / "voynich" / "voynich_alphabet_catalogue.json"
+    if do_voynich and args.gcs_bucket and not voy_cat_file.exists():
+        try:
+            from google.cloud import storage
+            client = storage.Client()
+            bucket = client.bucket(args.gcs_bucket)
+            b = bucket.blob(f"{args.gcs_prefix}/voynich/voynich_alphabet_catalogue.json")
+            if b.exists():
+                print(f"[GCS] Found complete Voynich corpus on GCS! Downloading metadata to skip re-extraction...")
+                b.download_to_filename(str(voy_cat_file))
+                for pb in bucket.list_blobs(prefix=f"{args.gcs_prefix}/voynich/pages/"):
+                    if pb.name.endswith(".json"):
+                        fname = Path(pb.name).name
+                        pb.download_to_filename(str(base_out / "voynich" / "pages" / fname))
+                print(f"[GCS] Voynich metadata downloaded successfully.")
+        except Exception as e:
+            print(f"[GCS] Voynich sync notice: {e}")
+
+    if do_voynich and voy_cat_file.exists() and len(list((base_out / "voynich" / "pages").glob("*.json"))) >= 220:
+        print("[*] Voynich already 100% complete! Loading catalogue and pages from cache...")
+        try:
+            with open(voy_cat_file, "r", encoding="utf-8") as f:
+                voynich_catalogue = json.load(f)
+            for p_json in sorted((base_out / "voynich" / "pages").glob("*.json")):
+                with open(p_json, "r", encoding="utf-8") as f:
+                    voynich_pages_data.append(json.load(f))
+            print(f"  [+] Loaded {len(voynich_pages_data)} Voynich folios from cache. Skipping Voynich extraction!")
+            do_voynich = False
+        except Exception as e:
+            print(f"[-] Error loading cached Voynich data: {e}")
 
     # -------------------------------------------------------------
     # 2. Parallel Processing: Voynich Manuscript
@@ -308,8 +336,13 @@ def main():
 
             serafini_pages_data.sort(key=lambda p: p["page_id"])
             print(f"[*] Inducing Seraphinianus Alphabet Catalogue across {len(all_serafini_glyphs)} extracted glyphs...")
+            sample_glyphs = all_serafini_glyphs
+            if len(all_serafini_glyphs) > 10000:
+                step = len(all_serafini_glyphs) // 10000
+                sample_glyphs = all_serafini_glyphs[::step][:10000]
+                print(f"  [i] Subsampled {len(sample_glyphs)} representative glyphs for density clustering.")
             builder_s = GlyphCatalogue(target_alphabet_size=52)
-            serafini_catalogue = builder_s.build_catalogue(all_serafini_glyphs, corpus_type="seraphinianus")
+            serafini_catalogue = builder_s.build_catalogue(sample_glyphs, corpus_type="seraphinianus")
             builder_s.export_catalogue_json(serafini_catalogue, base_out / "seraphinianus" / "seraphinianus_alphabet_catalogue.json")
             print(f"  [+] Seraphinianus Alphabet: {serafini_catalogue['canonical_alphabet_size']} canonical archetypes.")
 
