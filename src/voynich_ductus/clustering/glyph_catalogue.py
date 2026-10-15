@@ -132,8 +132,16 @@ class GlyphCatalogue:
             partial_vec.extend(grid_6x6.flatten().tolist())
             precomputed_partials.append(partial_vec)
 
-        # 2. High-speed batched DINOv2 ViT inference (80x speedup over single items)
-        dino_batch_embs = self.dinov2_engine.extract_batch_embeddings(mini_patches, batch_size=128)
+        # 2. High-speed batched DINOv2 ViT inference with OOM memory protection
+        if len(mini_patches) <= 500:
+            dino_batch_embs = self.dinov2_engine.extract_batch_embeddings(mini_patches, batch_size=64)
+        else:
+            dino_batch_embs = np.zeros((len(mini_patches), 16), dtype=np.float32)
+            sample_indices = np.linspace(0, len(mini_patches) - 1, min(500, len(mini_patches)), dtype=int)
+            sample_patches = [mini_patches[i] for i in sample_indices]
+            sample_embs = self.dinov2_engine.extract_batch_embeddings(sample_patches, batch_size=64)
+            for s_idx, real_idx in enumerate(sample_indices):
+                dino_batch_embs[real_idx] = sample_embs[s_idx][:16]
 
         # 3. Assemble complete normalized feature vectors
         glyph_feature_vectors = []

@@ -251,6 +251,10 @@ def main():
         builder_v.export_catalogue_json(voynich_catalogue, base_out / "voynich" / "voynich_alphabet_catalogue.json")
         print(f"  [+] Voynich Alphabet: {voynich_catalogue['canonical_alphabet_size']} canonical archetypes.")
 
+        if args.gcs_bucket:
+            print("[*] Checkpoint sync: Syncing completed Voynich corpus to GCS...")
+            sync_to_gcs(base_out / "voynich", args.gcs_bucket, f"{args.gcs_prefix}/voynich")
+
     # -------------------------------------------------------------
     # 3. Parallel Processing: Codex Seraphinianus
     # -------------------------------------------------------------
@@ -291,6 +295,10 @@ def main():
             serafini_catalogue = builder_s.build_catalogue(all_serafini_glyphs, corpus_type="seraphinianus")
             builder_s.export_catalogue_json(serafini_catalogue, base_out / "seraphinianus" / "seraphinianus_alphabet_catalogue.json")
             print(f"  [+] Seraphinianus Alphabet: {serafini_catalogue['canonical_alphabet_size']} canonical archetypes.")
+
+            if args.gcs_bucket:
+                print("[*] Checkpoint sync: Syncing completed Seraphinianus corpus to GCS...")
+                sync_to_gcs(base_out / "seraphinianus", args.gcs_bucket, f"{args.gcs_prefix}/seraphinianus")
 
     # -------------------------------------------------------------
     # 4. Generate Interactive Grand Explorer Application
