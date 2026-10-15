@@ -57,7 +57,7 @@ class VectorExporter:
         return " ".join(d_tokens)
 
     @staticmethod
-    def to_svg(strokes: List[Dict[str, Any]], width: int, height: int, output_path: Union[str, Path], include_order_colors: bool = True) -> str:
+    def to_svg(strokes: List[Dict[str, Any]], width: int, height: int, output_path: Optional[Union[str, Path]] = None, include_order_colors: bool = True) -> str:
         """
         Exports strokes to an SVG string/file with embedded kinematic ordering and smooth cubic curves.
         """
@@ -122,7 +122,7 @@ class VectorExporter:
         return svg_content
 
     @staticmethod
-    def to_json(strokes: List[Dict[str, Any]], metadata: Dict[str, Any], output_path: Union[str, Path]) -> str:
+    def to_json(strokes: List[Dict[str, Any]], metadata: Dict[str, Any], output_path: Optional[Union[str, Path]] = None) -> str:
         """
         Exports strokes with full kinematic timestamps and metadata to JSON.
         """

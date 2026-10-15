@@ -16,8 +16,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from PIL import Image
 import numpy as np
 
-# Ensure src/ is on sys.path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+# Ensure src/ and scripts/ are on sys.path
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
 from voynich_ductus.ingestion.pdf_loader import PDFScanLoader
@@ -317,7 +320,10 @@ def main():
     # -------------------------------------------------------------
     # 4. Generate Interactive Grand Explorer Application
     # -------------------------------------------------------------
-    from scripts.generate_full_glyph_corpus_and_explorer import generate_explorer_html
+    try:
+        from scripts.generate_full_glyph_corpus_and_explorer import generate_explorer_html
+    except ImportError:
+        from generate_full_glyph_corpus_and_explorer import generate_explorer_html
     explorer_path = base_out / "grand_glyph_explorer.html"
     generate_explorer_html(voynich_pages_data, voynich_catalogue, serafini_pages_data, serafini_catalogue, explorer_path)
 
