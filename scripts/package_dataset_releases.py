@@ -51,8 +51,10 @@ def package_subfolder(subfolder_name: str, src_dir: Path, output_dir: Path, pref
         final_size = current_zip_path.stat().st_size
         print(f"  [+] Closed Part {part_idx:02d}: {current_zip_path.name} ({final_size / (1024*1024):.2f} MB, {files_in_part} files)")
         total_parts.append(current_zip_path)
+    else:
+        current_zip_path.unlink()
 
-    print(f"  [✓] {subfolder_name.upper()} successfully partitioned into {len(total_parts)} archives (< 90 MB each).")
+    print(f"  [OK] {subfolder_name.upper()} successfully partitioned into {len(total_parts)} archives (< 90 MB each).")
     return total_parts
 
 
@@ -71,7 +73,7 @@ def main():
     s_parts = package_subfolder("seraphinianus", atlas_dir, out_release, "seraphini_coords")
 
     print("\n" + "=" * 80)
-    print(f"[✓] Summary: {len(v_parts)} Voynich parts + {len(s_parts)} Seraphinianus parts generated in {out_release}")
+    print(f"[OK] Summary: {len(v_parts)} Voynich parts + {len(s_parts)} Seraphinianus parts generated in {out_release}")
     for p in v_parts + s_parts:
         print(f"    - {p.name:<30} ({p.stat().st_size / (1024*1024):.2f} MB)")
     print("=" * 80)
