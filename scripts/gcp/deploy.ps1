@@ -182,6 +182,7 @@ elseif ($Mode -eq "cloud-run") {
         Start-Sleep -Seconds 3
         $execName = (gcloud run jobs executions list --job=voynich-batch-job --project=$ProjectId --region=$Region --limit=1 --format="value(metadata.name)" 2>$null)
     }
+    $execName = "$execName".Trim()
     Write-Host "  [+] Cloud Run Execution active: $execName" -ForegroundColor Green
     Write-Host "      Monitoring execution progress until completion..." -ForegroundColor Yellow
 
