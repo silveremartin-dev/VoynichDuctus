@@ -1,6 +1,11 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', '$_IMAGE_TAG', '-f', 'scripts/gcp/Dockerfile', '.']
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        docker pull $_IMAGE_TAG || true
+        docker build -t $_IMAGE_TAG --cache-from $_IMAGE_TAG -f scripts/gcp/Dockerfile .
 images:
   - '$_IMAGE_TAG'
 timeout: '1200s'

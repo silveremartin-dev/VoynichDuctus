@@ -1,21 +1,22 @@
-# .gcloudignore for VoynichDuctus GCP Cloud Build
-.git/
+.git
 .gitignore
-.pytest_cache/
-__pycache__/
+.pytest_cache
+__pycache__
 *.pyc
+*.pyo
+*.pyd
 output/
-scratch/
+data/zips/
+data/scans/voynich/*.zip
+data/scans/seraphinianus/*.zip
+data/scans/gallica/
+intermediate/diagnostics/
+intermediate/models/
+intermediate/test_gallica_cache/
 tests/
-.env*
-*.key
-*.pem
-*.json-key
-
-# Do NOT ignore data scans needed by batch runner
-!data/annotations/
-!data/annotations/**
-!data/scans/seraphinianus/
-!data/scans/seraphinianus/Codex Seraphinianus.pdf
-!data/scans/voynich/voynichese_scans/
-!data/scans/voynich/voynichese_scans/**
+releases/
+scratch/
+docs/
+*.html
+*.log
+*.tmp

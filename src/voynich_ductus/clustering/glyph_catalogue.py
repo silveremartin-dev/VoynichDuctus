@@ -461,10 +461,10 @@ class GlyphCatalogue:
                 cluster_glyphs=cluster_glyphs
             )
 
-            # Collect full occurrences / spatial instances across all pages
-            all_instances = []
-            for g in cluster_glyphs:
-                all_instances.append({
+            # Collect top representative instances across folios for modal inspection
+            sample_instances = []
+            for g in cluster_glyphs[:30]:
+                sample_instances.append({
                     "glyph_id": g.get("glyph_id", ""),
                     "page_id": g.get("page_id", ""),
                     "line_id": g.get("line_id", ""),
@@ -495,13 +495,13 @@ class GlyphCatalogue:
                 "mean_width": mean_width,
                 "inliers_count": inlier_count,
                 "outliers_count": outlier_count,
-                "outlier_ratio": round(outlier_count / max(1, len(all_instances)), 3),
+                "outlier_ratio": round(outlier_count / max(1, len(cluster_glyphs)), 3),
                 "rejection_bins": rejection_bins_counts,
                 "corpus_match": corpus_match,
                 "corpus_matches": multi_matches,
-                "total_instances_count": len(all_instances),
-                "all_instances": all_instances,
-                "sample_instances": [g["glyph_id"] for g in cluster_glyphs[:20]]
+                "total_instances_count": len(cluster_glyphs),
+                "all_instances": sample_instances,
+                "sample_instances": sample_instances
             })
 
         return {

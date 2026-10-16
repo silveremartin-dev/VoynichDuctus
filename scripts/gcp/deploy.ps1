@@ -9,7 +9,8 @@ param (
     [string]$BucketName = "ether-509812-voynich-atlas",
     [int]$VoynichLimit = 0,
     [int]$SerafiniLimit = 0,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$ForceVoynich
 )
 
 $env:CLOUDSDK_CORE_PROJECT = $ProjectId
@@ -25,6 +26,7 @@ Write-Host " Region:          $Region"
 Write-Host " Execution Mode:  $Mode"
 Write-Host " Target Image:    $ImageTag"
 Write-Host " GCS Bucket:      gs://$BucketName"
+Write-Host " Force Voynich:   $ForceVoynich"
 Write-Host "=================================================================="
 
 # ------------------------------------------------------------------------------
@@ -66,6 +68,9 @@ if ($VoynichLimit -gt 0) {
 if ($SerafiniLimit -gt 0) {
     $containerArgs += "--serafini-limit=$SerafiniLimit"
 }
+if ($ForceVoynich) {
+    $containerArgs += "--force-voynich"
+}
 
 # ------------------------------------------------------------------------------
 # Step 3: Launch Execution & Monitor
@@ -75,25 +80,24 @@ if ($Mode -eq "spot-vm") {
     $vmName = "voynich-batch-worker-$epoch"
     $zone = "${Region}-b"
 
-    Write-Host "`n[*] Step 3: Launching high-throughput Compute Engine Spot VM ($vmName, c2d-standard-16)..." -ForegroundColor Green
+    Write-Host "`n[*] Step 3: Launching high-throughput Compute Engine Spot VM ($vmName, c2d-standard-16, Container-Optimized OS)..." -ForegroundColor Green
     
-    $createCmd = "gcloud compute instances create-with-container $vmName " +
-        "--project=$ProjectId " +
-        "--zone=$zone " +
-        "--machine-type=c2d-standard-16 " +
-        "--preemptible " +
-        "--boot-disk-size=50GB " +
-        "--service-account=$ServiceAccount " +
-        "--scopes=cloud-platform " +
-        "--container-image=$ImageTag " +
-        "--container-restart-policy=never " +
-        "--tags=voynich-batch"
+    $argsStr = $containerArgs -join " "
+    $startupScript = "#!/bin/bash`ngcloud auth configure-docker --quiet`ndocker run --rm $ImageTag $argsStr"
 
-    foreach ($arg in $containerArgs) {
-        $createCmd += " `"--container-arg=$arg`""
-    }
+    gcloud compute instances create $vmName `
+        --project=$ProjectId `
+        --zone=$zone `
+        --machine-type=c2d-standard-16 `
+        --preemptible `
+        --image-family=cos-stable `
+        --image-project=cos-cloud `
+        --boot-disk-size=50GB `
+        --service-account=$ServiceAccount `
+        --scopes=cloud-platform `
+        --metadata=startup-script="$startupScript" `
+        --tags=voynich-batch
 
-    Invoke-Expression $createCmd
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to launch Spot VM! Aborting."
         exit 1
@@ -115,7 +119,6 @@ if ($Mode -eq "spot-vm") {
             $hasExplorer = gsutil -q stat $explorerBlob
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "`n[+] Detection: Batch run successfully completed and uploaded to GCS! ($elapsed min elapsed)" -ForegroundColor Green
-                # Allow 10 seconds for any final blob flush
                 Start-Sleep -Seconds 10
                 break
             }
@@ -172,8 +175,40 @@ elseif ($Mode -eq "cloud-run") {
             --args="$runArgs"
     }
 
-    Write-Host "  [+] Executing Cloud Run Job (async/autonomous for overnight run)..." -ForegroundColor Green
-    gcloud run jobs execute voynich-batch-job --project=$ProjectId --region=$Region --async
+    Write-Host "  [+] Executing Cloud Run Job..." -ForegroundColor Green
+    $execName = (gcloud run jobs execute voynich-batch-job --project=$ProjectId --region=$Region --format="value(metadata.name)" 2>$null)
+    if (-not $execName) {
+        # Fallback to fetching the latest execution
+        Start-Sleep -Seconds 3
+        $execName = (gcloud run jobs executions list --job=voynich-batch-job --project=$ProjectId --region=$Region --limit=1 --format="value(metadata.name)" 2>$null)
+    }
+    Write-Host "  [+] Cloud Run Execution active: $execName" -ForegroundColor Green
+    Write-Host "      Monitoring execution progress until completion..." -ForegroundColor Yellow
+
+    $startTime = Get-Date
+    while ($true) {
+        Start-Sleep -Seconds 15
+        $elapsed = [math]::Round(((Get-Date) - $startTime).TotalMinutes, 1)
+
+        $statusJsonRaw = (gcloud run jobs executions describe $execName --project=$ProjectId --region=$Region --format="json" 2>$null)
+        if ($statusJsonRaw) {
+            $statusJson = $statusJsonRaw | ConvertFrom-Json
+            $succeeded = $statusJson.status.succeededCount
+            $failed = $statusJson.status.failedCount
+            $running = $statusJson.status.runningCount
+
+            Write-Host "    [$elapsed min] Cloud Run Execution: $execName | Running: $running, Succeeded: $succeeded, Failed: $failed" -ForegroundColor Gray
+
+            if ($succeeded -and [int]$succeeded -ge 1) {
+                Write-Host "`n[+] Cloud Run Execution $execName completed successfully in $elapsed minutes!" -ForegroundColor Green
+                break
+            }
+            if ($failed -and [int]$failed -ge 1) {
+                Write-Error "Cloud Run Execution $execName failed! Check Cloud Logging for details."
+                exit 1
+            }
+        }
+    }
 }
 
 # ------------------------------------------------------------------------------

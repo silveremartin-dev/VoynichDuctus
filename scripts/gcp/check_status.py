@@ -1,7 +1,7 @@
 import subprocess
 import json
 
-filter_expr = 'resource.type="cloud_run_job" AND labels."run.googleapis.com/execution_name"="voynich-batch-job-d2vpr"'
+filter_expr = 'resource.type="cloud_run_job" AND labels."run.googleapis.com/execution_name"="voynich-batch-job-6xsv5"'
 cmd = [
     "gcloud", "logging", "read",
     filter_expr,

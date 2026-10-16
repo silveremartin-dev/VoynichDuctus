@@ -112,36 +112,57 @@ def process_single_voynich_folio(
                     subfolder="voynich"
                 )
                 print(f"  [HD] Aligned {folio_id} on Yale Master scan ({yale_img.width}x{yale_img.height}).")
-                return res
+            else:
+                res = None
         except Exception as e:
             print(f"  [i] Yale HD registration fallback for {folio_id}: {e}")
-
-    # Fallback to 2x Lanczos glance image
-    if r_words:
-        res = segmenter.extract_page_glyphs_with_ground_truth(
-            page_id=folio_id,
-            image=img,
-            rosetta_words=r_words,
-            output_dir=base_out,
-            subfolder="voynich"
-        )
+            res = None
     else:
-        res = segmenter.extract_page_glyphs(
-            page_id=folio_id,
-            image=img,
-            output_dir=base_out,
-            subfolder="voynich"
-        )
+        res = None
+
+    # Fallback to 2x Lanczos glance image if Yale HD not available or failed
+    if res is None:
+        if r_words:
+            res = segmenter.extract_page_glyphs_with_ground_truth(
+                page_id=folio_id,
+                image=img,
+                rosetta_words=r_words,
+                output_dir=base_out,
+                subfolder="voynich"
+            )
+        else:
+            res = segmenter.extract_page_glyphs(
+                page_id=folio_id,
+                image=img,
+                output_dir=base_out,
+                subfolder="voynich"
+            )
 
     # Census yield evaluation
     yr = PaleographyYieldValidator.evaluate_yield(
         folio_id=folio_id,
-        detected_lines=res["line_count"],
-        detected_glyphs=res["glyph_count"],
-        extracted_strokes=sum(len(g.get("strokes", [])) for g in res["glyphs"])
+        detected_lines=res.get("line_count", 0),
+        detected_glyphs=res.get("glyph_count", 0),
+        extracted_strokes=sum(len(g.get("strokes", [])) for g in res.get("glyphs", []))
     )
-    res["yield_report"] = yr
-    return res
+
+    # Return lightweight summary with representative sample across IPC boundary
+    is_preload = (folio_id.lower() in ["f001r", "f1r"])
+    return {
+        "page_id": folio_id,
+        "page_img_rel": res.get("page_img_rel", f"voynich/pages/{folio_id}.jpg"),
+        "json_rel": f"voynich/pages/{folio_id}.json",
+        "image_width": res.get("image_width", 1500),
+        "image_height": res.get("image_height", 2000),
+        "line_count": res.get("line_count", 0),
+        "word_count": res.get("word_count", 0),
+        "glyph_count": res.get("glyph_count", 0),
+        "yield_report": yr,
+        "sample_glyphs": res.get("glyphs", [])[:30],
+        "lines": res.get("lines", []) if is_preload else [],
+        "words": res.get("words", []) if is_preload else [],
+        "glyphs": res.get("glyphs", []) if is_preload else [],
+    }
 
 
 def process_single_serafini_page(
@@ -253,6 +274,8 @@ def main():
                         help="Max Voynich folios to process (for staging / test runs)")
     parser.add_argument("--serafini-limit", type=int, default=None,
                         help="Max Seraphinianus pages to process")
+    parser.add_argument("--force-voynich", action="store_true", default=False,
+                        help="Force re-extraction of Voynich folios even if cached")
     args = parser.parse_args()
 
     t_start = time.perf_counter()
@@ -275,7 +298,7 @@ def main():
 
     # Check if Voynich is already complete on GCS
     voy_cat_file = base_out / "voynich" / "voynich_alphabet_catalogue.json"
-    if do_voynich and args.gcs_bucket and not voy_cat_file.exists():
+    if do_voynich and not args.force_voynich and args.gcs_bucket and not voy_cat_file.exists():
         try:
             from google.cloud import storage
             client = storage.Client()
@@ -292,14 +315,30 @@ def main():
         except Exception as e:
             print(f"[GCS] Voynich sync notice: {e}")
 
-    if do_voynich and voy_cat_file.exists() and len(list((base_out / "voynich" / "pages").glob("*.json"))) >= 220:
+    if do_voynich and not args.force_voynich and voy_cat_file.exists() and len(list((base_out / "voynich" / "pages").glob("*.json"))) >= 220:
         print("[*] Voynich already 100% complete! Loading catalogue and pages from cache...")
         try:
             with open(voy_cat_file, "r", encoding="utf-8") as f:
                 voynich_catalogue = json.load(f)
             for p_json in sorted((base_out / "voynich" / "pages").glob("*.json")):
                 with open(p_json, "r", encoding="utf-8") as f:
-                    voynich_pages_data.append(json.load(f))
+                    d = json.load(f)
+                p_id = d.get("page_id", p_json.stem)
+                is_preload = (p_id.lower() in ["f001r", "f1r"])
+                voynich_pages_data.append({
+                    "page_id": p_id,
+                    "page_img_rel": d.get("page_img_rel", f"voynich/pages/{p_id}.jpg"),
+                    "json_rel": f"voynich/pages/{p_id}.json",
+                    "image_width": d.get("image_width", 1500),
+                    "image_height": d.get("image_height", 2000),
+                    "line_count": d.get("line_count", len(d.get("lines", []))),
+                    "word_count": d.get("word_count", len(d.get("words", []))),
+                    "glyph_count": d.get("glyph_count", len(d.get("glyphs", []))),
+                    "yield_report": d.get("yield_report", {}),
+                    "lines": d.get("lines", []) if is_preload else [],
+                    "words": d.get("words", []) if is_preload else [],
+                    "glyphs": d.get("glyphs", []) if is_preload else [],
+                })
             print(f"  [+] Loaded {len(voynich_pages_data)} Voynich folios from cache. Skipping Voynich extraction!")
             do_voynich = False
         except Exception as e:
@@ -368,7 +407,7 @@ def main():
                 try:
                     res = future.result()
                     voynich_pages_data.append(res)
-                    all_voynich_glyphs.extend(res.get("glyphs", []))
+                    all_voynich_glyphs.extend(res.get("sample_glyphs", res.get("glyphs", [])))
                     print(f"  [+] Completed {f_id}: {res['line_count']} lines, {res['word_count']} words, {res['glyph_count']} glyphs.")
                 except Exception as e:
                     print(f"  [-] Error on {f_id}: {e}")
@@ -455,12 +494,28 @@ def main():
             builder_s.export_catalogue_json(serafini_catalogue, base_out / "seraphinianus" / "seraphinianus_alphabet_catalogue.json")
             print(f"  [+] Seraphinianus Alphabet: {serafini_catalogue['canonical_alphabet_size']} canonical archetypes.")
 
-            # Load page JSONs for explorer generation
+            # Load page metadata for Grand Explorer assembly without memory bloat
             print("[*] Loading Seraphinianus page metadata for Grand Explorer assembly...")
             for p_json in sorted((base_out / "seraphinianus" / "pages").glob("*.json")):
                 try:
                     with open(p_json, "r", encoding="utf-8") as f:
-                        serafini_pages_data.append(json.load(f))
+                        d = json.load(f)
+                    p_id = d.get("page_id", p_json.stem)
+                    is_preload = (p_id in ["serafini_p000", "serafini_p030"])
+                    serafini_pages_data.append({
+                        "page_id": p_id,
+                        "page_img_rel": d.get("page_img_rel", f"seraphinianus/pages/{p_id}.jpg"),
+                        "json_rel": f"seraphinianus/pages/{p_id}.json",
+                        "image_width": d.get("image_width", 1600),
+                        "image_height": d.get("image_height", 2400),
+                        "line_count": d.get("line_count", len(d.get("lines", []))),
+                        "word_count": d.get("word_count", len(d.get("words", []))),
+                        "glyph_count": d.get("glyph_count", len(d.get("glyphs", []))),
+                        "yield_report": d.get("yield_report", {}),
+                        "lines": d.get("lines", []) if is_preload else [],
+                        "words": d.get("words", []) if is_preload else [],
+                        "glyphs": d.get("glyphs", []) if is_preload else [],
+                    })
                 except Exception:
                     pass
 

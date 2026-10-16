@@ -47,7 +47,8 @@ dependencies = [
     "matplotlib>=3.5.0",
     "click>=8.0.0",
     "tqdm>=4.64.0",
-    "pypdfium2>=4.0.0"
+    "pypdfium2>=4.0.0",
+    "opencv-python-headless>=4.7.0"
 ]
 
 [project.optional-dependencies]

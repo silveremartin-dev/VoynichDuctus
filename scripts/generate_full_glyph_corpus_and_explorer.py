@@ -25,7 +25,7 @@ from voynich_ductus.ingestion.transcription_reference import PaleographyYieldVal
 from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader
 
 
-def clean_page_data_for_json(pages_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def clean_page_data_for_json(pages_data: List[Dict[str, Any]], subfolder: str = "voynich") -> List[Dict[str, Any]]:
     clean_pages = []
     for p in pages_data:
         clean_lines = []
@@ -66,15 +66,16 @@ def clean_page_data_for_json(pages_data: List[Dict[str, Any]]) -> List[Dict[str,
                 "svg_content": g.get("svg_content", ""),
                 "canonical_type": g.get("canonical_type", "")
             })
+        p_id = p.get("page_id", "")
         clean_pages.append({
-            "page_id": p["page_id"],
-            "page_img_rel": p.get("page_img_rel", ""),
-            "json_rel": p.get("json_rel", ""),
+            "page_id": p_id,
+            "page_img_rel": p.get("page_img_rel") or f"{subfolder}/pages/{p_id}.jpg",
+            "json_rel": p.get("json_rel") or f"{subfolder}/pages/{p_id}.json",
             "image_width": p.get("image_width", 1500),
             "image_height": p.get("image_height", 2000),
-            "line_count": p["line_count"],
+            "line_count": p.get("line_count", len(clean_lines)),
             "word_count": p.get("word_count", len(clean_words)),
-            "glyph_count": p["glyph_count"],
+            "glyph_count": p.get("glyph_count", len(clean_glyphs)),
             "yield_report": p.get("yield_report", {}),
             "lines": clean_lines,
             "words": clean_words,
@@ -96,12 +97,12 @@ def generate_explorer_html(
     app_data = {
         "voynich": {
             "title": "Voynich Manuscript (Beinecke MS 408)",
-            "pages": clean_page_data_for_json(voynich_pages_data),
+            "pages": clean_page_data_for_json(voynich_pages_data, subfolder="voynich"),
             "catalogue": voynich_catalogue
         },
         "seraphinianus": {
             "title": "Codex Seraphinianus (Luigi Serafini, 1981)",
-            "pages": clean_page_data_for_json(serafini_pages_data),
+            "pages": clean_page_data_for_json(serafini_pages_data, subfolder="seraphinianus"),
             "catalogue": serafini_catalogue
         }
     }
@@ -1196,9 +1197,9 @@ def generate_explorer_html(
 
         function render() {{
             const msData = data[currentMs];
-            const totalGlyphs = msData.pages.reduce((acc, p) => acc + p.glyph_count, 0);
-            const totalLines = msData.pages.reduce((acc, p) => acc + p.line_count, 0);
-            const totalWords = msData.pages.reduce((acc, p) => acc + (p.words ? p.words.length : 0), 0);
+            const totalGlyphs = msData.pages.reduce((acc, p) => acc + (p.glyph_count || (p.glyphs ? p.glyphs.length : 0)), 0);
+            const totalLines = msData.pages.reduce((acc, p) => acc + (p.line_count || (p.lines ? p.lines.length : 0)), 0);
+            const totalWords = msData.pages.reduce((acc, p) => acc + (typeof p.word_count !== 'undefined' ? p.word_count : (p.words ? p.words.length : 0)), 0);
 
             document.getElementById('stats-bar').innerHTML = `
                 <div class="stat-card">
