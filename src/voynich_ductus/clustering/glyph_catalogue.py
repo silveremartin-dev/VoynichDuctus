@@ -342,14 +342,50 @@ class GlyphCatalogue:
 
             inlier_count = 0
             outlier_count = 0
+            rejection_bins_counts = {}
+
             for d_val, g_idx, g_item in sorted_pairs:
                 is_out = bool(d_val > max_allowed_dist and len(sorted_pairs) > 3)
                 g_item["medoid_distance"] = round(float(d_val), 3)
                 g_item["is_outlier"] = is_out
+
+                gw = float(g_item.get("width", 20))
+                gh = float(g_item.get("height", 20))
+                g_area = float(g_item.get("area", gw * gh))
+                g_stk = float(g_item.get("stroke_count", len(g_item.get("strokes", []))))
+
                 if is_out:
                     outlier_count += 1
+                    if corpus_type.lower() == "seraphinianus":
+                        if g_area > 1200 or gw > 90 or gh > 100:
+                            b_tag = "SERAFINI_ILLUSTRATION_BLEED"
+                        elif g_area < 16 or (gw <= 6 and gh <= 6):
+                            b_tag = "SERAFINI_SCANNER_SHADOW_SPECK"
+                        elif (gw / max(1.0, gh)) < 0.6 and gh <= 18:
+                            b_tag = "SERAFINI_DETACHED_DIACRITIC"
+                        elif gw > 75:
+                            b_tag = "SERAFINI_WORD_JUNCTION_MERGE"
+                        else:
+                            b_tag = "SERAFINI_IRREGULAR_CURSIVE"
+                    else:
+                        if g_area > 1100 or gw > 85 or gh > 95 or g_item.get("paint_fraction", 0.0) > 0.35:
+                            b_tag = "ILLUSTRATION_BLEED"
+                        elif (gw <= 6 and gh <= 6) or g_area < 15:
+                            b_tag = "PARCHMENT_FLAW_SPECK"
+                        elif (gw >= 2.2 * mean_width and gh >= 1.5 * mean_height) or g_area >= 2.8 * (mean_width * mean_height) or g_stk >= 3:
+                            b_tag = "SEGMENTATION_MERGE"
+                        elif g_area <= 0.28 * (mean_width * mean_height) or (gw <= 0.35 * mean_width and gh <= 0.6 * mean_height):
+                            b_tag = "SEGMENTATION_FRAGMENT"
+                        elif gw >= 1.8 * mean_width or gh >= 1.8 * mean_height:
+                            b_tag = "EXTREME_FLOURISH"
+                        else:
+                            b_tag = "HAPAX_ATYPICAL"
                 else:
                     inlier_count += 1
+                    b_tag = "INLIER_CONFORMANT"
+
+                g_item["outlier_bin"] = b_tag
+                rejection_bins_counts[b_tag] = rejection_bins_counts.get(b_tag, 0) + 1
 
             type_name = f"G{rank:02d}"
 
@@ -440,6 +476,7 @@ class GlyphCatalogue:
                     "png_rel": g.get("png_rel", ""),
                     "svg_rel": g.get("svg_rel", ""),
                     "is_outlier": g.get("is_outlier", False),
+                    "outlier_bin": g.get("outlier_bin", "INLIER_CONFORMANT"),
                     "medoid_distance": g.get("medoid_distance", 0.0)
                 })
 
@@ -459,6 +496,7 @@ class GlyphCatalogue:
                 "inliers_count": inlier_count,
                 "outliers_count": outlier_count,
                 "outlier_ratio": round(outlier_count / max(1, len(all_instances)), 3),
+                "rejection_bins": rejection_bins_counts,
                 "corpus_match": corpus_match,
                 "corpus_matches": multi_matches,
                 "total_instances_count": len(all_instances),
