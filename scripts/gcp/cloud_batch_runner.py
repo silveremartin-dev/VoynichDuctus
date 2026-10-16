@@ -93,10 +93,29 @@ def process_single_serafini_page(
     base_out_str: str
 ) -> Dict[str, Any]:
     """Worker function: executes topological loop-preserving extraction on a single Seraphinianus page."""
-    segmenter = GlyphSegmenter()
     base_out = Path(base_out_str)
     page_id = f"serafini_p{page_idx:03d}"
+    pages_dir = base_out / "seraphinianus" / "pages"
+    p_json = pages_dir / f"{page_id}.json"
+    p_jpg = pages_dir / f"{page_id}.jpg"
     
+    # Check if page was already extracted to avoid re-work
+    if p_json.exists() and p_jpg.exists():
+        try:
+            with open(p_json, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            return {
+                "page_id": page_id,
+                "line_count": d.get("line_count", 0),
+                "word_count": d.get("word_count", 0),
+                "glyph_count": d.get("glyph_count", 0),
+                "sample_glyphs": d.get("glyphs", [])[:15],
+                "cached": True
+            }
+        except Exception:
+            pass
+
+    segmenter = GlyphSegmenter()
     loader_s = PDFScanLoader(Path(pdf_path_str))
     # 1600px is crystal clear for digital PDF cursive and avoids multi-gigabyte memory spikes
     p_img = loader_s.get_page_image(page_idx, target_min_dim=1600)
@@ -106,7 +125,16 @@ def process_single_serafini_page(
         p_img = p_img.rotate(270, expand=True)
         
     res_s = segmenter.extract_page_glyphs(page_id, p_img, output_dir=base_out, subfolder="seraphinianus")
-    return res_s
+    
+    # Return ONLY lightweight summary across IPC boundary to keep parent memory near zero
+    return {
+        "page_id": page_id,
+        "line_count": res_s.get("line_count", 0),
+        "word_count": res_s.get("word_count", 0),
+        "glyph_count": res_s.get("glyph_count", 0),
+        "sample_glyphs": res_s.get("glyphs", [])[:15],
+        "cached": False
+    }
 
 
 def sync_to_gcs(local_dir: Path, bucket_name: str, gcs_prefix: str = "voynich_ductus/atlas_dataset", max_workers: int = 16):
@@ -318,7 +346,28 @@ def main():
             else:
                 pages = list(range(total_pages))
 
+            # Pre-sync any completed Seraphinianus pages from GCS if available
+            if args.gcs_bucket:
+                try:
+                    from google.cloud import storage
+                    client = storage.Client()
+                    bucket = client.bucket(args.gcs_bucket)
+                    prefix = f"{args.gcs_prefix}/seraphinianus/pages/"
+                    existing_blobs = list(bucket.list_blobs(prefix=prefix))
+                    if existing_blobs:
+                        print(f"[GCS] Found {len(existing_blobs)} existing Seraphinianus objects on GCS. Syncing to local cache...")
+                        pages_dir = base_out / "seraphinianus" / "pages"
+                        pages_dir.mkdir(parents=True, exist_ok=True)
+                        for b in existing_blobs:
+                            fname = Path(b.name).name
+                            dest = pages_dir / fname
+                            if not dest.exists():
+                                b.download_to_filename(str(dest))
+                except Exception as e:
+                    print(f"[GCS] Pre-sync notice: {e}")
+
             print(f"[*] Dispatching {len(pages)} Seraphinianus pages across {args.workers} workers...")
+            completed_count = 0
             with ProcessPoolExecutor(max_workers=args.workers) as executor:
                 future_to_page = {
                     executor.submit(process_single_serafini_page, p, str(pdf_path), str(base_out)): p
@@ -328,27 +377,35 @@ def main():
                     p_idx = future_to_page[future]
                     try:
                         res_s = future.result()
-                        serafini_pages_data.append(res_s)
-                        all_serafini_glyphs.extend(res_s.get("glyphs", []))
-                        print(f"  [+] Completed page {p_idx}: {res_s['line_count']} lines, {res_s['word_count']} words, {res_s['glyph_count']} glyphs.")
+                        all_serafini_glyphs.extend(res_s.get("sample_glyphs", []))
+                        completed_count += 1
+                        status_str = "CACHED" if res_s.get("cached") else "Extracted"
+                        print(f"  [+] ({completed_count}/{len(pages)}) {status_str} page {p_idx}: {res_s['line_count']} lines, {res_s['word_count']} words, {res_s['glyph_count']} glyphs.")
+                        
+                        # Checkpoint sync to GCS every 40 pages
+                        if args.gcs_bucket and completed_count % 40 == 0:
+                            print(f"  [*] Checkpoint sync ({completed_count}/{len(pages)}) to GCS...")
+                            sync_to_gcs(base_out / "seraphinianus" / "pages", args.gcs_bucket, f"{args.gcs_prefix}/seraphinianus/pages")
                     except Exception as e:
                         print(f"  [-] Error on page {p_idx}: {e}")
 
-            serafini_pages_data.sort(key=lambda p: p["page_id"])
-            print(f"[*] Inducing Seraphinianus Alphabet Catalogue across {len(all_serafini_glyphs)} extracted glyphs...")
-            sample_glyphs = all_serafini_glyphs
-            if len(all_serafini_glyphs) > 10000:
-                step = len(all_serafini_glyphs) // 10000
-                sample_glyphs = all_serafini_glyphs[::step][:10000]
-                print(f"  [i] Subsampled {len(sample_glyphs)} representative glyphs for density clustering.")
+            if args.gcs_bucket:
+                sync_to_gcs(base_out / "seraphinianus" / "pages", args.gcs_bucket, f"{args.gcs_prefix}/seraphinianus/pages")
+
+            print(f"[*] Inducing Seraphinianus Alphabet Catalogue across {len(all_serafini_glyphs)} sample glyphs...")
             builder_s = GlyphCatalogue(target_alphabet_size=52)
-            serafini_catalogue = builder_s.build_catalogue(sample_glyphs, corpus_type="seraphinianus")
+            serafini_catalogue = builder_s.build_catalogue(all_serafini_glyphs, corpus_type="seraphinianus")
             builder_s.export_catalogue_json(serafini_catalogue, base_out / "seraphinianus" / "seraphinianus_alphabet_catalogue.json")
             print(f"  [+] Seraphinianus Alphabet: {serafini_catalogue['canonical_alphabet_size']} canonical archetypes.")
 
-            if args.gcs_bucket:
-                print("[*] Checkpoint sync: Syncing completed Seraphinianus corpus to GCS...")
-                sync_to_gcs(base_out / "seraphinianus", args.gcs_bucket, f"{args.gcs_prefix}/seraphinianus")
+            # Load page JSONs for explorer generation
+            print("[*] Loading Seraphinianus page metadata for Grand Explorer assembly...")
+            for p_json in sorted((base_out / "seraphinianus" / "pages").glob("*.json")):
+                try:
+                    with open(p_json, "r", encoding="utf-8") as f:
+                        serafini_pages_data.append(json.load(f))
+                except Exception:
+                    pass
 
     # -------------------------------------------------------------
     # 4. Generate Interactive Grand Explorer Application
