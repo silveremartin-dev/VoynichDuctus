@@ -198,7 +198,15 @@ class GlyphCatalogue:
         longest_s = max(strokes, key=lambda s: len(s.get("points", [])))
         l_pts = longest_s.get("points", [])
 
-        # 1. Closed loop check (endpoints distance or mask hole)
+        # 1. Tall ascender or Gallows (e.g., 'b', 'd', 'k', 't', gallows ligatures)
+        # MUST precede closed loop check: an ascender glyph with a bowl (like 'b' or 'd')
+        # must NEVER be clustered with a flat x-height oval (like 'o' or 'a')!
+        if gh >= 1.35 * gw and gh >= 24:
+            return "TALL_GALLOWS"
+        if stroke_count >= 2 and gh >= 28:
+            return "TALL_GALLOWS"
+
+        # 2. Closed loop check (endpoints distance or mask hole) for flat x-height bodies ('o', 'a' bowl)
         if len(l_pts) >= 5:
             p0 = np.array(l_pts[0][:2])
             p_end = np.array(l_pts[-1][:2])
@@ -214,10 +222,6 @@ class GlyphCatalogue:
             holes = filled & (~g_mask)
             if np.sum(holes) >= 3:
                 return "CLOSED_LOOP"
-
-        # 2. Tall ascender or Gallows
-        if gh >= 1.45 * gw or (stroke_count >= 2 and gh >= 28):
-            return "TALL_GALLOWS"
 
         # 3. Wide horizontal bench
         if aspect >= 1.4 and gw >= 30:
@@ -331,6 +335,22 @@ class GlyphCatalogue:
             sorted_pairs = sorted(zip(dists, indices, cluster_glyphs), key=lambda x: x[0])
             cluster_glyphs = [p[2] for p in sorted_pairs]
 
+            # Outlier quarantine: evaluate distance from medoid
+            # Glyphs deviating from cluster center are flagged as OUTLIER_SUSPECT
+            med_dist = float(np.median(dists)) if len(dists) > 0 else 1.0
+            max_allowed_dist = self.distance_threshold if self.distance_threshold is not None else max(2.6, med_dist * 2.5)
+
+            inlier_count = 0
+            outlier_count = 0
+            for d_val, g_idx, g_item in sorted_pairs:
+                is_out = bool(d_val > max_allowed_dist and len(sorted_pairs) > 3)
+                g_item["medoid_distance"] = round(float(d_val), 3)
+                g_item["is_outlier"] = is_out
+                if is_out:
+                    outlier_count += 1
+                else:
+                    inlier_count += 1
+
             type_name = f"G{rank:02d}"
 
             # Tag all members with canonical type
@@ -418,7 +438,9 @@ class GlyphCatalogue:
                     "height": int(g.get("height", 0)),
                     "stroke_count": int(g.get("stroke_count", len(g.get("strokes", [])))),
                     "png_rel": g.get("png_rel", ""),
-                    "svg_rel": g.get("svg_rel", "")
+                    "svg_rel": g.get("svg_rel", ""),
+                    "is_outlier": g.get("is_outlier", False),
+                    "medoid_distance": g.get("medoid_distance", 0.0)
                 })
 
             alphabet_entries.append({
@@ -434,6 +456,9 @@ class GlyphCatalogue:
                 "mean_strokes": mean_strokes,
                 "mean_height": mean_height,
                 "mean_width": mean_width,
+                "inliers_count": inlier_count,
+                "outliers_count": outlier_count,
+                "outlier_ratio": round(outlier_count / max(1, len(all_instances)), 3),
                 "corpus_match": corpus_match,
                 "corpus_matches": multi_matches,
                 "total_instances_count": len(all_instances),
