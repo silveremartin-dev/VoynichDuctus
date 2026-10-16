@@ -562,7 +562,7 @@ def generate_explorer_html(
         }}
         .catalogue-trio {{
             display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-columns: 1fr 1fr;
             gap: 8px;
         }}
         .c-box {{
@@ -2565,12 +2565,8 @@ def generate_explorer_html(
                     ${{schemesSummaryHtml}}
                     <div class="catalogue-trio">
                         <div class="c-box">
-                            <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">EXEMPLAR</span>
-                            <img src="${{a.exemplar_png}}" alt="${{a.type_id}}">
-                        </div>
-                        <div class="c-box">
-                            <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">DUCTUS</span>
-                            ${{a.exemplar_svg_content}}
+                            <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">KINEMATIC DUCTUS</span>
+                            ${{a.exemplar_svg_content || '<div style="color:var(--text-muted); font-size:0.7rem; padding:10px;">(Ductus)</div>'}}
                         </div>
                         ${{refSvgElem}}
                     </div>
@@ -2579,7 +2575,7 @@ def generate_explorer_html(
                         <div style="margin-top:2px; font-size:0.70rem;">Exemplar ID: <code>${{a.exemplar_id}}</code></div>
                     </div>
                     <button class="btn-variations" onclick="event.stopPropagation(); openArchetypeVariations('${{a.type_id}}')">
-                        View All ${{a.total_instances_count || a.frequency}} Variations Across Pages ➔
+                        View Variations & Folio Occurrences (${{a.sample_instances ? a.sample_instances.length : 0}} samples) ➔
                     </button>
                 </div>
             `;
@@ -2664,17 +2660,21 @@ def generate_explorer_html(
             `;
             document.getElementById('modal-banner').innerHTML = bannerHtml;
 
-            const instances = arch.all_instances || [];
-            document.getElementById('modal-count-header').innerText = `All ${{instances.length}} Variations Across Folios (Click any item to locate on page)`;
+            const instances = (arch.sample_instances && arch.sample_instances.length > 0) ? arch.sample_instances : (arch.all_instances || []);
+            document.getElementById('modal-count-header').innerText = `Archetype Occurrences (${{instances.length}} Variations across Folios) — Click any item to locate & view on page`;
 
             const varGrid = document.getElementById('modal-variations-grid');
             varGrid.innerHTML = instances.map(inst => `
-                <div class="var-card" onclick="locateInstanceFromModal('${{inst.glyph_id}}', '${{inst.page_id}}')">
-                    <img src="${{inst.png_rel}}" alt="${{inst.glyph_id}}">
-                    <div class="loc">${{inst.page_id}}</div>
-                    <div class="coords">[${{inst.bbox[0]}}, ${{inst.bbox[1]}}]</div>
-                    <div style="font-size:0.62rem; color:var(--text-muted);">${{inst.stroke_count}} stroke(s)</div>
-                    <button class="btn-locate">📍 Locate on Page</button>
+                <div class="var-card" onclick="locateInstanceFromModal('${{inst.glyph_id}}', '${{inst.page_id}}')" title="Click to view and zoom on ${{inst.page_id}}">
+                    <div style="font-size:0.82rem; font-weight:bold; color:var(--accent); margin-bottom:2px;">${{inst.page_id}}</div>
+                    <div style="background:#0f172a; border:1px solid #1e293b; border-radius:4px; padding:6px; width:100%; text-align:center; margin:4px 0;">
+                        <div style="font-size:0.65rem; color:var(--text-muted);">Glyph ID</div>
+                        <div style="font-size:0.70rem; font-family:monospace; color:#38bdf8; overflow:hidden; text-overflow:ellipsis;">${{inst.glyph_id ? inst.glyph_id.split('_').slice(-2).join('_') : 'Glyph'}}</div>
+                        <div style="font-size:0.62rem; color:var(--text-muted); margin-top:2px;">${{inst.width}}×${{inst.height}} px</div>
+                    </div>
+                    <div class="coords">[y:${{inst.bbox ? inst.bbox[0] : 0}}, x:${{inst.bbox ? inst.bbox[1] : 0}}]</div>
+                    <div style="font-size:0.62rem; color:var(--success); font-weight:600;">${{inst.stroke_count || 1}} stroke(s)</div>
+                    <button class="btn-locate">📍 Locate on ${{inst.page_id}}</button>
                 </div>
             `).join('');
 
@@ -2693,22 +2693,21 @@ def generate_explorer_html(
             }}
         }}
 
-        function locateInstanceFromModal(glyphId, pageId) {{
+        async function locateInstanceFromModal(glyphId, pageId) {{
             closeVariationsModal();
             const msData = data[currentMs];
             const pIdx = msData.pages.findIndex(p => p.page_id === pageId);
             if (pIdx !== -1) {{
-                currentPageIdx = pIdx;
                 if (currentTab !== 'pages') {{
                     setTab('pages');
-                }} else {{
-                    renderPagesTab();
                 }}
-                
+                await selectPage(pIdx);
                 const page = msData.pages[pIdx];
-                const g = page.glyphs.find(x => x.glyph_id === glyphId);
-                if (g) {{
-                    selectGlyph(g, true);
+                if (page && page.glyphs) {{
+                    const g = page.glyphs.find(x => x.glyph_id === glyphId);
+                    if (g) {{
+                        selectGlyph(g, true);
+                    }}
                 }}
             }}
         }}

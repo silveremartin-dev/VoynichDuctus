@@ -18,9 +18,37 @@ from generate_full_glyph_corpus_and_explorer import generate_explorer_html
 
 
 def clean_catalogue_for_embed(cat_dict: dict) -> dict:
-    """Retains full archetype metadata, exemplars and transliteration alignments while omitting massive instance lists."""
+    """Retains full archetype metadata, exemplars and transliteration alignments while embedding rich sample instances."""
     cleaned_alphabet = []
     for arch in cat_dict.get("alphabet", []):
+        all_inst = arch.get("all_instances", [])
+        samples = []
+        if all_inst:
+            for inst in all_inst[:24]:
+                samples.append({
+                    "glyph_id": inst.get("glyph_id", ""),
+                    "page_id": inst.get("page_id", ""),
+                    "line_id": inst.get("line_id", ""),
+                    "word_id": inst.get("word_id", ""),
+                    "bbox": inst.get("bbox", [0, 0, 0, 0]),
+                    "width": inst.get("width", 0),
+                    "height": inst.get("height", 0),
+                    "stroke_count": inst.get("stroke_count", 1)
+                })
+        elif arch.get("sample_instances"):
+            for item in arch.get("sample_instances", [])[:24]:
+                if isinstance(item, dict):
+                    samples.append(item)
+                else:
+                    samples.append({
+                        "glyph_id": str(item),
+                        "page_id": str(item).split("_")[0] if "_" in str(item) else "",
+                        "bbox": [0, 0, 0, 0],
+                        "width": arch.get("mean_width", 20),
+                        "height": arch.get("mean_height", 25),
+                        "stroke_count": arch.get("mean_strokes", 1)
+                    })
+
         cleaned_alphabet.append({
             "type_id": arch.get("type_id"),
             "rank": arch.get("rank"),
@@ -37,7 +65,7 @@ def clean_catalogue_for_embed(cat_dict: dict) -> dict:
             "corpus_match": arch.get("corpus_match"),
             "corpus_matches": arch.get("corpus_matches"),
             "total_instances_count": arch.get("total_instances_count", arch.get("frequency", 0)),
-            "sample_instances": arch.get("sample_instances", [])[:15]
+            "sample_instances": samples
         })
     return {
         "total_glyphs": cat_dict.get("total_glyphs", 0),
