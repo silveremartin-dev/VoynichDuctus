@@ -43,6 +43,25 @@ def process_single_voynich_folio(
     # 2x Lanczos upscale for crisp pen stroke resolution (1272x1800)
     img = raw_img.resize((raw_img.width * 2, raw_img.height * 2), Image.Resampling.LANCZOS)
     
+    # Check for authentic Yale HD Master plate
+    yale_img = None
+    yale_dir = Path("data/scans/voynich/yale")
+    if yale_dir.exists():
+        import re
+        m = re.match(r"f0*(\d+)([rv]\d*)?", folio_id.lower())
+        if m:
+            num = int(m.group(1))
+            sfx = m.group(2) or "r"
+            cand_names = [f"f{num:03d}{sfx}.jpg", f"f{num}{sfx}.jpg", f"{folio_id}.jpg"]
+            for cn in cand_names:
+                ypath = yale_dir / cn
+                if ypath.exists():
+                    try:
+                        yale_img = Image.open(ypath).convert("RGB")
+                        break
+                    except Exception:
+                        pass
+
     # Reconstruct RosettaWord objects if provided
     r_words = None
     if rosetta_words_serialized:
@@ -60,6 +79,44 @@ def process_single_voynich_folio(
                 bbox_scan=tuple(d["bbox_scan"]) if d.get("bbox_scan") else None
             ))
 
+    # If Yale HD is available and we have ground truth words, use SIFT/RANSAC alignment
+    if yale_img is not None and r_words:
+        try:
+            from voynich_ductus.ingestion.image_registration import MultimodalFolioAligner
+            aligner = MultimodalFolioAligner(cache_dir="intermediate/test_cache/registration")
+            reg = aligner.compute_registration(raw_img, yale_img, folio_id=folio_id)
+            if reg and reg.get("status") == "success":
+                mat = np.array(reg["matrix_2x3"], dtype=np.float64)
+                yale_r_words = []
+                for rw in r_words:
+                    if rw.bbox_scan:
+                        # rw.bbox_scan is in glance coordinates (or 2x upscaled)
+                        # glance native is raw_img size
+                        transformed_bbox = aligner.transform_bbox(rw.bbox_scan, mat)
+                        from voynich_ductus.ingestion.voynichese_rosetta import RosettaWord
+                        yale_r_words.append(RosettaWord(
+                            folio=rw.folio,
+                            index=rw.index,
+                            eva_text=rw.eva_text,
+                            x_xml=rw.x_xml,
+                            y_xml=rw.y_xml,
+                            width_xml=rw.width_xml,
+                            height_xml=rw.height_xml,
+                            bbox_scan=transformed_bbox
+                        ))
+                res = segmenter.extract_page_glyphs_with_ground_truth(
+                    page_id=folio_id,
+                    image=yale_img,
+                    rosetta_words=yale_r_words,
+                    output_dir=base_out,
+                    subfolder="voynich"
+                )
+                print(f"  [HD] Aligned {folio_id} on Yale Master scan ({yale_img.width}x{yale_img.height}).")
+                return res
+        except Exception as e:
+            print(f"  [i] Yale HD registration fallback for {folio_id}: {e}")
+
+    # Fallback to 2x Lanczos glance image
     if r_words:
         res = segmenter.extract_page_glyphs_with_ground_truth(
             page_id=folio_id,

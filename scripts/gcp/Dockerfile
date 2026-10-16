@@ -38,6 +38,8 @@ RUN pip install -e .
 COPY data/annotations/ /app/data/annotations/
 COPY data/scans/seraphinianus/ /app/data/scans/seraphinianus/
 COPY data/scans/voynich/voynichese_scans/ /app/data/scans/voynich/voynichese_scans/
+COPY data/scans/voynich/yale/ /app/data/scans/voynich/yale/
+COPY intermediate/test_cache/registration/ /app/intermediate/test_cache/registration/
 
 # Create runtime scratch and output directories
 RUN mkdir -p /app/output /app/cache /tmp/matplotlib && chmod -R 777 /app/output /app/cache /tmp/matplotlib
