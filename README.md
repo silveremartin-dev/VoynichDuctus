@@ -184,45 +184,56 @@ python scripts/generate_full_glyph_corpus_and_explorer.py
 
 ---
 
-## 10. Project Structure
+## 10. Project Structure & Clean Tier Architecture
+
+The repository enforces a strict separation of concerns across 4 distinct tiers:
 
 ```
 VoynichDuctus/
-├── data/
+├── data/                        # TIER 1: Pure Input Data (Raw inputs only)
 │   ├── annotations/voynichese/  # 225-folio Voynichese Rosetta ground truth dataset
-│   └── scans/                   # Local HD scans & PDFs (Voynich, Seraphinianus, Gallica)
-├── docs/                        # Paleographic documentation and synthesis guides
-├── output/
-│   ├── atlas_dataset/           # grand_glyph_explorer.html & extracted glyph database
-│   ├── diagnostics/             # comprehensive_diagnostics_report.json
-│   ├── models/                  # Trained PyTorch neural checkpoints (.pt)
-│   └── training_plates/         # High-resolution kinematic calibration inspection plates
+│   └── scans/                   # Raw scans & PDFs (Voynich Beinecke, Seraphinianus, Gallica)
+├── intermediate/                # TIER 2: Intermediate Products & Build Caches
+│   ├── diagnostics/             # Intermediate diagnostic metrics and JSON summaries
+│   ├── models/                  # Trained PyTorch neural checkpoints (ScribalFlowNet, etc.)
+│   └── test_gallica_cache/      # Gallica IIIF plate download caches
+├── output/                      # TIER 3: Final Deliverables (User-Facing)
+│   └── atlas_dataset/           # grand_glyph_explorer.html & zero-waste paired page assets
+├── releases/                    # TIER 4: Partitioned Distribution Archives (< 100 MB)
+│   └── dataset_zips/            # voyage_coords_part*.zip & seraphini_coords_part*.zip
 ├── scripts/
-│   ├── generate_full_glyph_corpus_and_explorer.py
-│   ├── generate_training_plates_and_train.py
+│   ├── build_dynamic_grand_explorer.py
+│   ├── package_dataset_releases.py
+│   ├── unpack_dataset.py
 │   └── run_comprehensive_diagnostics.py
 ├── src/voynich_ductus/
 │   ├── clustering/              # Unsupervised density clustering & catalogue builder
 │   ├── diagnostics/             # Shannon H1/H2, Hurst DFA, Lempel-Ziv, Markov FSA
 │   ├── embeddings/              # 16-D geometric features, DINOv2 adapter, ScribalFlowNet
 │   ├── generators/              # Timm self-citation, Rugg Cardan grille, Latin herbal baselines
-│   ├── ingestion/               # Yale IIIF client, Gallica client, Sauvola binarizer, segmenter
+│   ├── ingestion/               # MultimodalFolioAligner (SIFT/RANSAC), IIIF, Sauvola
 │   ├── models/                  # MedievalScribalTrainer (supervised & triplet loss)
-│   ├── utils/                   # Vector exporter, SVG renderers, formatters
 │   └── vectorizer/              # CalligraphicVectorizer (40° nib), comparative engines
-└── tests/                       # Complete pytest suite (45/45 passing)
+└── tests/                       # Complete pytest suite (50/50 passing)
 ```
 
 ---
 
-## 11. Acknowledgments & References
+## 11. Public Datasets, Archive.org Links & Copyright Policy
 
-- **[Yale University Beinecke Library](https://beinecke.library.yale.edu/)**: High-resolution IIIF scans of Beinecke MS 408.
-- **[Bibliothèque nationale de France (BnF Gallica)](https://gallica.bnf.fr/)**: Medieval Latin herbal reference codices (*Latin 6823, Latin 6862, Français 12322*).
-- **[The Voynichese Project](https://github.com/voynichese/voynichese)**: Curated EVA word-level ground truth annotations (Apache-2.0).
-- **Luigi Serafini**: Creator of the *Codex Seraphinianus* (1981).
+- **Voynich Manuscript (Beinecke MS 408)**:
+  - **Status**: Public Domain (Early 15th Century, carbon-dated 1404–1438 AD).
+  - **Archive.org Master Scan**: [The Voynich Manuscript on Archive.org](https://archive.org/details/TheVoynichManuscript)
+  - **Yale Beinecke High-Res Collection**: [Yale Beinecke Digital Library](https://beinecke.library.yale.edu/)
+- **Codex Seraphinianus (Luigi Serafini, 1981)**:
+  - **Status**: Under exclusive copyright (Luigi Serafini / Franco Maria Ricci).
+  - **Copyright Policy**: To strictly respect author intellectual property, **no raster page scans of the *Codex Seraphinianus* are distributed or hosted in this repository**. Only derived mathematical vector annotations and stroke coordinate graphs (`.json`) are published for academic and computational linguistic research.
+  - **Archive.org Scan for Local Testing**: [Luigi Serafini — Codex Seraphinianus on Archive.org](https://archive.org/details/Luigi.Serafini..Codex.Seraphinianus_201608/page/n315/mode/2up)
+- **BnF Gallica Medieval Codices**:
+  - **Status**: Public Domain (Digitized by Bibliothèque nationale de France). Codices *Latin 6823, Latin 6862, Français 12322*.
+- **The Voynichese Project**:
+  - Curated word-level ground truth coordinates (Apache-2.0).
 - **Torsten Timm & Gordon Rugg**: Foundational research on scribal self-citation and Cardan grille mechanics.
-- **Landini, Stolfi, Currier, and Takahashi**: Historical transliteration censuses and comparative statistics.
 
 ---
 

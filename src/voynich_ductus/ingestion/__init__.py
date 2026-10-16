@@ -9,6 +9,7 @@ from voynich_ductus.ingestion.transcription_reference import TranscriptionRefere
 from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
 
 from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader, RosettaWord
+from voynich_ductus.ingestion.image_registration import MultimodalFolioAligner
 
 __all__ = [
     "IIIFClient",
@@ -21,6 +22,7 @@ __all__ = [
     "GlyphSegmenter",
     "VoynicheseRosettaLoader",
     "RosettaWord",
+    "MultimodalFolioAligner",
 ]
 
 

@@ -77,7 +77,7 @@ def run_diagnostics():
     results = suite.compare_corpora(corpora)
 
     # Save JSON summary
-    out_dir = Path("output/diagnostics")
+    out_dir = Path("intermediate/diagnostics")
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path = out_dir / "comprehensive_diagnostics_report.json"
     with open(json_path, "w", encoding="utf-8") as f:

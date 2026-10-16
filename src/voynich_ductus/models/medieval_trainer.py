@@ -285,7 +285,7 @@ class MedievalScribalTrainer:
         self,
         epochs: int = 15,
         batch_size: int = 32,
-        save_path: Optional[Union[str, Path]] = "output/models/scribal_flow_net.pt"
+        save_path: Optional[Union[str, Path]] = "intermediate/models/scribal_flow_net.pt"
     ) -> Dict[str, Any]:
         """
         Trains ScribalKinematicFlowNet over multiple epochs and persists model weights.
@@ -323,7 +323,7 @@ class MedievalScribalTrainer:
         self,
         epochs: int = 15,
         batch_size: int = 32,
-        save_path: Optional[Union[str, Path]] = "output/models/scribal_contrastive_net.pt"
+        save_path: Optional[Union[str, Path]] = "intermediate/models/scribal_contrastive_net.pt"
     ) -> Dict[str, Any]:
         """
         Trains ScribalContrastiveEmbeddingNet over multiple epochs and persists model weights.

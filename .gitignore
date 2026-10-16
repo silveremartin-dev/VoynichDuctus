@@ -37,14 +37,16 @@ venv.bak/
 
 # Data and large downloads
 data/*
+!data/README.md
 !data/annotations/
 !data/annotations/**
 scans/
 scan/
 downloads/
-raw_scans/
 output/
-*.tiff
+intermediate/
+releases/
+*.zip
 *.tif
 *.pdf
 *.jpg

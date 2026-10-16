@@ -94,7 +94,7 @@ def train_medieval_models():
             print(f"Epoch {epoch:02d}/50: Triplet Loss = {loss_dict.get('triplet_loss', 0.0):.4f} | Accuracy = {loss_dict.get('triplet_accuracy', 1.0):.2%}")
 
     # Save checkpoints
-    out_models = Path("output/models")
+    out_models = Path("intermediate/models")
     out_models.mkdir(parents=True, exist_ok=True)
     torch.save(flow_net._model.state_dict(), out_models / "scribal_flow_net.pt")
     torch.save(emb_net._model.state_dict(), out_models / "scribal_contrastive_net.pt")

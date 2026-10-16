@@ -26,7 +26,7 @@ def test_gallica_client_ark_normalization():
 
 
 def test_gallica_client_synthetic_fallback():
-    client = GallicaManuscriptClient(cache_dir="output/test_gallica_cache")
+    client = GallicaManuscriptClient(cache_dir="intermediate/test_gallica_cache")
     # Test downloading synthetic fallback folio
     img = client.load_folio_image("latin_6823", page_num=12, target_width=1000)
     assert img is not None
