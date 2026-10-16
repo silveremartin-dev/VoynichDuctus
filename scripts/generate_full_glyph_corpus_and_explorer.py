@@ -69,6 +69,7 @@ def clean_page_data_for_json(pages_data: List[Dict[str, Any]]) -> List[Dict[str,
         clean_pages.append({
             "page_id": p["page_id"],
             "page_img_rel": p.get("page_img_rel", ""),
+            "json_rel": p.get("json_rel", ""),
             "image_width": p.get("image_width", 1500),
             "image_height": p.get("image_height", 2000),
             "line_count": p["line_count"],
@@ -753,7 +754,12 @@ def generate_explorer_html(
         <div id="view-pages" class="page-view-layout">
             <!-- 1. Pages List -->
             <div class="panel">
-                <h3>Processed Folios</h3>
+                <h3>Processed Folios <span id="pages-count-badge" style="font-size:0.75rem; color:var(--text-muted); font-weight:normal;"></span></h3>
+                <div style="margin-bottom:8px;">
+                    <input id="page-search-input" type="text" placeholder="🔍 Search folio/page... (e.g. 30, f4r)" 
+                           style="background:#0b1120; border:1px solid var(--border); color:#fff; font-size:0.75rem; padding:6px 10px; border-radius:6px; width:100%; box-sizing:border-box;" 
+                           oninput="renderPagesTab()">
+                </div>
                 <div id="yield-panel"></div>
                 <div id="pages-list" style="overflow-y:auto; flex:1;"></div>
             </div>
@@ -1113,6 +1119,10 @@ def generate_explorer_html(
         function setManuscript(ms) {{
             currentMs = ms;
             currentPageIdx = 0;
+            if (ms === 'seraphinianus') {{
+                const idx30 = data[ms].pages.findIndex(p => p.page_id === 'serafini_p030');
+                if (idx30 >= 0) currentPageIdx = idx30;
+            }}
             selectedGlyph = null;
             selectedWord = null;
             archetypeFilterVal = 'ALL';
@@ -1121,11 +1131,16 @@ def generate_explorer_html(
             panX = 0;
             panY = 0;
             
+            const filterInput = document.getElementById('page-search-input');
+            if (filterInput) filterInput.value = '';
+
             document.getElementById('btn-voynich').className = ms === 'voynich' ? 'btn-toggle active-voynich' : 'btn-toggle';
             document.getElementById('btn-serafini').className = ms === 'seraphinianus' ? 'btn-toggle active-serafini' : 'btn-toggle';
             
             populateAlphabetSchemeOptions();
-            render();
+            ensurePageLoaded(currentMs, currentPageIdx).then(() => {{
+                render();
+            }});
         }}
 
         function setTab(tab) {{
@@ -1221,20 +1236,83 @@ def generate_explorer_html(
             }}
         }}
 
+        const pageLoadCache = new Map();
+        let isLoadingPage = false;
+
+        async function ensurePageLoaded(ms, idx) {{
+            const page = data[ms].pages[idx];
+            if (!page) return null;
+            if (page.glyphs && page.glyphs.length > 0) return page;
+
+            const cacheKey = `${{ms}}_${{page.page_id}}`;
+            if (pageLoadCache.has(cacheKey)) {{
+                const cached = pageLoadCache.get(cacheKey);
+                Object.assign(page, cached);
+                return page;
+            }}
+
+            try {{
+                isLoadingPage = true;
+                const resp = await fetch(page.json_rel);
+                if (resp.ok) {{
+                    const fullData = await resp.json();
+                    page.lines = fullData.lines || [];
+                    page.words = fullData.words || [];
+                    page.glyphs = fullData.glyphs || [];
+                    page.yield_report = fullData.yield_report || {{}};
+                    pageLoadCache.set(cacheKey, {{
+                        lines: page.lines,
+                        words: page.words,
+                        glyphs: page.glyphs,
+                        yield_report: page.yield_report
+                    }});
+                }}
+            }} catch (err) {{
+                console.warn(`Dynamic load notice for ${{page.page_id}}:`, err);
+            }} finally {{
+                isLoadingPage = false;
+            }}
+            return page;
+        }}
+
+        async function selectPage(idx) {{
+            currentPageIdx = idx;
+            selectedGlyph = null;
+            selectedWord = null;
+            zoomScale = 1.0;
+            panX = 0;
+            panY = 0;
+            await ensurePageLoaded(currentMs, idx);
+            renderPagesTab();
+        }}
+
         function renderPagesTab() {{
             const msData = data[currentMs];
+            const filterInput = document.getElementById('page-search-input');
+            const filterText = filterInput ? filterInput.value.toLowerCase().trim() : '';
+            const badge = document.getElementById('pages-count-badge');
+            if (badge) badge.textContent = `(${{msData.pages.length}} total)`;
+
             const pagesList = document.getElementById('pages-list');
-            pagesList.innerHTML = msData.pages.map((p, idx) => `
-                <div class="page-item ${{idx === currentPageIdx ? 'active' : ''}}" onclick="selectPage(${{idx}})">
-                    <div>
-                        <strong>${{p.page_id}}</strong>
-                        <div style="font-size:0.72rem; color:var(--text-muted);">${{p.line_count}} lines, ${{p.words ? p.words.length : 0}} words</div>
+            const items = [];
+            for (let idx = 0; idx < msData.pages.length; idx++) {{
+                const p = msData.pages[idx];
+                if (filterText && !p.page_id.toLowerCase().includes(filterText)) continue;
+                const wCount = (typeof p.word_count !== 'undefined') ? p.word_count : (p.words ? p.words.length : 0);
+                items.push(`
+                    <div class="page-item ${{idx === currentPageIdx ? 'active' : ''}}" onclick="selectPage(${{idx}})">
+                        <div>
+                            <strong>${{p.page_id}}</strong>
+                            <div style="font-size:0.72rem; color:var(--text-muted);">${{p.line_count}} lines, ${{wCount}} words</div>
+                        </div>
+                        <span class="badge-freq">${{p.glyph_count}} glyphs</span>
                     </div>
-                    <span class="badge-freq">${{p.glyph_count}} glyphs</span>
-                </div>
-            `).join('');
+                `);
+            }}
+            pagesList.innerHTML = items.join('');
 
             const page = msData.pages[currentPageIdx];
+            if (!page) return;
             const yr = page.yield_report;
             const yieldPanel = document.getElementById('yield-panel');
             if (yr && yr.has_reference) {{
@@ -1277,16 +1355,6 @@ def generate_explorer_html(
             archetypeFilterVal = val;
             renderGlyphGrid();
             drawCanvasOverlay();
-        }}
-
-        function selectPage(idx) {{
-            currentPageIdx = idx;
-            selectedGlyph = null;
-            selectedWord = null;
-            zoomScale = 1.0;
-            panX = 0;
-            panY = 0;
-            renderPagesTab();
         }}
 
         const cropCache = new Map();
