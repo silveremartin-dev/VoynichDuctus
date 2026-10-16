@@ -390,8 +390,11 @@ class GlyphSegmenter:
                 c["c_center"] = float(np.mean(cols))
 
         M = len(main_comps)
-        single_glyph_max_w = 26
-        min_glyph_w = 9
+        # Resolution-adaptive scaling: adapts to low-res glance (H~35px) and Yale Beinecke HD (H~90-140px)
+        scale_ref = max(1.0, H / 35.0)
+        single_glyph_max_w = int(round(28 * scale_ref))
+        min_glyph_w = int(round(9 * scale_ref))
+        peak_win = int(round(14 * scale_ref))
 
         # Determine target splits if expected_glyph_count (K) is provided and exceeds CC count
         extra_splits_needed = 0
@@ -436,7 +439,7 @@ class GlyphSegmenter:
                 continue
             c_left, c_right = int(cols[0]), int(cols[-1])
             col_proj = np.sum(c_mask, axis=0).astype(float)
-            smoothed = gaussian_filter1d(col_proj, sigma=1.2)
+            smoothed = gaussian_filter1d(col_proj, sigma=max(1.2, 1.2 * scale_ref * 0.7))
 
             # Find genuine ligature valleys (inter-character connection necks)
             valleys = []
@@ -444,8 +447,8 @@ class GlyphSegmenter:
                 if x in forbidden_cols:
                     continue
                 if smoothed[x] <= smoothed[x - 1] and smoothed[x] <= smoothed[x + 1]:
-                    l_peak = np.max(col_proj[max(c_left, x - 14):x]) if x > c_left else 1.0
-                    r_peak = np.max(col_proj[x:min(c_right, x + 14)]) if x < c_right else 1.0
+                    l_peak = np.max(col_proj[max(c_left, x - peak_win):x]) if x > c_left else 1.0
+                    r_peak = np.max(col_proj[x:min(c_right, x + peak_win)]) if x < c_right else 1.0
                     m_peak = min(l_peak, r_peak)
                     # Significant dip in ink height
                     if m_peak > 0 and (col_proj[x] / m_peak) <= 0.65:

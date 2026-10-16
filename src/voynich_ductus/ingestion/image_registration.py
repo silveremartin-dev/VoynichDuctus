@@ -19,7 +19,7 @@ class MultimodalFolioAligner:
     and robust RANSAC affine consensus.
     """
 
-    def __init__(self, cache_dir: Optional[Union[str, Path]] = "data/annotations/voynichese/registration_cache"):
+    def __init__(self, cache_dir: Optional[Union[str, Path]] = "intermediate/registration_cache"):
         self.cache_dir = Path(cache_dir) if cache_dir else None
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)

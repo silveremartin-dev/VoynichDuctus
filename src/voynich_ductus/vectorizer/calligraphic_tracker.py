@@ -140,34 +140,37 @@ class CalligraphicVectorizer:
             if not candidates:
                 continue
 
-            # Pick the highest priority touchdown point for this component
-            _, start_y, start_x, init_dy, init_dx = candidates[0]
+            comp_visited = np.zeros_like(comp_mask, dtype=bool)
 
-            # Trace single continuous trajectory through the component's distance ridge
-            visited = np.zeros_like(comp_mask, dtype=bool)
-            raw_pts = self._trace_continuous_ridge(smoothed_dist, visited, start_y, start_x, init_dy, init_dx)
-            
-            if len(raw_pts) < 3:
-                # Small dot / punctuation: create minimal stroke
-                pts_comp = np.argwhere(comp_mask)
-                if len(pts_comp) > 0:
-                    cy, cx = np.mean(pts_comp, axis=0)
-                    raw_pts = [(float(cy), float(cx), 2.5), (float(cy), float(cx + 0.5), 2.5)]
+            for cand in candidates[:3]:
+                _, start_y, start_x, init_dy, init_dx = cand
+                if comp_visited[start_y, start_x]:
+                    continue
 
-            calligraphic_pts = self._parameterize_stroke(raw_pts)
-            if len(calligraphic_pts) >= 2:
-                stroke_len = float(len(calligraphic_pts))
-                strokes.append({
-                    "stroke_id": f"cal_s{stroke_idx:02d}",
-                    "order_index": stroke_idx,
-                    "points": calligraphic_pts,
-                    "length": stroke_len,
-                    "start": (calligraphic_pts[0][0], calligraphic_pts[0][1]),
-                    "end": (calligraphic_pts[-1][0], calligraphic_pts[-1][1]),
-                    "nib_angle_deg": float(np.rad2deg(self.nib_angle_rad)),
-                    "mean_width": float(np.mean([p[2] for p in calligraphic_pts]))
-                })
-                stroke_idx += 1
+                raw_pts = self._trace_continuous_ridge(smoothed_dist, comp_visited, start_y, start_x, init_dy, init_dx)
+                
+                if len(raw_pts) < 3:
+                    continue
+
+                calligraphic_pts = self._parameterize_stroke(raw_pts)
+                if len(calligraphic_pts) >= 2:
+                    stroke_len = float(len(calligraphic_pts))
+                    strokes.append({
+                        "stroke_id": f"cal_s{stroke_idx:02d}",
+                        "order_index": stroke_idx,
+                        "points": calligraphic_pts,
+                        "length": stroke_len,
+                        "start": (calligraphic_pts[0][0], calligraphic_pts[0][1]),
+                        "end": (calligraphic_pts[-1][0], calligraphic_pts[-1][1]),
+                        "nib_angle_deg": float(np.rad2deg(self.nib_angle_rad)),
+                        "mean_width": float(np.mean([p[2] for p in calligraphic_pts]))
+                    })
+                    stroke_idx += 1
+
+                # If primary stroke(s) covered the vast majority of the skeleton, finish component
+                remaining_skel = skel & (~comp_visited)
+                if np.sum(remaining_skel) < 10:
+                    break
 
         # Fallback if no stroke passed
         if not strokes:
@@ -196,7 +199,7 @@ class CalligraphicVectorizer:
         start_x: int,
         init_dy: float,
         init_dx: float,
-        max_steps: int = 600
+        max_steps: int = 300
     ) -> List[Tuple[float, float, float]]:
         """
         Follows continuous ink crest with minimum bending energy (Euler-Bernoulli),
@@ -211,15 +214,15 @@ class CalligraphicVectorizer:
         local_visited.add((start_y, start_x))
 
         cur_dy, cur_dx = init_dy, init_dx
-        step_size = 1.35
+        step_size = 1.6
 
         for step in range(max_steps):
             best_val = -1e9
             best_ny, best_nx = None, None
             best_vdy, best_vdx = None, None
 
-            # Sample 19 radial directions with forward momentum preference
-            for angle in np.linspace(-np.pi * 0.65, np.pi * 0.65, 19):
+            # Sample 11 radial directions with forward momentum preference
+            for angle in np.linspace(-np.pi * 0.55, np.pi * 0.55, 11):
                 cos_a, sin_a = np.cos(angle), np.sin(angle)
                 cand_dy = cur_dy * cos_a - cur_dx * sin_a
                 cand_dx = cur_dy * sin_a + cur_dx * cos_a
@@ -231,8 +234,9 @@ class CalligraphicVectorizer:
                 if 0 <= iy < h and 0 <= ix < w:
                     d_val = dist_map[iy, ix]
                     if d_val >= 0.35:
-                        # Momentum score: favors straight/smooth continuation (Euler-Bernoulli)
-                        momentum_score = cos_a * 2.0
+                        # Momentum score: strong forward momentum (Euler-Bernoulli) prevents 90° deflections
+                        momentum_score = cos_a * 3.5
+                        deflection_penalty = -4.5 * (0.4 - cos_a) if cos_a < 0.4 else 0.0
                         # Avoid immediate backtracking in the last 6 steps
                         is_recent = False
                         for p in pts[-6:]:
@@ -244,7 +248,7 @@ class CalligraphicVectorizer:
 
                         # Distance crest bonus
                         unvis_bonus = 1.2 if (iy, ix) not in local_visited else 0.0
-                        score = d_val * 2.2 + momentum_score + unvis_bonus
+                        score = d_val * 2.0 + momentum_score + deflection_penalty + unvis_bonus
 
                         if score > best_val:
                             best_val = score
@@ -257,6 +261,9 @@ class CalligraphicVectorizer:
 
             iy, ix = int(round(best_ny)), int(round(best_nx))
             local_visited.add((iy, ix))
+            y0_v, y1_v = max(0, iy - 1), min(h, iy + 2)
+            x0_v, x1_v = max(0, ix - 1), min(w, ix + 2)
+            global_visited[y0_v:y1_v, x0_v:x1_v] = True
 
             cy, cx = best_ny, best_nx
             cur_dy, cur_dx = best_vdy, best_vdx
