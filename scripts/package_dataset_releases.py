@@ -47,12 +47,13 @@ def package_subfolder(subfolder_name: str, src_dir: Path, output_dir: Path, pref
             zf = zipfile.ZipFile(current_zip_path, "a", compression=zipfile.ZIP_DEFLATED, compresslevel=9)
 
     zf.close()
-    if current_zip_path.stat().st_size > 0:
+    if files_in_part > 0 and current_zip_path.stat().st_size > 22:
         final_size = current_zip_path.stat().st_size
         print(f"  [+] Closed Part {part_idx:02d}: {current_zip_path.name} ({final_size / (1024*1024):.2f} MB, {files_in_part} files)")
         total_parts.append(current_zip_path)
     else:
-        current_zip_path.unlink()
+        if current_zip_path.exists():
+            current_zip_path.unlink()
 
     print(f"  [OK] {subfolder_name.upper()} successfully partitioned into {len(total_parts)} archives (< 90 MB each).")
     return total_parts
