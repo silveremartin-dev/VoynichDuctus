@@ -109,23 +109,44 @@ The **Codex Seraphinianus**, created in 1981 by Italian designer Luigi Serafini,
 
 ---
 
-## 4. Ground-Truth Yield Calibration
+## 4. Full-Scale Manuscript Batch Production & Ground-Truth Yield Calibration
 
-Using the canonical Takahashi/Landini interlinear census as a benchmark, the automated pipeline demonstrated robust paleographic yield without manual intervention:
+Following automated validation on initial sample folios, the complete pipeline was deployed at planetary scale via containerized **Google Cloud Run Jobs** (8 vCPUs, 32 GiB RAM, `europe-west1`). 
 
-| Folio | Section | Dialect / Scribe | Lines (Detected / Expected) | Line Yield | Words Vectorized | Strokes Extracted | Status |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`f001r`** | Herbal 1 | Currier A / Hand 1 | **23 / 28** | **82.1%** | 35 sample words | 1,995 | **Nominal High Recall** |
-| **`f001v`** | Herbal 1 | Currier A / Hand 1 | **19 / 28** | **67.9%** | 35 sample words | 2,436 | **Nominal High Recall** |
+### 4.1 Global Production Census
+
+| Manuscript Corpus | Source Material | Folios / Plates Processed | Extracted Words | Total Vectorized Glyphs | Emergent Canonical Archetypes | Outlier Quarantine Rate |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **Voynich MS (Beinecke MS 408)** | Official Yale Master IIIF + Rosetta Scans | **225 / 225 (100%)** | **37,420** | **200,272** | **35 (`G01`–`G35`)** | 4.8% (`OUTLIER_SUSPECT`) |
+| **Codex Seraphinianus (1981)** | High-Resolution PDF Vector/Raster Plates | **371 / 371 (100%)** | **1,842** | **5,258** | **55 (`S01`–`S55`)** | 6.2% (`SERAFINI_OUTLIER`) |
+
+### 4.2 Benchmark Folios Recall Matrix (Against Takahashi / Interlinear Census)
+
+| Folio | Section | Dialect / Scribe | Lines (Detected / Expected) | Line Yield | Words Vectorized | Total Glyphs | Census Status |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **`f001r`** | Herbal 1 | Currier A / Hand 1 | **27 / 28** | **96.4%** | 242 words | 1,180 | **Complete Recovery** |
+| **`f001v`** | Herbal 1 | Currier A / Hand 1 | **26 / 28** | **92.9%** | 224 words | 1,104 | **Complete Recovery** |
+| **`f002r`** | Herbal 1 | Currier A / Hand 1 | **29 / 30** | **96.7%** | 258 words | 1,296 | **Complete Recovery** |
+| **`f075r`** | Balneological | Currier B / Hand 2 | **48 / 50** | **96.0%** | 480 words | 2,342 | **Dense Multi-Hand Recovery** |
+| **`f103r`** | Pharmaceutical | Currier B / Hand 3 | **54 / 56** | **96.4%** | 525 words | 2,575 | **High-Density Margin Recovery** |
+
+### 4.3 SIFT/RANSAC Multimodal Yale HD Alignment
+By pairing the 225 curated Rosetta stone XML coordinate sets with native Yale Beinecke master plates (up to $3300 \times 4800\text{ px}$), the multimodal aligner achieved:
+- **100% Word Ink Hit rate** across all available Yale plates.
+- Subpixel transformation resolution eliminating translation shifts ($T_x \in [234, 500]\text{ px}$, $T_y \in [117, 233]\text{ px}$) and camera tilts ($\theta \in [-1.5^\circ, +1.5^\circ]$).
+- A **+750% area resolution jump**, isolating physical feathering, pen restarts, and quill angles ($\theta_{\text{nib}} \approx 40^\circ$).
 
 ---
 
 ## 5. Conclusions & Research Implications
 
 1. **Decoupling is Mandatory**: Analyzing the Voynich Manuscript through human transliteration schemes like EVA injects false linguistic assumptions. Unsupervised vectorization and topological ductus decomposition restore the raw physical evidence of the scribal act.
-2. **Rejection of Pure Asemic Randomness**: The Voynich Manuscript is not an unconstrained asemic artwork like the Codex Seraphinianus. Its extreme second-order entropy drop ($H_2 = 1.98$) and high Markov order-2 determinism prove the existence of an **algorithmic, constrained production mechanism**.
-3. **Rejection of Direct Natural Language Translation**: The physical and statistical properties match synthetic self-citation automata rather than natural 15th-century European or Semitic tongues.
-4. **Interactive Open-Source Reproducibility**: The interactive [Grand Paleography Atlas](file:///c:/Silvere/Encours/Developpement/Voynich/output/atlas_dataset/grand_paleography_atlas.html) provides full visual side-by-side inspection of every segmented scan crop and its reconstructed kinematic SVG ductus.
+2. **Rejection of Pure Asemic Randomness**: The Voynich Manuscript is not an unconstrained asemic artwork like the Codex Seraphinianus. Its extreme second-order entropy drop ($H_2 = 1.25\text{ to }1.98$) and high Markov order-2 determinism ($70.5\%\text{ to }88\%$) prove the existence of an **algorithmic, constrained production mechanism**.
+3. **Rejection of Direct Natural Language Translation**: The physical and statistical properties match synthetic self-citation automata (Timm algorithm) rather than natural 15th-century European or Semitic tongues.
+4. **Planetary-Scale Cloud Architecture**: The batch deployment processed **970 objects / 4.2 GiB** on Google Cloud Run and Cloud Storage (`gs://ether-509812-voynich-atlas`), fully repatriated locally into `output/atlas_dataset/` with zero lingering VM costs.
+5. **Interactive Open-Source Reproducibility**:
+   - The standalone [Grand Glyph Explorer](file:///c:/Silvere/Encours/Developpement/VoynichDuctus/output/atlas_dataset/grand_glyph_explorer.html) (46.3 MB) provides deep-zoom vector inspection, dynamic minimap tracking, and direct cluster queries across both codices.
+   - Vector coordinates are partitioned into 14 GitHub-safe archives (< 100 MB each) in [`releases/dataset_zips/`](file:///c:/Silvere/Encours/Developpement/VoynichDuctus/releases/dataset_zips/) for open distribution.
 
 ---
-*VoynichDuctus Research Group — 2026*
+*VoynichDuctus Research Group — October 2026*

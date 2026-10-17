@@ -214,7 +214,7 @@ VoynichDuctus/
 │   ├── ingestion/               # MultimodalFolioAligner (SIFT/RANSAC), IIIF, Sauvola
 │   ├── models/                  # MedievalScribalTrainer (supervised & triplet loss)
 │   └── vectorizer/              # CalligraphicVectorizer (40° nib), comparative engines
-└── tests/                       # Complete pytest suite (50/50 passing)
+└── tests/                       # Complete pytest suite (52/52 passing)
 ```
 
 ---
