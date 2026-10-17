@@ -62,6 +62,23 @@ def test_glyph_catalogue():
         assert "corpus_match" in entry
         assert "all_instances" in entry
         assert len(entry["all_instances"]) == entry["frequency"]
+        assert "rejection_bins" in entry
+
+    # Verify outlier quarantine path with tight threshold on a single stroke group
+    mock_1stroke = [
+        {"glyph_id": f"GS{i}", "page_id": "f001r", "bbox": [10, 10, 30, 20], "height": 20, "width": 10, "stroke_count": 1, "png_rel": "g.png", "svg_rel": "g.svg", "strokes": [{"points": [(0, 0, 1), (10, 0, 1)]}]}
+        for i in range(5)
+    ]
+    mock_1stroke.append({
+        "glyph_id": "G_OUT", "page_id": "f001r", "bbox": [10, 10, 32, 25], "height": 22, "width": 15, "stroke_count": 1, "area": 330, "paint_fraction": 0.5, "png_rel": "g_out.png", "svg_rel": "g_out.svg", "strokes": [{"points": [(0, 0, 1), (22, 15, 1)]}]
+    })
+    strict_builder = GlyphCatalogue(target_alphabet_size=1, distance_threshold=0.001)
+    strict_cat = strict_builder.build_catalogue(mock_1stroke, corpus_type="voynich")
+    assert strict_cat["canonical_alphabet_size"] >= 1
+    found_outlier = any(entry.get("outliers_count", 0) > 0 for entry in strict_cat["alphabet"])
+    assert found_outlier
+    rejection_bins = strict_cat["alphabet"][0]["rejection_bins"]
+    assert len(rejection_bins) > 0
 
 
 def test_corpus_matcher():

@@ -340,6 +340,11 @@ class GlyphCatalogue:
             med_dist = float(np.median(dists)) if len(dists) > 0 else 1.0
             max_allowed_dist = self.distance_threshold if self.distance_threshold is not None else max(2.6, med_dist * 2.5)
 
+            # Calculate geometric averages for outlier thresholds and morphological matching
+            mean_strokes = round(float(np.mean([g.get("stroke_count", len(g.get("strokes", []))) for g in cluster_glyphs])), 2)
+            mean_height = round(float(np.mean([g.get("height", 20) for g in cluster_glyphs])), 1)
+            mean_width = round(float(np.mean([g.get("width", 15) for g in cluster_glyphs])), 1)
+
             inlier_count = 0
             outlier_count = 0
             rejection_bins_counts = {}
@@ -392,11 +397,6 @@ class GlyphCatalogue:
             # Tag all members with canonical type
             for g in cluster_glyphs:
                 g["canonical_type"] = type_name
-
-            mean_strokes = round(float(np.mean([g.get("stroke_count", len(g.get("strokes", []))) for g in cluster_glyphs])), 2)
-            mean_height = round(float(np.mean([g.get("height", 20) for g in cluster_glyphs])), 1)
-            mean_width = round(float(np.mean([g.get("width", 15) for g in cluster_glyphs])), 1)
-
             # Match with standard historical corpora (enforcing 1-to-1 unique correspondence)
             if corpus_type.lower() == "seraphinianus":
                 corpus_match = CorpusCorrespondenceMatcher.match_serafini_archetype(
