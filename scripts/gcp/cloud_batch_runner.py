@@ -33,11 +33,31 @@ def process_single_voynich_folio(
     folio_id: str,
     scan_path: str,
     base_out_str: str,
-    rosetta_words_serialized: Optional[List[Dict[str, Any]]] = None
+    rosetta_words_serialized: Optional[List[Dict[str, Any]]] = None,
+    force: bool = False
 ) -> Dict[str, Any]:
     """Worker function: executes zero-waste extraction on a single Voynich folio."""
-    segmenter = GlyphSegmenter()
     base_out = Path(base_out_str)
+    pages_dir = base_out / "voynich" / "pages"
+    p_json = pages_dir / f"{folio_id}.json"
+    p_jpg = pages_dir / f"{folio_id}.jpg"
+
+    if not force and p_json.exists():
+        try:
+            with open(p_json, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            return {
+                "page_id": folio_id,
+                "line_count": d.get("line_count", len(d.get("lines", []))),
+                "word_count": d.get("word_count", len(d.get("words", []))),
+                "glyph_count": d.get("glyph_count", len(d.get("glyphs", []))),
+                "sample_glyphs": d.get("glyphs", [])[:15],
+                "cached": True
+            }
+        except Exception:
+            pass
+
+    segmenter = GlyphSegmenter()
     
     raw_img = Image.open(scan_path)
     # 2x Lanczos upscale for crisp pen stroke resolution (1272x1800)
@@ -361,6 +381,26 @@ def main():
         if args.voynich_limit:
             folios = folios[:args.voynich_limit]
 
+        # Pre-sync any completed Voynich pages from GCS if available
+        if args.gcs_bucket and not args.force_voynich:
+            try:
+                from google.cloud import storage
+                client = storage.Client()
+                bucket = client.bucket(args.gcs_bucket)
+                prefix = f"{args.gcs_prefix}/voynich/pages/"
+                existing_blobs = list(bucket.list_blobs(prefix=prefix))
+                if existing_blobs:
+                    print(f"[GCS] Found {len(existing_blobs)} existing Voynich objects on GCS. Syncing to local cache...")
+                    pages_dir = base_out / "voynich" / "pages"
+                    pages_dir.mkdir(parents=True, exist_ok=True)
+                    for b in existing_blobs:
+                        fname = Path(b.name).name
+                        dest = pages_dir / fname
+                        if not dest.exists():
+                            b.download_to_filename(str(dest))
+            except Exception as e:
+                print(f"[GCS] Voynich pre-sync notice: {e}")
+
         # Prepare task payloads
         tasks = []
         for f_id in folios:
@@ -394,12 +434,12 @@ def main():
             except Exception as e:
                 print(f"  [i] Rosetta pre-fetch notice for {f_id}: {e}")
 
-            tasks.append((f_id, str(scan_path), str(base_out), r_words_ser))
+            tasks.append((f_id, str(scan_path), str(base_out), r_words_ser, args.force_voynich))
 
         print(f"[*] Dispatching {len(tasks)} Voynich folios across {args.workers} workers...")
         with ProcessPoolExecutor(max_workers=args.workers) as executor:
             future_to_folio = {
-                executor.submit(process_single_voynich_folio, t[0], t[1], t[2], t[3]): t[0]
+                executor.submit(process_single_voynich_folio, t[0], t[1], t[2], t[3], t[4]): t[0]
                 for t in tasks
             }
             for future in as_completed(future_to_folio):
@@ -408,7 +448,8 @@ def main():
                     res = future.result()
                     voynich_pages_data.append(res)
                     all_voynich_glyphs.extend(res.get("sample_glyphs", res.get("glyphs", [])))
-                    print(f"  [+] Completed {f_id}: {res['line_count']} lines, {res['word_count']} words, {res['glyph_count']} glyphs.")
+                    status_str = "CACHED" if res.get("cached") else "Extracted"
+                    print(f"  [+] ({len(voynich_pages_data)}/{len(tasks)}) {status_str} {f_id}: {res['line_count']} lines, {res['word_count']} words, {res['glyph_count']} glyphs.")
                 except Exception as e:
                     print(f"  [-] Error on {f_id}: {e}")
 
