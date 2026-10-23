@@ -216,7 +216,7 @@ elseif ($Mode -eq "cloud-run") {
 # Step 5: Repatriate All Data to Local Workspace
 # ------------------------------------------------------------------------------
 Write-Host "`n[*] Step 5: Repatriating all extracted assets and interactive explorer locally..." -ForegroundColor Cyan
-$localDest = "output/atlas_dataset"
+$localDest = "data/processed/atlas_dataset"
 New-Item -ItemType Directory -Force -Path $localDest | Out-Null
 
 gsutil -m rsync -r "gs://${BucketName}/voynich_ductus/atlas_dataset" "$localDest"

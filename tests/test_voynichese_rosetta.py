@@ -13,8 +13,8 @@ from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader,
 @pytest.fixture
 def rosetta_loader():
     return VoynicheseRosettaLoader(
-        annotations_dir="data/annotations/voynichese",
-        scans_dir="data/scans/voynich/yale",
+        annotations_dir="data/raw/annotations/voynichese",
+        scans_dir="data/raw/scans/voynich/yale",
     )
 
 

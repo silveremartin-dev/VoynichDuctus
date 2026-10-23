@@ -20,9 +20,9 @@ folio_pairs = [
 
 print("CALIBRATION_START")
 for folio_id, xml_id in folio_pairs:
-    scan = Image.open(f"data/scans/voynich/yale/{folio_id}.jpg")
+    scan = Image.open(f"data/raw/scans/voynich/yale/{folio_id}.jpg")
     ink = binarizer.binarize(scan)
-    root = ET.parse(f"data/annotations/voynichese/{xml_id}.xml").getroot()
+    root = ET.parse(f"data/raw/annotations/voynichese/{xml_id}.xml").getroot()
     words = root.findall("word")
     sample_words = words[::max(1, len(words) // 25)]
 

@@ -2725,7 +2725,7 @@ def generate_explorer_html(
 
 
 def main():
-    base_out = Path("./output/atlas_dataset")
+    base_out = Path("./data/processed/atlas_dataset")
     
     # 1. Clean slate: wipe old directories for 100% fresh extraction
     for sub in ["voynich", "seraphinianus"]:
@@ -2748,10 +2748,10 @@ def main():
     voynich_pages_data = []
     all_voynich_glyphs = []
 
-    iiif_client = IIIFClient(cache_dir="data/scans/voynich/yale")
+    iiif_client = IIIFClient(cache_dir="data/raw/scans/voynich/yale")
     voynich_folios = ["f001r", "f001v", "f002r", "f002v", "f003r", "f003v", "f004r", "f004v"]
 
-    voynichese_scans_dir = Path("data/scans/voynich/voynichese_scans")
+    voynichese_scans_dir = Path("data/raw/scans/voynich/voynichese_scans")
     voynichese_scans_dir.mkdir(parents=True, exist_ok=True)
 
     for folio_id in voynich_folios:
@@ -2821,7 +2821,7 @@ def main():
     serafini_pages_data = []
     all_serafini_glyphs = []
 
-    serafini_pdf = Path("data/scans/seraphinianus/Codex Seraphinianus.pdf")
+    serafini_pdf = Path("data/raw/scans/seraphinianus/Codex Seraphinianus.pdf")
     if serafini_pdf.exists():
         loader_s = PDFScanLoader(serafini_pdf)
         for p_idx in [30, 35, 40]:

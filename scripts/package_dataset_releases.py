@@ -60,7 +60,7 @@ def package_subfolder(subfolder_name: str, src_dir: Path, output_dir: Path, pref
 
 
 def main():
-    atlas_dir = Path("output/atlas_dataset")
+    atlas_dir = Path("data/processed/atlas_dataset")
     out_release = Path("releases/dataset_zips")
 
     print("=" * 80)

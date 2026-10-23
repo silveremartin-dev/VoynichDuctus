@@ -65,7 +65,7 @@ def process_single_voynich_folio(
     
     # Check for authentic Yale HD Master plate
     yale_img = None
-    yale_dir = Path("data/scans/voynich/yale")
+    yale_dir = Path("data/raw/scans/voynich/yale")
     if yale_dir.exists():
         import re
         m = re.match(r"f0*(\d+)([rv]\d*)?", folio_id.lower())
@@ -103,7 +103,7 @@ def process_single_voynich_folio(
     if yale_img is not None and r_words:
         try:
             from voynich_ductus.ingestion.image_registration import MultimodalFolioAligner
-            aligner = MultimodalFolioAligner(cache_dir="intermediate/test_cache/registration")
+            aligner = MultimodalFolioAligner(cache_dir="data/intermediate/registration")
             reg = aligner.compute_registration(raw_img, yale_img, folio_id=folio_id)
             if reg and reg.get("status") == "success":
                 mat = np.array(reg["matrix_2x3"], dtype=np.float64)
@@ -284,7 +284,7 @@ def main():
                         help="Number of parallel worker processes (default: CPU cores - 1)")
     parser.add_argument("--manuscripts", type=str, default="voynich,seraphinianus",
                         help="Comma-separated manuscripts to process: voynich, seraphinianus")
-    parser.add_argument("--output-dir", type=str, default="./output/atlas_dataset",
+    parser.add_argument("--output-dir", type=str, default="./data/processed/atlas_dataset",
                         help="Output directory for extracted atlas and web explorer")
     parser.add_argument("--gcs-bucket", type=str, default=None,
                         help="Google Cloud Storage bucket name for final synchronization")
@@ -370,7 +370,7 @@ def main():
     if do_voynich:
         print("\n[*] Initializing Voynich Manuscript extraction queue...")
         rosetta_loader = VoynicheseRosettaLoader()
-        voynichese_scans_dir = Path("data/scans/voynich/voynichese_scans")
+        voynichese_scans_dir = Path("data/raw/scans/voynich/voynichese_scans")
         voynichese_scans_dir.mkdir(parents=True, exist_ok=True)
 
         all_avail = rosetta_loader.list_available_folios()
@@ -474,7 +474,7 @@ def main():
 
     if do_serafini:
         print("\n[*] Initializing Codex Seraphinianus extraction queue...")
-        pdf_path = Path("data/scans/seraphinianus/Codex Seraphinianus.pdf")
+        pdf_path = Path("data/raw/scans/seraphinianus/Codex Seraphinianus.pdf")
         if pdf_path.exists():
             loader_s = PDFScanLoader(pdf_path)
             total_pages = len(loader_s)

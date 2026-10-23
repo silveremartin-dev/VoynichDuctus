@@ -119,8 +119,8 @@ def generate(generator: str, words: int):
 
 @main.command()
 @click.option("--input-image", "-i", required=True, help="Input scan or word image file.")
-@click.option("--output-svg", "-s", default="output/vectorized_strokes.svg", help="Output SVG path.")
-@click.option("--output-tokens", "-t", default="output/tokens.txt", help="Output tokenized text file.")
+@click.option("--output-svg", "-s", default="data/processed/vectorized_strokes.svg", help="Output SVG path.")
+@click.option("--output-tokens", "-t", default="data/processed/tokens.txt", help="Output tokenized text file.")
 def process(input_image: str, output_svg: str, output_tokens: str):
     """Executes full offline-to-online stroke vectorization, clustering, and tokenization pipeline."""
     img_path = Path(input_image)

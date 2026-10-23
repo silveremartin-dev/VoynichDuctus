@@ -418,7 +418,7 @@ def generate_grand_atlas_html(voynich_words: List[Dict], serafini_words: List[Di
 
 
 def main():
-    base_out = Path("./output/atlas_dataset")
+    base_out = Path("./data/processed/atlas_dataset")
     base_out.mkdir(parents=True, exist_ok=True)
     (base_out / "voynich" / "png").mkdir(parents=True, exist_ok=True)
     (base_out / "voynich" / "svg").mkdir(parents=True, exist_ok=True)
@@ -435,7 +435,7 @@ def main():
 
     # 1. Process Voynich Manuscript Scans (from Yale Beinecke high-res or PDF)
     # Master archival folios
-    voynich_sources = [Path("data/scans/f001r.jpg"), Path("data/scans/f001v.jpg")]
+    voynich_sources = [Path("data/raw/scans/f001r.jpg"), Path("data/raw/scans/f001v.jpg")]
     for vf in voynich_sources:
         if vf.exists():
             img = Image.open(vf)
@@ -456,7 +456,7 @@ def main():
                 print(f"  [>] Ground Truth Benchmark: {yr['detected_lines']}/{yr['expected_lines']} lines ({yr['line_yield_pct']}%), Scribe: {yr['scribe_hand']} ({yr['currier_language']})")
 
     # 2. Process Codex Seraphinianus Scans (from PDF)
-    serafini_pdf = Path("data/scans/seraphinianus/Codex Seraphinianus.pdf")
+    serafini_pdf = Path("data/raw/scans/seraphinianus/Codex Seraphinianus.pdf")
     if serafini_pdf.exists():
         loader_s = PDFScanLoader(serafini_pdf)
         # Process multiple text-dense pages across chapters

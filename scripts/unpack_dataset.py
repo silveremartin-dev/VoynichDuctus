@@ -1,6 +1,6 @@
 """
 Dataset Unpacker for VoynichDuctus.
-Unpacks all partitioned coordinate archives from releases/dataset_zips into output/atlas_dataset.
+Unpacks all partitioned coordinate archives from releases/dataset_zips into data/processed/atlas_dataset.
 """
 
 import zipfile
@@ -8,7 +8,7 @@ from pathlib import Path
 
 def unpack_all():
     zip_dir = Path("releases/dataset_zips")
-    dest_dir = Path("output/atlas_dataset")
+    dest_dir = Path("data/processed/atlas_dataset")
     dest_dir.mkdir(parents=True, exist_ok=True)
     
     zip_files = sorted(list(zip_dir.glob("*.zip")))

@@ -38,8 +38,13 @@ venv.bak/
 # Data and large downloads
 data/*
 !data/README.md
-!data/annotations/
-!data/annotations/**
+!data/raw/
+!data/raw/annotations/
+!data/raw/annotations/**
+data/raw/scans/
+data/intermediate/
+data/processed/
+data/cache/
 scans/
 scan/
 downloads/
@@ -89,4 +94,4 @@ scripts/gcp/outputs/
 *credentials*.json
 
 # Annotations cache
-data/annotations/voynichese/js_cache/
+data/raw/annotations/voynichese/js_cache/

@@ -143,9 +143,9 @@ By pairing the 225 curated Rosetta stone XML coordinate sets with native Yale Be
 1. **Decoupling is Mandatory**: Analyzing the Voynich Manuscript through human transliteration schemes like EVA injects false linguistic assumptions. Unsupervised vectorization and topological ductus decomposition restore the raw physical evidence of the scribal act.
 2. **Rejection of Pure Asemic Randomness**: The Voynich Manuscript is not an unconstrained asemic artwork like the Codex Seraphinianus. Its extreme second-order entropy drop ($H_2 = 1.25\text{ to }1.98$) and high Markov order-2 determinism ($70.5\%\text{ to }88\%$) prove the existence of an **algorithmic, constrained production mechanism**.
 3. **Rejection of Direct Natural Language Translation**: The physical and statistical properties match synthetic self-citation automata (Timm algorithm) rather than natural 15th-century European or Semitic tongues.
-4. **Planetary-Scale Cloud Architecture**: The batch deployment processed **970 objects / 4.2 GiB** on Google Cloud Run and Cloud Storage (`gs://ether-509812-voynich-atlas`), fully repatriated locally into `output/atlas_dataset/` with zero lingering VM costs.
+4. **Planetary-Scale Cloud Architecture**: The batch deployment processed **970 objects / 4.2 GiB** on Google Cloud Run and Cloud Storage (`gs://ether-509812-voynich-atlas`), fully repatriated locally into `data/processed/atlas_dataset/` with zero lingering VM costs.
 5. **Interactive Open-Source Reproducibility**:
-   - The standalone [Grand Glyph Explorer](file:///c:/Silvere/Encours/Developpement/VoynichDuctus/output/atlas_dataset/grand_glyph_explorer.html) (46.3 MB) provides deep-zoom vector inspection, dynamic minimap tracking, and direct cluster queries across both codices.
+   - The standalone [Grand Glyph Explorer](file:///c:/Silvere/Encours/Developpement/VoynichDuctus/data/processed/atlas_dataset/grand_glyph_explorer.html) (46.3 MB) provides deep-zoom vector inspection, dynamic minimap tracking, and direct cluster queries across both codices.
    - Vector coordinates are partitioned into 14 GitHub-safe archives (< 100 MB each) in [`releases/dataset_zips/`](file:///c:/Silvere/Encours/Developpement/VoynichDuctus/releases/dataset_zips/) for open distribution.
 
 ---

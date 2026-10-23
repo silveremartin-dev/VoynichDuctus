@@ -133,7 +133,7 @@ def vectorize_image_to_ductus(image: Image.Image, output_svg_path: Path) -> Dict
 
 
 def generate_full_dataset():
-    out_dir = Path("./output/svg_dataset")
+    out_dir = Path("./data/processed/svg_dataset")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "png").mkdir(exist_ok=True)
     (out_dir / "svg").mkdir(exist_ok=True)

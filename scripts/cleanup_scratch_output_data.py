@@ -1,8 +1,8 @@
 """
 Systematic cleanup script for VoynichDuctus:
-Removes legacy non-zero-waste assets from output/atlas_dataset (glyphs/ and words/ folders),
+Removes legacy non-zero-waste assets from data/processed/atlas_dataset (glyphs/ and words/ folders),
 removes temporary scratch_* images from data/,
-removes test artifacts from output/,
+removes test artifacts from data/processed/,
 and cleans up obsolete debug scripts from scratch/.
 """
 
@@ -43,9 +43,9 @@ def main():
             total_bytes += s
 
     print("\n=====================================================")
-    print(" 2. CLEANING OUTPUT/ATLAS_DATASET ZERO-WASTE VIOLATIONS")
+    print(" 2. CLEANING DATA/PROCESSED/ATLAS_DATASET ZERO-WASTE VIOLATIONS")
     print("=====================================================")
-    atlas_dir = root / "output" / "atlas_dataset"
+    atlas_dir = root / "data" / "processed" / "atlas_dataset"
     for sub in ["voynich", "seraphinianus"]:
         for obsolete in ["glyphs", "words"]:
             obs_dir = atlas_dir / sub / obsolete
@@ -62,9 +62,9 @@ def main():
         total_bytes += s
 
     print("\n=====================================================")
-    print(" 3. CLEANING ROOT OUTPUT/ TEMP TEST ARTIFACTS")
+    print(" 3. CLEANING ROOT DATA/PROCESSED/ TEMP TEST ARTIFACTS")
     print("=====================================================")
-    out_dir = root / "output"
+    out_dir = root / "data" / "processed"
     for f in [out_dir / "p030_alignment_check.jpg"]:
         c, s = remove_file_safely(f)
         total_files += c

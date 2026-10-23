@@ -75,8 +75,8 @@ class VoynicheseRosettaLoader:
 
     def __init__(
         self,
-        annotations_dir: Union[str, Path] = "data/annotations/voynichese",
-        scans_dir: Union[str, Path] = "data/scans/voynich/yale",
+        annotations_dir: Union[str, Path] = "data/raw/annotations/voynichese",
+        scans_dir: Union[str, Path] = "data/raw/scans/voynich/yale",
         js_cache_dir: Optional[Union[str, Path]] = None,
     ):
         self.annotations_dir = Path(annotations_dir)
@@ -159,7 +159,7 @@ class VoynicheseRosettaLoader:
         Loads word annotations directly from the Voynichese .js folio script files.
         Coordinates in .js are direct pixel coordinates for the 636x900 glance image:
             https://www.voynichese.com/2/data/folio/image/glance/color/large/{folio_id}.jpg
-        Downloads and caches the .js file locally under data/annotations/voynichese/js_cache/.
+        Downloads and caches the .js file locally under data/raw/annotations/voynichese/js_cache/.
         """
         norm_name = self._normalize_folio_id(folio_id)
         if norm_name in self._cache_js_folios:
@@ -557,7 +557,7 @@ class VoynicheseRosettaLoader:
         # Try both f001r and f1r formatting
         match = re.match(r"f(\d+)([rv]\d*)?", norm_name)
         candidates = []
-        voynichese_scans = Path("data/scans/voynich/voynichese_scans")
+        voynichese_scans = Path("data/raw/scans/voynich/voynichese_scans")
         if match:
             num = int(match.group(1))
             side = match.group(2) or ""

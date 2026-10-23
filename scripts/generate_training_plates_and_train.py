@@ -151,7 +151,7 @@ def train_and_evaluate_models():
             print(f"Epoch {epoch:02d}/50: Triplet Loss = {loss_dict.get('triplet_loss', 0.0):.4f} | Dist(A, P) = {loss_dict.get('pos_dist', 0.0):.4f} | Dist(A, N) = {loss_dict.get('neg_dist', 0.0):.4f}")
 
     # Save trained checkpoint
-    save_dir = Path("intermediate/models")
+    save_dir = Path("data/intermediate/models")
     save_dir.mkdir(parents=True, exist_ok=True)
     torch.save(flow_model._model.state_dict(), save_dir / "scribal_flow_net.pt")
     torch.save(emb_model._model.state_dict(), save_dir / "scribal_contrastive_net.pt")
@@ -159,7 +159,7 @@ def train_and_evaluate_models():
 
 
 if __name__ == "__main__":
-    out_dir = Path("output/training_plates")
+    out_dir = Path("data/processed/training_plates")
     render_synthetic_kinematic_plate(out_dir)
     render_contrastive_triplet_plate(out_dir)
     train_and_evaluate_models()

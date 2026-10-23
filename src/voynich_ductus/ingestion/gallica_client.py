@@ -56,7 +56,7 @@ class GallicaManuscriptClient:
         }
     }
 
-    def __init__(self, cache_dir: Union[str, Path] = "data/scans/gallica"):
+    def __init__(self, cache_dir: Union[str, Path] = "data/raw/scans/gallica"):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -116,7 +116,7 @@ class GallicaManuscriptClient:
         """
         import time
         ark = self.normalize_ark(manuscript_key)
-        clean_ark_id = ark.replace("ark:/12148/", "").replace("/", "_")
+        clean_ark_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', ark.replace("ark:/12148/", ""))
         dest_filename = f"gallica_{clean_ark_id}_f{page_num:03d}_{target_width}px.jpg"
         dest_path = self.cache_dir / dest_filename
 
@@ -129,11 +129,14 @@ class GallicaManuscriptClient:
             "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
         }
 
+        max_allowed_bytes = 50 * 1024 * 1024  # 50 MB threshold for single page
         for attempt in range(max_retries):
             try:
                 req = urllib.request.Request(url, headers=headers)
                 with urllib.request.urlopen(req, timeout=30) as resp:
-                    content = resp.read()
+                    content = resp.read(max_allowed_bytes + 1)
+                    if len(content) > max_allowed_bytes:
+                        raise ValueError(f"Downloaded payload exceeds safety limit of {max_allowed_bytes} bytes")
                     with open(dest_path, "wb") as f:
                         f.write(content)
                 return dest_path

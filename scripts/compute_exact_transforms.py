@@ -7,7 +7,7 @@ from skimage.transform import rescale
 from voynich_ductus.ingestion.iiif_client import IIIFClient
 from pathlib import Path
 
-iiif = IIIFClient(cache_dir='data/scans/voynich/yale')
+iiif = IIIFClient(cache_dir='data/raw/scans/voynich/yale')
 mapping = [
     ('f001r', 'f1r'), ('f001v', 'f1v'),
     ('f002r', 'f2r'), ('f002v', 'f2v'),
@@ -16,7 +16,7 @@ mapping = [
 ]
 
 for fid, norm in mapping:
-    g_img = Image.open(f'data/scans/voynich/glance/{norm}.jpg')
+    g_img = Image.open(f'data/raw/scans/voynich/glance/{norm}.jpg')
     gw, gh = g_img.size
     y_path = iiif.download_folio(fid, max_width=2400)
     y_img = Image.open(y_path)

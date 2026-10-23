@@ -22,17 +22,18 @@ Scans are stored in a clean directory hierarchy:
 
 ```
 data/
-└── scans/
-    ├── voynich/
-    │   ├── yale/              # Official Yale Beinecke MS 408 IIIF Master Scans (2400-3300px, 300 DPI)
-    │   │   ├── f001r.jpg
-    │   │   ├── f001v.jpg
-    │   │   └── ...
-    │   └── pdf/               # Archival reference document
-    │       └── VoynichManuscript.pdf
-    └── seraphinianus/
-        └── pdf/               # Vector & high-res plates of Luigi Serafini (1981)
-            └── Codex Seraphinianus.pdf
+└── raw/
+    └── scans/
+        ├── voynich/
+        │   ├── yale/              # Official Yale Beinecke MS 408 IIIF Master Scans (2400-3300px, 300 DPI)
+        │   │   ├── f001r.jpg
+        │   │   ├── f001v.jpg
+        │   │   └── ...
+        │   └── pdf/               # Archival reference document
+        │       └── VoynichManuscript.pdf
+        └── seraphinianus/
+            └── pdf/               # Vector & high-res plates of Luigi Serafini (1981)
+                └── Codex Seraphinianus.pdf
 ```
 
 - **Voynich Manuscript**: Scans fetched directly via Yale Beinecke IIIF Presentation v3 API at native high resolution (~2400 × 3300 px), ensuring ink boundaries, parchment texture, and pen crossings are captured without downsampling blur.
@@ -106,7 +107,7 @@ data/
   - **Codex Seraphinianus**: 371 / 371 pages processed, **5,258 glyphs**, 55 archetypes (`seraphinianus_alphabet_catalogue.json`, 1.8 MB).
   - **Synchronized Volume**: 970 objects / 4.2 GiB on Google Cloud Storage (`gs://ether-509812-voynich-atlas`).
 - **Cost Discipline**: Ephemeral serverless execution with automatic termination; zero persistent VM charges.
-- **Data Repatriation**: Local workspace `output/atlas_dataset/` contains complete vector JSONs and the standalone web application [`grand_glyph_explorer.html`](file:///c:/Silvere/Encours/Developpement/VoynichDuctus/output/atlas_dataset/grand_glyph_explorer.html) (46.3 MB).
+- **Data Repatriation**: Local workspace `data/processed/atlas_dataset/` contains complete vector JSONs and the standalone web application [`grand_glyph_explorer.html`](file:///c:/Silvere/Encours/Developpement/VoynichDuctus/data/processed/atlas_dataset/grand_glyph_explorer.html) (46.3 MB).
 - **Distribution Packages**: 14 partitioned ZIP archives (< 100 MB each) generated in [`releases/dataset_zips/`](file:///c:/Silvere/Encours/Developpement/VoynichDuctus/releases/dataset_zips/).
 
 ---
@@ -145,4 +146,4 @@ All changes are strictly covered by automated deterministic unit tests:
 ```bash
 py -3 -m pytest tests/ -v
 ```
-All metrics and interactive features are rendered in the standalone HTML application at `output/atlas_dataset/grand_glyph_explorer.html`.
+All metrics and interactive features are rendered in the standalone HTML application at `data/processed/atlas_dataset/grand_glyph_explorer.html`.

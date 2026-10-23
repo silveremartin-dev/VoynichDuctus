@@ -108,12 +108,12 @@ chmod +x gcp/deploy.sh
 Pour tester l'image avant l'envoi sur GCP :
 ```bash
 docker build -t voynich-ductus-batch -f gcp/Dockerfile .
-docker run --rm -v $(pwd)/output:/app/output voynich-ductus-batch --workers 4 --voynich-limit 2
+docker run --rm -v $(pwd)/data/processed:/app/data/processed voynich-ductus-batch --workers 4 --voynich-limit 2
 ```
 
 ### Méthode 3 : Récupération des résultats depuis Google Cloud Storage
 Une fois le batch terminé, téléchargez le Grand Explorateur et les catalogues :
 ```bash
-gsutil -m rsync -r gs://<VOTRE_BUCKET>/voynich_ductus/atlas_dataset/ ./output/atlas_dataset/
+gsutil -m rsync -r gs://<VOTRE_BUCKET>/voynich_ductus/atlas_dataset/ ./data/processed/atlas_dataset/
 ```
-Puis ouvrez `output/atlas_dataset/grand_glyph_explorer.html` dans votre navigateur.
+Puis ouvrez `data/processed/atlas_dataset/grand_glyph_explorer.html` dans votre navigateur.

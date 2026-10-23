@@ -1,5 +1,5 @@
 """
-Loads authentic 15th-century scribal patches from local Gallica PDFs in data/scans/gallica,
+Loads authentic 15th-century scribal patches from local Gallica PDFs in data/raw/scans/gallica,
 generates enhanced medieval serif training batches, and trains MedievalScribalTrainer.
 """
 
@@ -21,7 +21,7 @@ def extract_gallica_script_patches(max_patches_per_pdf: int = 40, patch_size: in
     """
     Extracts real ink character crops from local Gallica manuscript PDFs.
     """
-    gallica_dir = Path("data/scans/gallica")
+    gallica_dir = Path("data/raw/scans/gallica")
     pdf_files = list(gallica_dir.glob("*.pdf"))
     print(f"[*] Found {len(pdf_files)} Gallica manuscript PDFs in {gallica_dir}:")
     for f in pdf_files:
@@ -94,7 +94,7 @@ def train_medieval_models():
             print(f"Epoch {epoch:02d}/50: Triplet Loss = {loss_dict.get('triplet_loss', 0.0):.4f} | Accuracy = {loss_dict.get('triplet_accuracy', 1.0):.2%}")
 
     # Save checkpoints
-    out_models = Path("intermediate/models")
+    out_models = Path("data/intermediate/models")
     out_models.mkdir(parents=True, exist_ok=True)
     torch.save(flow_net._model.state_dict(), out_models / "scribal_flow_net.pt")
     torch.save(emb_net._model.state_dict(), out_models / "scribal_contrastive_net.pt")

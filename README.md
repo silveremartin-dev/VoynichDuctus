@@ -144,7 +144,7 @@ Evaluating the emergent ductus corpora against control baselines across 1,387 to
 ## 8. Interactive Grand Glyph Explorer
 
 The pipeline generates an interactive, high-performance web application at:
-`output/atlas_dataset/grand_glyph_explorer.html`
+`data/processed/atlas_dataset/grand_glyph_explorer.html`
 
 ### Features:
 - **Interactive HD Deep Zoom & Minimap**: Smooth pan and zoom across Yale Beinecke HD folios and Seraphinianus plates.
@@ -169,7 +169,7 @@ pip install -e .
 ### Running Scripts & Generating the Explorer
 
 ```bash
-# 1. Run the full test suite (45 unit & integration tests)
+# 1. Run the full test suite (52 unit & integration tests)
 pytest tests/ -v
 
 # 2. Run the information-theoretic diagnostics suite
@@ -186,20 +186,23 @@ python scripts/generate_full_glyph_corpus_and_explorer.py
 
 ## 10. Project Structure & Clean Tier Architecture
 
-The repository enforces a strict separation of concerns across 4 distinct tiers:
+The repository enforces a strict separation of concerns across 4 distinct data tiers under `data/`:
 
 ```
 VoynichDuctus/
-├── data/                        # TIER 1: Pure Input Data (Raw inputs only)
-│   ├── annotations/voynichese/  # 225-folio Voynichese Rosetta ground truth dataset
-│   └── scans/                   # Raw scans & PDFs (Voynich Beinecke, Seraphinianus, Gallica)
-├── intermediate/                # TIER 2: Intermediate Products & Build Caches
-│   ├── diagnostics/             # Intermediate diagnostic metrics and JSON summaries
-│   ├── models/                  # Trained PyTorch neural checkpoints (ScribalFlowNet, etc.)
-│   └── test_gallica_cache/      # Gallica IIIF plate download caches
-├── output/                      # TIER 3: Final Deliverables (User-Facing)
-│   └── atlas_dataset/           # grand_glyph_explorer.html & zero-waste paired page assets
-├── releases/                    # TIER 4: Partitioned Distribution Archives (< 100 MB)
+├── data/
+│   ├── raw/                     # TIER 1: Pure Input Data (Raw inputs only)
+│   │   ├── annotations/voynichese/ # 225-folio Voynichese Rosetta ground truth dataset
+│   │   └── scans/               # Raw scans & PDFs (Voynich Beinecke, Seraphinianus, Gallica)
+│   ├── intermediate/            # TIER 2: Intermediate Products & Checkpoints
+│   │   ├── diagnostics/         # Intermediate diagnostic metrics and JSON summaries
+│   │   ├── models/              # Trained PyTorch neural checkpoints (ScribalFlowNet, etc.)
+│   │   └── registration/        # Multimodal SIFT/RANSAC registration matrices
+│   ├── processed/               # TIER 3: Final Deliverables (User-Facing)
+│   │   └── atlas_dataset/       # grand_glyph_explorer.html & zero-waste paired page assets
+│   └── cache/                   # TIER 4: Network & Ephemeral Test Caches
+│       └── gallica/             # Gallica IIIF plate download caches
+├── releases/                    # Distribution Archives (< 100 MB)
 │   └── dataset_zips/            # voyage_coords_part*.zip & seraphini_coords_part*.zip
 ├── scripts/
 │   ├── build_dynamic_grand_explorer.py
@@ -240,4 +243,4 @@ VoynichDuctus/
 ## 12. License
 
 This project is licensed under the [MIT License](LICENSE).
-The Voynichese annotation dataset bundled under `data/annotations/voynichese/` is licensed under the Apache License, Version 2.0.
+The Voynichese annotation dataset bundled under `data/raw/annotations/voynichese/` is licensed under the Apache License, Version 2.0.

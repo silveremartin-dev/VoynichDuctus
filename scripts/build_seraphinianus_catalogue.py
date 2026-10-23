@@ -1,6 +1,6 @@
 """
 Builds the Canonical Alphabet Catalogue for Codex Seraphinianus
-from the 371 extracted page JSONs in output/atlas_dataset/seraphinianus/pages/.
+from the 371 extracted page JSONs in data/processed/atlas_dataset/seraphinianus/pages/.
 """
 
 import json
@@ -14,7 +14,7 @@ from voynich_ductus.clustering.glyph_catalogue import GlyphCatalogue
 
 
 def main():
-    pages_dir = Path("output/atlas_dataset/seraphinianus/pages")
+    pages_dir = Path("data/processed/atlas_dataset/seraphinianus/pages")
     json_files = sorted(pages_dir.glob("*.json"))
     print(f"[*] Found {len(json_files)} Seraphinianus page JSONs.")
 
@@ -40,7 +40,7 @@ def main():
     print("[*] Running topological partitioning & clustering...")
     catalogue = builder.build_catalogue(sampled_glyphs, corpus_type="seraphinianus")
 
-    out_file = Path("output/atlas_dataset/seraphinianus/seraphinianus_alphabet_catalogue.json")
+    out_file = Path("data/processed/atlas_dataset/seraphinianus/seraphinianus_alphabet_catalogue.json")
     builder.export_catalogue_json(catalogue, out_file)
     print(f"[+] Saved Seraphinianus Alphabet Catalogue to {out_file.resolve()}")
     print(f"[+] Induced {catalogue['canonical_alphabet_size']} canonical archetypes.")

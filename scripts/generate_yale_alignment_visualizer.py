@@ -19,7 +19,7 @@ from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader
 
 
 def build_comparison_plate(output_path: Path):
-    aligner = MultimodalFolioAligner(cache_dir="intermediate/test_cache/registration")
+    aligner = MultimodalFolioAligner(cache_dir="data/intermediate/registration")
     rosetta = VoynicheseRosettaLoader()
 
     folios_to_test = [
@@ -54,8 +54,8 @@ def build_comparison_plate(output_path: Path):
         yale_id = f_info["yale_id"]
         title = f_info["title"]
 
-        glance_path = Path(f"data/scans/voynich/voynichese_scans/{fol_id}.jpg")
-        yale_path = Path(f"data/scans/voynich/yale/{yale_id}.jpg")
+        glance_path = Path(f"data/raw/scans/voynich/voynichese_scans/{fol_id}.jpg")
+        yale_path = Path(f"data/raw/scans/voynich/yale/{yale_id}.jpg")
 
         if not glance_path.exists() or not yale_path.exists():
             print(f"[-] Missing scan for {fol_id}")

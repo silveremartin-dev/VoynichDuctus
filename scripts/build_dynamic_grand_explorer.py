@@ -103,7 +103,7 @@ def parse_page_stub_fast(json_path: Path, subfolder: str) -> dict:
 
 
 def main():
-    base_out = Path("output/atlas_dataset")
+    base_out = Path("data/processed/atlas_dataset")
     voynich_dir = base_out / "voynich"
     serafini_dir = base_out / "seraphinianus"
 

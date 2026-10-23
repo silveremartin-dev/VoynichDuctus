@@ -40,7 +40,8 @@ class GeminiPaleographyAdapter:
                 img.save(buffered, format="PNG")
                 img_b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent"
+                headers = {"x-goog-api-key": self.api_key}
                 prompt_text = (
                     "Act as an expert medieval paleographer. Analyze this high-resolution manuscript crop. "
                     "Return ONLY a valid JSON object with keys: "
@@ -59,7 +60,7 @@ class GeminiPaleographyAdapter:
                     "generationConfig": {"response_mime_type": "application/json"}
                 }
 
-                resp = requests.post(url, json=payload, timeout=20)
+                resp = requests.post(url, headers=headers, json=payload, timeout=20)
                 if resp.status_code == 200:
                     text_resp = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
                     parsed = json.loads(text_resp)
@@ -114,7 +115,8 @@ class GeminiPaleographyAdapter:
                 img2.save(b2, format="PNG")
                 b2_b64 = base64.b64encode(b2.getvalue()).decode("utf-8")
 
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent"
+                headers = {"x-goog-api-key": self.api_key}
                 prompt_text = (
                     "Compare the scribal ductus, pen nib angle, and slant between Image 1 and Image 2. "
                     "Return ONLY a valid JSON object with keys: "
@@ -134,7 +136,7 @@ class GeminiPaleographyAdapter:
                     "generationConfig": {"response_mime_type": "application/json"}
                 }
 
-                resp = requests.post(url, json=payload, timeout=25)
+                resp = requests.post(url, headers=headers, json=payload, timeout=25)
                 if resp.status_code == 200:
                     text_resp = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
                     parsed = json.loads(text_resp)

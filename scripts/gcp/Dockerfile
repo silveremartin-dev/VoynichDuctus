@@ -35,14 +35,14 @@ COPY pyproject.toml /app/
 RUN pip install -e .
 
 # Copy data assets
-COPY data/annotations/ /app/data/annotations/
-COPY data/scans/seraphinianus/ /app/data/scans/seraphinianus/
-COPY data/scans/voynich/voynichese_scans/ /app/data/scans/voynich/voynichese_scans/
-COPY data/scans/voynich/yale/ /app/data/scans/voynich/yale/
-COPY intermediate/test_cache/registration/ /app/intermediate/test_cache/registration/
+COPY data/raw/annotations/ /app/data/raw/annotations/
+COPY data/raw/scans/seraphinianus/ /app/data/raw/scans/seraphinianus/
+COPY data/raw/scans/voynich/voynichese_scans/ /app/data/raw/scans/voynich/voynichese_scans/
+COPY data/raw/scans/voynich/yale/ /app/data/raw/scans/voynich/yale/
+COPY data/intermediate/registration/ /app/data/intermediate/registration/
 
 # Create runtime scratch and output directories
-RUN mkdir -p /app/output /app/cache /tmp/matplotlib && chmod -R 777 /app/output /app/cache /tmp/matplotlib
+RUN mkdir -p /app/data/processed /app/data/cache /tmp/matplotlib && chmod -R 777 /app/data/processed /app/data/cache /tmp/matplotlib
 
 # Default entrypoint for Cloud Run Jobs / Vertex AI / Compute Engine
 ENTRYPOINT ["python", "scripts/gcp/cloud_batch_runner.py"]

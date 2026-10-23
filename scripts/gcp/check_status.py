@@ -11,7 +11,7 @@ cmd = [
     "--format=json"
 ]
 
-res = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+res = subprocess.run(cmd, capture_output=True, text=True)
 if res.returncode != 0:
     print("Error:", res.stderr)
 else:

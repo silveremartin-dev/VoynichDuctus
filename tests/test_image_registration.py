@@ -39,13 +39,13 @@ def create_synthetic_textured_document(width=600, height=800):
 
 
 def test_aligner_initialization():
-    aligner = MultimodalFolioAligner(cache_dir="intermediate/test_cache/registration")
+    aligner = MultimodalFolioAligner(cache_dir="data/intermediate/registration")
     assert aligner is not None
     assert aligner.sift is not None
 
 
 def test_synthetic_registration_accuracy():
-    aligner = MultimodalFolioAligner(cache_dir="intermediate/test_cache/registration")
+    aligner = MultimodalFolioAligner(cache_dir="data/intermediate/registration")
     ref_img = create_synthetic_textured_document(width=600, height=800)
 
     scale_gt = 1.4
@@ -85,12 +85,12 @@ def test_synthetic_registration_accuracy():
 
 
 def test_real_voynich_folio_registration():
-    glance_file = Path("data/scans/voynich/voynichese_scans/f1r.jpg")
-    yale_file = Path("data/scans/voynich/yale/f001r.jpg")
+    glance_file = Path("data/raw/scans/voynich/voynichese_scans/f1r.jpg")
+    yale_file = Path("data/raw/scans/voynich/yale/f001r.jpg")
     if not glance_file.exists() or not yale_file.exists():
         pytest.skip("Scans f1r/f001r not found on disk")
 
-    aligner = MultimodalFolioAligner(cache_dir="intermediate/test_cache/registration")
+    aligner = MultimodalFolioAligner(cache_dir="data/intermediate/registration")
     img_glance = cv2.imread(str(glance_file))
     img_yale = cv2.imread(str(yale_file))
 

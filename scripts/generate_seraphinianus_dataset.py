@@ -15,7 +15,7 @@ from voynich_ductus.utils.io import BenchmarkFormatter
 
 
 def run_seraphinianus_pipeline():
-    out_dir = Path("./output/seraphinianus")
+    out_dir = Path("./data/processed/seraphinianus")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "png").mkdir(exist_ok=True)
     (out_dir / "svg").mkdir(exist_ok=True)
