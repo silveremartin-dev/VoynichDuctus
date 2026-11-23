@@ -64,3 +64,27 @@ def test_multi_stroke_ductus_extraction():
     assert strokes[0]["order_index"] == 0
     assert strokes[1]["order_index"] == 1
 
+
+def test_seraphinianus_single_continuous_stroke():
+    vec = CalligraphicVectorizer()
+
+    # Synthetic complex cursive glyph with loop and stem
+    mask = np.zeros((60, 40), dtype=bool)
+    # Loop at top
+    for y in range(5, 25):
+        for x in range(10, 30):
+            r = np.hypot(y - 15, x - 20)
+            if 6 <= r <= 9:
+                mask[y, x] = True
+    # Stem extending down from bottom of loop
+    mask[24:55, 18:23] = True
+
+    # In single stroke mode, MUST return strictly 1 continuous stroke
+    strokes = vec.extract_calligraphic_ductus(mask, single_stroke_mode=True)
+    assert len(strokes) == 1
+    assert strokes[0]["stroke_id"] == "cal_s00"
+    assert len(strokes[0]["points"]) >= 10
+    # Ductus must start at the top (touchdown) and end lower (pen lift)
+    assert strokes[0]["points"][0][0] <= strokes[0]["points"][-1][0]
+
+

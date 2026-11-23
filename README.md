@@ -11,17 +11,18 @@
 
 ## Table of Contents
 - [1. Executive Summary & Purpose](#1-executive-summary--purpose)
-- [2. The Methodological Pitfall: The EVA Transliteration Bias](#2-the-methodological-pitfall-the-eva-transliteration-bias)
-- [3. Complete Pipeline Architecture](#3-complete-pipeline-architecture)
-- [4. The 5 Independent Vision & Ductus Methods](#4-the-5-independent-vision--ductus-methods)
-- [5. Physical Nib, Serifs & Medieval Scribal Mechanics](#5-physical-nib-serifs--medieval-scribal-mechanics)
-- [6. Emergent Transliteration & Allograph Discovery](#6-emergent-transliteration--allograph-discovery)
-- [7. Formal Information-Theoretic Diagnostics Benchmark](#7-formal-information-theoretic-diagnostics-benchmark)
-- [8. Interactive Grand Glyph Explorer](#8-interactive-grand-glyph-explorer)
-- [9. Installation & Quickstart](#9-installation--quickstart)
-- [10. Project Structure](#10-project-structure)
-- [11. Acknowledgments & References](#11-acknowledgments--references)
-- [12. License](#12-license)
+- [2. The Methodological Pitfall: The EVA Transliteration Bias & The Ouroboros Avoidance Principle](#2-the-methodological-pitfall-the-eva-transliteration-bias--the-ouroboros-avoidance-principle)
+- [3. Complete Pipeline Architecture & The Anti-Circularity Firewall](#3-complete-pipeline-architecture--the-anti-circularity-firewall)
+- [4. Proposition 4: Popperian Falsification Test & Discordance Detector](#4-proposition-4-popperian-falsification-test--discordance-detector)
+- [5. The 5 Independent Vision & Ductus Methods](#5-the-5-independent-vision--ductus-methods)
+- [6. Physical Nib, Serifs & Medieval Scribal Mechanics](#6-physical-nib-serifs--medieval-scribal-mechanics)
+- [7. Emergent Transliteration & Allograph Discovery](#7-emergent-transliteration--allograph-discovery)
+- [8. Formal Information-Theoretic Diagnostics Benchmark](#8-formal-information-theoretic-diagnostics-benchmark)
+- [9. Interactive Grand Glyph Explorer](#9-interactive-grand-glyph-explorer)
+- [10. Installation & Quickstart](#10-installation--quickstart)
+- [11. Project Structure & Clean Tier Architecture](#11-project-structure--clean-tier-architecture)
+- [12. Public Datasets, Archive.org Links & Copyright Policy](#12-public-datasets-archiveorg-links--copyright-policy)
+- [13. License](#13-license)
 
 ---
 
@@ -41,43 +42,111 @@ Most modern computational studies suffer from a fatal flaw: they train models on
 
 ---
 
-## 2. The Methodological Pitfall: The EVA Transliteration Bias
+## 2. The Methodological Pitfall: The EVA Transliteration Bias & The Ouroboros Avoidance Principle
 
+### A. The EVA Bias
 The European Voynich Alphabet (EVA) was created in the 1990s to store the manuscript in computer ASCII:
 - **Arbitrary Grapheme Grouping**: EVA forced arbitrary decisions on whether adjacent ink strokes form a single glyph or a ligature of distinct glyphs (e.g. deciding whether `ch`, `sh`, `cth`, `ckh` are atomic or composite).
 - **Subjective Human Smoothing**: When algorithms analyze EVA strings, they measure human linguistic biases rather than scribal physical realities.
-- **The VoynichDuctus Solution**: Working directly on raw pixel geometry, quill angles, and stroke kinematics to induce emergent alphabets purely from objective physical and topological traits.
+
+### B. The Ouroboros Problem (Circularity Trap)
+If an algorithmic model tunes its stroke segmentations or character counts to match EVA letter counts, it falls into a vicious circular trap (the serpent biting its own tail):
+1. It uses human assumptions to train or optimize stroke cutting.
+2. It then computes statistical metrics on the segmented text.
+3. It triumphantly discovers that the statistical metrics resemble human language!
+This circularity has plagued Voynich research for thirty years.
+
+### C. The Zero-Circularity Guarantee
+In **VoynichDuctus**, all upstream stages (1 to 4) operate under a strict mathematical quarantine:
+- **No EVA labels** are ever fed into `CalligraphicVectorizer`, `GeometricFeatureExtractor`, `WordScribalEncoder`, `NeuralWordDecomposer`, or `GlyphClusterer`.
+- Strokes and archetypes are derived **exclusively** from raw ink geometry, Euclidean distance transform ridges, Euler-Bernoulli minimum bending energy, and self-supervised visual features.
+- External transcriptions (Voynichese 2014, Currier, v101, Latin herbals) are isolated strictly in Stages 5 & 6 as **external Popperian falsification targets**.
 
 ---
 
-## 3. Complete Pipeline Architecture
+## 3. Complete Pipeline Architecture & The Anti-Circularity Firewall
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        voynich_ductus Pipeline                         │
-└────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌──────────────────┐    ┌────────────────────┐    ┌─────────────────────┐
-│ 1. Ingestion     │ ──▶│ 2. Vectorization   │ ──▶│ 3. Embeddings       │
-│ - Yale IIIF / PDF│    │ - 40° Nib Ridge Trk│    │ - 16-D Descriptors  │
-│ - Sauvola / Wolf │    │ - Euler-Bernoulli  │    │ - DINOv2 ViT 768-D  │
-│ - Line / Word CC │    │ - Kinematic Flow   │    │ - Contrastive Net   │
-└──────────────────┘    └────────────────────┘    └─────────────────────┘
-                                                             │
-                                                             ▼
-┌──────────────────┐    ┌────────────────────┐    ┌─────────────────────┐
-│ 6. Ground Truth  │ ◀──│ 5. Diagnostics     │ ◀──│ 4. Clustering       │
-│ - Timm Self-Cite │    │ - Shannon H1 / H2  │    │ - HDBSCAN / Density │
-│ - Rugg Cardan    │    │ - Hurst / DFA      │    │ - Tokenizer         │
-│ - Latin Herbal   │    │ - LZMA / Gzip Ratio│    │   (e.g. G01-G29)    │
-│ - Random Noise   │    │ - Markov FSA Ord-2 │    │ - Rosetta Alignment │
-└──────────────────┘    └────────────────────┘    └─────────────────────┘
+```mermaid
+flowchart TD
+    subgraph S1["Stage 1: Ingestion & Physical Metric Calibration"]
+        A1["Raw Multispectral Scans (Beinecke MS 408 / Seraphinianus)"] --> A2["Local Adaptive Binarization (Sauvola & Wolf-Jolion)"]
+        A2 --> A3["Metric Scale Calibration (mm / dmm) & Whitespace Boundary Arbitration"]
+    end
+
+    subgraph S2["Stage 2: Offline-to-Online Scribal Kinematics"]
+        B1["Medial Axis & EDT Distance Ridges"] --> B2["40° Beveled Quill Physics (Pleins & Déliés Contrast)"]
+        B2 --> B3["Euler-Bernoulli Minimum Bending Energy & Junction Resolving"]
+        B3 --> B4["Vector Ductus Trajectories (x, y, t, w) & Spatial Word CCs"]
+    end
+
+    subgraph S3["Stage 3: Objective Feature Embeddings"]
+        C1["16-D Geometric Descriptors (Tortuosity, Loops, Tangents)"]
+        C2["Self-Supervised Meta DINOv2 ViT (768-D Embeddings)"]
+        C3["Neural Spatial Word Decomposer (Horizontal PCA Basis Functions)"]
+    end
+
+    subgraph S4["Stage 4: Emergent Alphabet Induction"]
+        D1["Topological Loop Partitioning (0L / 1L / 2+L)"]
+        D2["Physical Scale Stratification (TINY, CORE, TALL, WIDE)"]
+        D3["Density Clustering & Consensus Medoid Discovery"]
+        D4["Emergent Canonical Archetypes (G01, G02, ... G50)"]
+        D1 --> D3 --> D4
+        D2 --> D3
+    end
+
+    subgraph FIREWALL["🛡️ ANTI-CIRCULARITY FIREWALL (Zero-Ouroboros Guarantee)"]
+        direction LR
+        FW["No EVA labels enter Stages 1-4. No circular hyperparameter fitting. No phonetic priors."]
+    end
+
+    subgraph S5["Stage 5 & 6: Popperian Diagnostics & Falsification Engine"]
+        E1["Proposition 4: Popperian Discordance Detector (Model Units vs Letters)"]
+        E2["Information-Theoretic Diagnostics (Shannon H1/H2, Hurst DFA, LZMA, Markov)"]
+        E3["Independent Human Schemes: Voynichese 2014, Currier, v101, Latin Herbals"]
+        E4["Adversarial Generative Baselines: Timm Self-Citation, Rugg Cardan Grille"]
+        D4 --> E1
+        D4 --> E2
+        E3 -.->|External Target| E1
+        E4 -.->|Control Baseline| E2
+    end
+
+    S1 --> S2 --> S3 --> S4
+    S4 --> FIREWALL --> S5
+
+    style FIREWALL fill:#0f172a,stroke:#e11d48,stroke-width:3px,stroke-dasharray: 5 5,color:#f43f5e
+    style S1 fill:#091e17,stroke:#10b981,color:#ecfdf5
+    style S2 fill:#0c2d48,stroke:#38bdf8,color:#f0f9ff
+    style S3 fill:#1e1b4b,stroke:#818cf8,color:#e0e7ff
+    style S4 fill:#311042,stroke:#c084fc,color:#fae8ff
+    style S5 fill:#2d1a08,stroke:#f59e0b,color:#fef3c7
 ```
 
 ---
 
-## 4. The 5 Independent Vision & Ductus Methods
+## 4. Proposition 4: Popperian Falsification Test & Discordance Detector
+
+Rather than forcing the physical scribal model to conform to human transliterations, **Proposition 4** treats any divergence between the physical ductus and external transcriptions as an empirical scientific test:
+
+### A. Formal Comparison Logic
+For every lexical word, the system compares:
+- $N$: The number of physical kinematic components extracted by the active model (Quill Ductus, Neural PCA, or Hybrid Consensus).
+- $M$: The number of transcribed characters in the external consensus layout (e.g. Voynichese 2014 EVA).
+
+### B. Scientific Classifications
+1. **Validated Concordance ($N = M$)**:
+   - Strict 1-to-1 isomorphism between scribal pen kinematics and external human transcription.
+   - Proves that the autonomous physical model independently rediscovers the human paleographic grouping without supervision.
+2. **Sub-Glyphic Cleavage ($N > M$)**:
+   - The physical model identifies multiple mechanical pen lifts or distinct strokes within composite characters (e.g. compound gallows `cth` or `ckh` separated into 2 to 4 strokes, or complex ligatures).
+   - **Popperian Falsification**: Demonstrates that subjective human transliteration artificially unified multiple scribal gestures into a single ASCII letter.
+3. **Graphemic Conflation ($N < M$)**:
+   - The physical ductus traces a continuous cursive trajectory executed without pen lift, whereas human transcription posited multiple separate characters (e.g. running minims `iii` or fluid cursive ligatures).
+4. **Zero Dropped Ink Guarantee**:
+   - Inside every consensus word bounding box, 100% of the ink pixels are rigorously partitioned and accounted for across constituent glyph components ($0\text{ px}$ unanalyzed).
+
+---
+
+## 5. The 5 Independent Vision & Ductus Methods
 
 The pipeline integrates and contrasts 5 distinct, standalone paleographic methods:
 
@@ -91,7 +160,7 @@ The pipeline integrates and contrasts 5 distinct, standalone paleographic method
 
 ---
 
-## 5. Physical Nib, Serifs & Medieval Scribal Mechanics
+## 6. Physical Nib, Serifs & Medieval Scribal Mechanics
 
 ### A. 40° Bevel and Pleins & Déliés
 Broad-nib quill mechanics govern stroke width based on pen movement direction relative to the 40° nib axis:
@@ -103,11 +172,21 @@ $$w(\theta) = (W_{\text{nib}} - w_0) \cdot |\sin(\theta - 40^\circ)| + w_0$$
 Authentic 15th-century hands (Voynich, Gothic Bastarda, Humanistic cursive) exhibit pronounced **serifs**:
 - **Minim Entry Serifs**: Short diagonal approach from top-left ($dx=0.7, dy=0.7$) before the main vertical shaft, ending in an upward right foot flick.
 - **Ascender Club Heads**: Triangular massues on top of hastes (`'l'`, `'b'`, `'h'`) where touchdown occurs at the upper-left crest.
-- **Single-Stroke Cursive Loops (Seraphinianus)**: Enforces strictly **1 continuous stroke per connected ink component**, preventing artificial multi-stroke splitting on smooth loops.
+
+### C. The Dual-Ductus Kinematic Paradigm: Voynich vs. Seraphinianus
+
+| Paleographic Dimension | Codex Seraphinianus (1981) | Voynich Manuscript (MS 408, ca. 1404–1438) |
+| :--- | :--- | :--- |
+| **Script Medium** | 20th-c. technical fineliner (uniform ink). | 15th-c. split goose quill / calame (iron gall ink). |
+| **Strokes per Glyph** | **Strictly 1 continuous stroke** (`max_strokes=1`). | **1 to 4 strokes maximum** (`max_strokes=4`). |
+| **Trajectory Dynamics** | Smooth inertial ribbon, **zero angles > 90°**, progressive loops like a car on a winding road. | Segmented calligraphic pen lifts, Gothic angles, minim attacks and distinct foot flicks. |
+| **Skeleton Coverage** | **100% full skeleton coverage** via bidirectional tracing and 12-pass extension bridging. | Topological graph decomposition with Euler-Bernoulli minimum bending energy. |
+| **Loop Formation** | Continuous ribbon loop without pen lift. | Deliberate geometric bowl + vertical minim stem (e.g. `a` = `c` + `i`). |
+| **Stroke Caps** | 1 stroke (never lifted). | 1 minim/crescent, 2 looped letters, 3 gallows, 4 compound gallows (`cth`, `ckh`). |
 
 ---
 
-## 6. Emergent Transliteration & Allograph Discovery
+## 7. Emergent Transliteration & Allograph Discovery
 
 ### A. Voynich: Rosetta Alignment & Sub-Allograph Discovery
 - Words are segmented into $N$ character zones at local minima of vertical ink projection profiles, constrained by the expected Rosetta EVA character count.
@@ -121,7 +200,7 @@ Because no page-by-page transcription exists for Luigi Serafini's asemic codex, 
 
 ---
 
-## 7. Formal Information-Theoretic Diagnostics Benchmark
+## 8. Formal Information-Theoretic Diagnostics Benchmark
 
 Evaluating the emergent ductus corpora against control baselines across 1,387 tokens per corpus:
 
@@ -141,21 +220,22 @@ Evaluating the emergent ductus corpora against control baselines across 1,387 to
 
 ---
 
-## 8. Interactive Grand Glyph Explorer
+## 9. Interactive Grand Glyph Explorer
 
 The pipeline generates an interactive, high-performance web application at:
 `data/processed/atlas_dataset/grand_glyph_explorer.html`
 
 ### Features:
 - **Interactive HD Deep Zoom & Minimap**: Smooth pan and zoom across Yale Beinecke HD folios and Seraphinianus plates.
-- **Word & Glyph Overlay Toggles**: Highlight identified text lines, word boxes, and isolated character boundaries.
+- **Multi-Layer Canvas Display**: Toggle 🟣 Lines, 📦 Voynich Boxes, 🟡 Recognized Ink Words, and 🔵 Extracted Glyphs.
+- **Proposition 4 Scientific Inspector**: Live Popperian falsification card contrasting physical kinematics with human consensus transliteration.
 - **5-Way Vision & Ductus Comparison Modal**: Inspect any glyph simultaneously across all 5 paleographic engines with inline keyboard navigation ($\leftarrow$ / $\rightarrow$).
 - **Transliteration Inspector**: Compare Voynich Rosetta EVA strings with emergent ductus tokens, explore allograph discoveries, and browse the complete Seraphinianus transliteration.
 - **Archetype Variations Explorer**: View all physical instances of any canonical archetype across the entire manuscript with 1-click page localization.
 
 ---
 
-## 9. Installation & Quickstart
+## 10. Installation & Quickstart
 
 ```bash
 # Clone the repository
@@ -179,12 +259,12 @@ python scripts/run_comprehensive_diagnostics.py
 python scripts/generate_training_plates_and_train.py
 
 # 4. Generate the full corpus and interactive Grand Glyph Explorer
-python scripts/generate_full_glyph_corpus_and_explorer.py
+python scripts/build_dynamic_grand_explorer.py
 ```
 
 ---
 
-## 10. Project Structure & Clean Tier Architecture
+## 11. Project Structure & Clean Tier Architecture
 
 The repository enforces a strict separation of concerns across 4 distinct data tiers under `data/`:
 
@@ -222,7 +302,7 @@ VoynichDuctus/
 
 ---
 
-## 11. Public Datasets, Archive.org Links & Copyright Policy
+## 12. Public Datasets, Archive.org Links & Copyright Policy
 
 - **Voynich Manuscript (Beinecke MS 408)**:
   - **Status**: Public Domain (Early 15th Century, carbon-dated 1404–1438 AD).
@@ -240,7 +320,7 @@ VoynichDuctus/
 
 ---
 
-## 12. License
+## 13. License
 
 This project is licensed under the [MIT License](LICENSE).
 The Voynichese annotation dataset bundled under `data/raw/annotations/voynichese/` is licensed under the Apache License, Version 2.0.

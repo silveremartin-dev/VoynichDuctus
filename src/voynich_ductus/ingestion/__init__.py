@@ -7,6 +7,14 @@ from voynich_ductus.ingestion.pdf_loader import PDFScanLoader
 from voynich_ductus.ingestion.color_normalizer import ColorIlluminationNormalizer
 from voynich_ductus.ingestion.transcription_reference import TranscriptionReference, PaleographyYieldValidator
 from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
+from voynich_ductus.ingestion.codicology import (
+    LAYFIELD_DAVIS_CITATION,
+    VOYNICH_QUIRES,
+    get_traditional_codex_order,
+    get_layfield_davis_order,
+    build_folio_codicology_registry,
+    natural_folio_sort_key,
+)
 
 from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader, RosettaWord
 from voynich_ductus.ingestion.image_registration import MultimodalFolioAligner
@@ -23,6 +31,12 @@ __all__ = [
     "VoynicheseRosettaLoader",
     "RosettaWord",
     "MultimodalFolioAligner",
+    "LAYFIELD_DAVIS_CITATION",
+    "VOYNICH_QUIRES",
+    "get_traditional_codex_order",
+    "get_layfield_davis_order",
+    "build_folio_codicology_registry",
+    "natural_folio_sort_key",
 ]
 
 

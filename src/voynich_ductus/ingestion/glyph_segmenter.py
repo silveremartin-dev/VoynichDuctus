@@ -14,6 +14,7 @@ from skimage.measure import regionprops
 from voynich_ductus.ingestion.color_normalizer import ColorIlluminationNormalizer
 from voynich_ductus.ingestion.binarization import Binarizer
 from voynich_ductus.ingestion.segmenter import LineSegmenter
+from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
 from voynich_ductus.vectorizer.skeleton import Skeletonizer
 from voynich_ductus.vectorizer.stroke_graph import StrokeGraphExtractor
 from voynich_ductus.vectorizer.junction_resolver import JunctionResolver
@@ -34,18 +35,28 @@ class GlyphSegmenter:
         min_glyph_width: int = 6,
         max_glyph_width: int = 220,
         min_glyph_area: int = 15,
-        max_drawing_area: int = 6000
+        max_drawing_area: int = 6000,
+        scale_calib: Optional[MetricScaleCalibration] = None
     ):
-        self.min_glyph_height = min_glyph_height
-        self.max_glyph_height = max_glyph_height
-        self.min_glyph_width = min_glyph_width
-        self.max_glyph_width = max_glyph_width
-        self.min_glyph_area = min_glyph_area
-        self.max_drawing_area = max_drawing_area
+        self.scale_calib = scale_calib
+        if scale_calib is not None:
+            self.min_glyph_height = max(6, int(round(scale_calib.min_glyph_height_px)))
+            self.max_glyph_height = max(100, int(round(scale_calib.mm_to_px(22.0))))
+            self.min_glyph_width = max(4, int(round(scale_calib.min_glyph_width_px)))
+            self.max_glyph_width = max(100, int(round(scale_calib.mm_to_px(22.0))))
+            self.min_glyph_area = max(8, int(round(scale_calib.min_glyph_area_px)))
+            self.max_drawing_area = max(2000, int(round(scale_calib.macro_drawing_area_px * 2.0)))
+        else:
+            self.min_glyph_height = min_glyph_height
+            self.max_glyph_height = max_glyph_height
+            self.min_glyph_width = min_glyph_width
+            self.max_glyph_width = max_glyph_width
+            self.min_glyph_area = min_glyph_area
+            self.max_drawing_area = max_drawing_area
 
         self.normalizer = ColorIlluminationNormalizer()
         self.binarizer = Binarizer(method="sauvola", window_size=29, k=0.20)
-        self.line_segmenter = LineSegmenter(min_line_pitch=28, min_line_height=14, min_word_width=12, min_word_area=25)
+        self.line_segmenter = LineSegmenter(min_line_pitch=28, min_line_height=14, min_word_width=12, min_word_area=25, scale_calib=scale_calib)
         self.calligraphic_vectorizer = CalligraphicVectorizer(nib_angle_deg=40.0)
         self.skel_engine = Skeletonizer(method="medial_axis")
         self.graph_extractor = StrokeGraphExtractor()
@@ -298,9 +309,12 @@ class GlyphSegmenter:
             gray = np.mean(crop_rgb, axis=2).astype(float)
             darkness = float(bg_color.mean()) - gray
 
-        # If contrast is extremely subtle, lower threshold adaptively
+        # If contrast is subtle (e.g. Voynich aged vellum), lower thresholds adaptively
         max_d = float(np.max(darkness)) if darkness.size > 0 else 0.0
-        if max_d < high_thresh:
+        if max_d < 60.0:
+            high_thresh = max(6.0, max_d * 0.45)
+            low_thresh = max(3.0, max_d * 0.20)
+        elif max_d < high_thresh:
             high_thresh = max(8.0, max_d * 0.6)
             low_thresh = max(4.0, max_d * 0.25)
 
@@ -322,7 +336,8 @@ class GlyphSegmenter:
     def assemble_word_into_glyphs(
         self,
         w_img: np.ndarray,
-        expected_glyph_count: Optional[int] = None
+        expected_glyph_count: Optional[int] = None,
+        scale_calib: Optional[MetricScaleCalibration] = None
     ) -> List[Dict[str, Any]]:
         """
         Assembles connected components within a word into intact multi-stroke glyphs.
@@ -342,18 +357,35 @@ class GlyphSegmenter:
         if total_ink == 0:
             return []
 
+        active_calib = scale_calib or self.scale_calib
+        if active_calib is not None:
+            dot_dim_thresh = max(4, int(round(active_calib.dot_max_span_px)))
+            dot_area_thresh = max(10, int(round(active_calib.dot_max_area_px)))
+            scale_ref = max(1.0, active_calib.px_per_mm / 8.0)
+        else:
+            scale_ref = max(1.0, H / 35.0)
+            est_nib_w = max(1.5, 2.0 * scale_ref)
+            dot_dim_thresh = max(5, int(round(2.6 * est_nib_w)))
+            dot_area_thresh = max(14, int(round(3.5 * est_nib_w * est_nib_w)))
+
         labeled_w, num_w = label(w_mask, structure=np.ones((3, 3), dtype=bool))
         if num_w == 0:
             return []
 
         # Find connected components and sort horizontally
         props = sorted(regionprops(labeled_w), key=lambda p: (p.bbox[1] + p.bbox[3]) / 2.0)
-        valid_props = [p for p in props if p.area >= 4]
+        min_body_area = max(14, int(total_ink * 0.012))
+        min_body_h = max(8, int(H * 0.25))
+        valid_props = [
+            p for p in props
+            if p.area >= min_body_area and (p.bbox[2] - p.bbox[0]) >= min_body_h
+        ]
+        if not valid_props:
+            valid_props = [p for p in props if p.area >= 4]
         if not valid_props:
             valid_props = props
 
-        # Build component masks; attach any micro-speck (area < 4) to nearest component
-        # ensuring ZERO pixels of ink are discarded
+        # Build primary component masks
         comp_records = []
         for p in valid_props:
             cy0, cx0, cy1, cx1 = p.bbox
@@ -365,36 +397,129 @@ class GlyphSegmenter:
                 "area": int(p.area),
                 "cmin": cx0,
                 "cmax": cx1,
+                "cmin_y": cy0,
+                "cmax_y": cy1,
                 "c_center": (cx0 + cx1) / 2.0,
                 "w": cx1 - cx0,
                 "h": cy1 - cy0,
+                "diacritics": []
             })
 
-        # Attach tiny micro-specks to the nearest valid component
-        speck_props = [p for p in props if p.area < 4 and p not in valid_props]
+        if not comp_records and props:
+            # Entire word consists solely of dots or punctuation marks
+            res_dots = []
+            for p in props:
+                rmin, cmin, rmax, cmax = p.bbox
+                m = (labeled_w[rmin:rmax, cmin:cmax] == p.label)
+                p_h = rmax - rmin
+                p_w = cmax - cmin
+                res_dots.append({
+                    "mask": m,
+                    "bbox_local": (rmin, cmin, rmax, cmax),
+                    "area": int(p.area),
+                    "is_dot": bool((p_h <= dot_dim_thresh and p_w <= dot_dim_thresh) or p.area <= dot_area_thresh),
+                    "diacritics": []
+                })
+            return res_dots
+
+        # Attach fragments or decouple supralinear diacritics
+        speck_props = [p for p in props if p not in valid_props]
         for sp in speck_props:
             sp_cx = (sp.bbox[1] + sp.bbox[3]) / 2.0
+            sp_cy = (sp.bbox[0] + sp.bbox[2]) / 2.0
             sp_m = (labeled_w[sp.bbox[0]:sp.bbox[2], sp.bbox[1]:sp.bbox[3]] == sp.label)
-            closest = min(comp_records, key=lambda c: abs(c["c_center"] - sp_cx))
-            closest["mask"][sp.bbox[0]:sp.bbox[2], sp.bbox[1]:sp.bbox[3]] |= sp_m
-            closest["area"] += int(sp.area)
+            closest = min(comp_records, key=lambda c: min(abs(c["cmin"] - sp.bbox[3]), abs(sp.bbox[1] - c["cmax"]), abs(c["c_center"] - sp_cx)))
+            h_dist = max(0, max(closest["cmin"] - sp.bbox[3], sp.bbox[1] - closest["cmax"]))
 
-        # Recalculate component extents and centers (NEVER merge physically separate components)
+            # Scale-adaptive supralinear diacritic discrimination
+            is_supralinear = (sp_cy < H * 0.40) and (sp.bbox[2] <= closest["cmin_y"] + int(round(2.5 * scale_ref)))
+            if is_supralinear:
+                sp_h = sp.bbox[2] - sp.bbox[0]
+                sp_w = sp.bbox[3] - sp.bbox[1]
+                closest["diacritics"].append({
+                    "type": "DOT" if (sp_h <= dot_dim_thresh and sp_w <= dot_dim_thresh) else "ACCENT",
+                    "bbox": (int(sp.bbox[0]), int(sp.bbox[1]), int(sp.bbox[2]), int(sp.bbox[3])),
+                    "area": int(sp.area)
+                })
+            elif h_dist <= max(6, int(H * 0.18)) or sp.area >= 12:
+                # Genuine broken body stroke: merge into base mask
+                closest["mask"][sp.bbox[0]:sp.bbox[2], sp.bbox[1]:sp.bbox[3]] |= sp_m
+                closest["area"] += int(sp.area)
+
+        # Recalculate component extents and centers
         main_comps = sorted(comp_records, key=lambda c: c["cmin"])
         for c in main_comps:
             cols = np.where(np.any(c["mask"], axis=0))[0]
-            if len(cols) > 0:
+            rows = np.where(np.any(c["mask"], axis=1))[0]
+            if len(cols) > 0 and len(rows) > 0:
                 c["cmin"] = int(cols.min())
                 c["cmax"] = int(cols.max())
                 c["w"] = c["cmax"] - c["cmin"] + 1
+                c["h"] = int(rows.max() - rows.min() + 1)
                 c["c_center"] = float(np.mean(cols))
 
+        # Merge vertically stacked / overlapping components (e.g. broken stems or diacritics)
+        idx_m = 0
+        while idx_m < len(main_comps) - 1:
+            c1 = main_comps[idx_m]
+            c2 = main_comps[idx_m + 1]
+            overlap_x = min(c1["cmax"], c2["cmax"]) - max(c1["cmin"], c2["cmin"])
+            min_w_pair = max(1, min(c1["w"], c2["w"]))
+            if overlap_x >= 0.45 * min_w_pair:
+                c1["mask"] |= c2["mask"]
+                c1["area"] += c2["area"]
+                cols = np.where(np.any(c1["mask"], axis=0))[0]
+                rows = np.where(np.any(c1["mask"], axis=1))[0]
+                c1["cmin"] = int(cols.min())
+                c1["cmax"] = int(cols.max())
+                c1["w"] = c1["cmax"] - c1["cmin"] + 1
+                c1["h"] = int(rows.max() - rows.min() + 1)
+                c1["c_center"] = float(np.mean(cols))
+                main_comps.pop(idx_m + 1)
+            else:
+                idx_m += 1
+
+        if active_calib is not None:
+            single_glyph_max_w = max(18, int(round(active_calib.mm_to_px(3.5))))
+            min_glyph_w = max(6, int(round(active_calib.min_glyph_width_px)))
+            peak_win = max(8, int(round(active_calib.mm_to_px(1.8))))
+        else:
+            scale_ref = max(1.0, H / 35.0)
+            single_glyph_max_w = int(round(28 * scale_ref))
+            min_glyph_w = int(round(9 * scale_ref))
+            peak_win = int(round(14 * scale_ref))
+
+        # If expected_glyph_count (K) is provided and M > K, merge closest multi-stroke pairs (e.g. 'c'+'i' -> 'a')
+        if expected_glyph_count is not None and expected_glyph_count >= 1:
+            while len(main_comps) > expected_glyph_count and len(main_comps) >= 2:
+                best_pair_idx = -1
+                best_pair_cost = 1e9
+                for i_p in range(len(main_comps) - 1):
+                    ca = main_comps[i_p]
+                    cb = main_comps[i_p + 1]
+                    gap = cb["cmin"] - ca["cmax"]
+                    comb_w = cb["cmax"] - ca["cmin"] + 1
+                    if gap <= max(8, int(6 * scale_ref)) and comb_w <= int(1.45 * single_glyph_max_w):
+                        cost = gap * 3.0 + comb_w * 0.5
+                        if cost < best_pair_cost:
+                            best_pair_cost = cost
+                            best_pair_idx = i_p
+                if best_pair_idx < 0:
+                    break
+                ca = main_comps[best_pair_idx]
+                cb = main_comps[best_pair_idx + 1]
+                ca["mask"] |= cb["mask"]
+                ca["area"] += cb["area"]
+                cols = np.where(np.any(ca["mask"], axis=0))[0]
+                rows = np.where(np.any(ca["mask"], axis=1))[0]
+                ca["cmin"] = int(cols.min())
+                ca["cmax"] = int(cols.max())
+                ca["w"] = ca["cmax"] - ca["cmin"] + 1
+                ca["h"] = int(rows.max() - rows.min() + 1)
+                ca["c_center"] = float(np.mean(cols))
+                main_comps.pop(best_pair_idx + 1)
+
         M = len(main_comps)
-        # Resolution-adaptive scaling: adapts to low-res glance (H~35px) and Yale Beinecke HD (H~90-140px)
-        scale_ref = max(1.0, H / 35.0)
-        single_glyph_max_w = int(round(28 * scale_ref))
-        min_glyph_w = int(round(9 * scale_ref))
-        peak_win = int(round(14 * scale_ref))
 
         # Determine target splits if expected_glyph_count (K) is provided and exceeds CC count
         extra_splits_needed = 0
@@ -417,7 +542,9 @@ class GlyphSegmenter:
                     res_glyphs.append({
                         "mask": c_mask[rmin:rmax + 1, cmin:cmax + 1],
                         "bbox_local": (rmin, cmin, rmax + 1, cmax + 1),
-                        "area": area
+                        "area": area,
+                        "diacritics": comp.get("diacritics", []),
+                        "is_dot": bool((rmax - rmin <= dot_dim_thresh and cmax - cmin <= dot_dim_thresh) or area <= dot_area_thresh)
                     })
                 continue
 
@@ -477,7 +604,9 @@ class GlyphSegmenter:
                 res_glyphs.append({
                     "mask": c_mask[rmin:rmax + 1, cmin:cmax + 1],
                     "bbox_local": (rmin, cmin, rmax + 1, cmax + 1),
-                    "area": area
+                    "area": area,
+                    "diacritics": comp.get("diacritics", []),
+                    "is_dot": bool((rmax - rmin <= dot_dim_thresh and cmax - cmin <= dot_dim_thresh) or area <= dot_area_thresh)
                 })
             else:
                 # Cut along 2D minimum energy seams at valleys
@@ -492,18 +621,28 @@ class GlyphSegmenter:
                     if np.sum(part_m) > 0:
                         r = np.where(np.any(part_m, axis=1))[0]
                         c = np.where(np.any(part_m, axis=0))[0]
+                        p_area = int(np.sum(part_m))
+                        p_h = int(r[-1] - r[0] + 1)
+                        p_w = int(c[-1] - c[0] + 1)
                         res_glyphs.append({
                             "mask": part_m[r[0]:r[-1] + 1, c[0]:c[-1] + 1],
                             "bbox_local": (int(r[0]), int(c[0]), int(r[-1]) + 1, int(c[-1]) + 1),
-                            "area": int(np.sum(part_m))
+                            "area": p_area,
+                            "diacritics": [],
+                            "is_dot": bool((p_h <= dot_dim_thresh and p_w <= dot_dim_thresh) or p_area <= dot_area_thresh)
                         })
                 if np.sum(cur_m) > 0:
                     r = np.where(np.any(cur_m, axis=1))[0]
                     c = np.where(np.any(cur_m, axis=0))[0]
+                    p_area = int(np.sum(cur_m))
+                    p_h = int(r[-1] - r[0] + 1)
+                    p_w = int(c[-1] - c[0] + 1)
                     res_glyphs.append({
                         "mask": cur_m[r[0]:r[-1] + 1, c[0]:c[-1] + 1],
                         "bbox_local": (int(r[0]), int(c[0]), int(r[-1]) + 1, int(c[-1]) + 1),
-                        "area": int(np.sum(cur_m))
+                        "area": p_area,
+                        "diacritics": [],
+                        "is_dot": bool((p_h <= dot_dim_thresh and p_w <= dot_dim_thresh) or p_area <= dot_area_thresh)
                     })
 
         return sorted(res_glyphs, key=lambda g: g["bbox_local"][1])
@@ -650,14 +789,38 @@ class GlyphSegmenter:
 
         # Vectorize glyph ductus using Our Model (Kinematic Quill Tracker)
         try:
-            ordered_strokes = self.calligraphic_vectorizer.extract_calligraphic_ductus(g_mask)
+            is_seraphini = (subfolder == "seraphinianus")
+            ordered_strokes = self.calligraphic_vectorizer.extract_calligraphic_ductus(
+                g_mask,
+                single_stroke_mode=is_seraphini,
+                max_strokes=1 if is_seraphini else 6
+            )
+            
+            # Coverage audit: verify strokes cover the full glyph extent
+            needs_fallback = False
             if not ordered_strokes:
+                needs_fallback = True
+            elif not is_seraphini and gh >= 22:
+                all_y = [p[0] for s in ordered_strokes for p in s.get("points", [])]
+                if all_y:
+                    y_span = max(all_y) - min(all_y)
+                    if y_span < 0.60 * gh:
+                        needs_fallback = True
+                else:
+                    needs_fallback = True
+
+            if needs_fallback:
                 skel, widths = self.skel_engine.extract_skeleton(g_mask)
                 pixel_graph = self.graph_extractor.build_pixel_graph(skel, widths)
                 raw_strokes = self.graph_extractor.decompose_into_strokes(pixel_graph)
-                ordered_strokes = self.resolver.resolve_and_order_strokes(raw_strokes) if raw_strokes else []
+                ordered_strokes = self.resolver.resolve_and_order_strokes(raw_strokes) if raw_strokes else ordered_strokes
+                if is_seraphini and len(ordered_strokes) > 1:
+                    ordered_strokes = ordered_strokes[:1]
         except Exception:
             ordered_strokes = []
+
+        if is_seraphini and len(ordered_strokes) > 1:
+            ordered_strokes = ordered_strokes[:1]
 
         if not ordered_strokes:
             return None
@@ -690,10 +853,21 @@ class GlyphSegmenter:
             png_path = output_dir / subfolder / "glyphs" / "png" / png_filename
             svg_path = output_dir / subfolder / "glyphs" / "svg" / svg_filename
 
-            save_patch = self.normalizer.enhance_contrast_and_sharpness(
+            enhanced = self.normalizer.enhance_contrast_and_sharpness(
                 raw_patch, contrast_gain=1.35, unsharp_radius=1.0, unsharp_amount=1.6
             )
-            Image.fromarray(save_patch).save(png_path)
+            # Isolate constituent glyph tightly: mask out encroaching ink from adjacent letters
+            from scipy.ndimage import binary_dilation
+            dilated_mask = binary_dilation(g_mask, structure=np.ones((5, 5), dtype=bool))
+            alpha_mask = np.zeros((raw_patch.shape[0], raw_patch.shape[1]), dtype=np.uint8)
+            y_start = max(0, gy0 - cy0)
+            x_start = max(0, gx0 - cx0)
+            y_end = min(raw_patch.shape[0], y_start + g_mask.shape[0])
+            x_end = min(raw_patch.shape[1], x_start + g_mask.shape[1])
+            alpha_mask[y_start:y_end, x_start:x_end] = (dilated_mask[:y_end - y_start, :x_end - x_start] * 255).astype(np.uint8)
+
+            rgba_patch = np.dstack([enhanced, alpha_mask])
+            Image.fromarray(rgba_patch, mode="RGBA").save(png_path)
             with open(svg_path, "w", encoding="utf-8") as f_svg:
                 f_svg.write(svg_str)
             png_rel = f"{subfolder}/glyphs/png/{png_filename}"
@@ -847,12 +1021,19 @@ class GlyphSegmenter:
             # Guarantee that every lexical word contains at least 1 constituent glyph (monoglyph fallback)
             if glyph_idx == 0 and np.sum(w_img) >= 15:
                 try:
-                    ordered_strokes = self.calligraphic_vectorizer.extract_calligraphic_ductus(w_img)
+                    is_seraphini = (subfolder == "seraphinianus")
+                    ordered_strokes = self.calligraphic_vectorizer.extract_calligraphic_ductus(
+                        w_img,
+                        single_stroke_mode=is_seraphini,
+                        max_strokes=1 if is_seraphini else 6
+                    )
                     if not ordered_strokes:
                         skel, widths = self.skel_engine.extract_skeleton(w_img)
                         pixel_graph = self.graph_extractor.build_pixel_graph(skel, widths)
                         raw_strokes = self.graph_extractor.decompose_into_strokes(pixel_graph)
                         ordered_strokes = self.resolver.resolve_and_order_strokes(raw_strokes) if raw_strokes else []
+                        if is_seraphini and len(ordered_strokes) > 1:
+                            ordered_strokes = ordered_strokes[:1]
                 except Exception:
                     ordered_strokes = []
 

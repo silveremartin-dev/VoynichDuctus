@@ -57,15 +57,29 @@ class VectorExporter:
         return " ".join(d_tokens)
 
     @staticmethod
-    def to_svg(strokes: List[Dict[str, Any]], width: int, height: int, output_path: Optional[Union[str, Path]] = None, include_order_colors: bool = True) -> str:
+    @staticmethod
+    def to_svg(
+        strokes: List[Dict[str, Any]],
+        width: int,
+        height: int,
+        output_path: Optional[Union[str, Path]] = None,
+        include_order_colors: bool = True,
+        pad: int = 6,
+    ) -> str:
         """
         Exports strokes to an SVG string/file with embedded kinematic ordering and smooth cubic curves.
+        Includes padding in viewBox to avoid border clipping and ensure exact 1:1 alignment with scan crops.
         """
         # Palette for distinct pen-lift strokes
         colors = ["#38bdf8", "#10b981", "#f59e0b", "#c084fc", "#f43f5e", "#06b6d4", "#a855f7"]
 
+        vx = -pad
+        vy = -pad
+        vw = max(1, width + 2 * pad)
+        vh = max(1, height + 2 * pad)
+
         svg_lines = [
-            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="100%" height="100%" style="overflow:visible;">',
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vx} {vy} {vw} {vh}" width="100%" height="100%" style="overflow:hidden;">',
             '  <g id="voynich_strokes">'
         ]
 
@@ -92,8 +106,10 @@ class VectorExporter:
                 continue
 
             color = colors[i % len(colors)] if include_order_colors else "#38bdf8"
+            glyph_dim = max(width, height)
+            max_allowed_w = max(1.8, min(glyph_dim * 0.10, 3.2))
             avg_width = sum(p[2] for p in norm_pts) / len(norm_pts)
-            stroke_width = max(2.0, min(avg_width * 1.3, 7.0))
+            stroke_width = max(1.2, min(avg_width * 0.75, max_allowed_w))
 
             d_str = VectorExporter._points_to_smooth_path_d(norm_pts)
             start_y, start_x = norm_pts[0][0], norm_pts[0][1]
@@ -104,9 +120,9 @@ class VectorExporter:
                 f'stroke-linecap="round" stroke-linejoin="round" data-order="{stroke.get("order_index", i)}"/>'
             )
             # Pen-down touch point indicator (small circle on stroke start)
-            dot_r = max(2.5, min(stroke_width * 0.8, 5.0))
+            dot_r = max(1.1, min(stroke_width * 0.65, 2.0))
             svg_lines.append(
-                f'    <circle cx="{start_x:.2f}" cy="{start_y:.2f}" r="{dot_r:.2f}" fill="#10b981" opacity="0.9"/>'
+                f'    <circle cx="{start_x:.2f}" cy="{start_y:.2f}" r="{dot_r:.2f}" fill="#10b981" opacity="0.95"/>'
             )
 
         svg_lines.append("  </g>")

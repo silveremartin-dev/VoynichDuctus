@@ -22,46 +22,69 @@ def clean_catalogue_for_embed(cat_dict: dict) -> dict:
     cleaned_alphabet = []
     for arch in cat_dict.get("alphabet", []):
         all_inst = arch.get("all_instances", [])
+        source_insts = all_inst if all_inst else arch.get("sample_instances", [])
         samples = []
-        if all_inst:
-            for inst in all_inst[:24]:
+        for inst in source_insts[:36]:
+            if isinstance(inst, dict):
                 samples.append({
                     "glyph_id": inst.get("glyph_id", ""),
                     "page_id": inst.get("page_id", ""),
                     "line_id": inst.get("line_id", ""),
                     "word_id": inst.get("word_id", ""),
                     "bbox": inst.get("bbox", [0, 0, 0, 0]),
+                    "polygon": inst.get("polygon", []),
                     "width": inst.get("width", 0),
                     "height": inst.get("height", 0),
-                    "stroke_count": inst.get("stroke_count", 1)
+                    "height_mm": inst.get("height_mm", round(inst.get("height", 0) * 0.125, 2)),
+                    "width_mm": inst.get("width_mm", round(inst.get("width", 0) * 0.125, 2)),
+                    "height_dmm": inst.get("height_dmm", round(inst.get("height", 0) * 1.25, 1)),
+                    "width_dmm": inst.get("width_dmm", round(inst.get("width", 0) * 1.25, 1)),
+                    "area_mm2": inst.get("area_mm2", 0.0),
+                    "stroke_count": inst.get("stroke_count", 1),
+                    "loop_count": inst.get("loop_count", arch.get("loop_count", 0)),
+                    "topology_group": inst.get("topology_group", arch.get("topology_group", "")),
+                    "crop_uri": inst.get("crop_uri", ""),
+                    "svg_content": inst.get("svg_content", inst.get("ductus_svg", "")),
+                    "eva_char": inst.get("eva_char", "")
                 })
-        elif arch.get("sample_instances"):
-            for item in arch.get("sample_instances", [])[:24]:
-                if isinstance(item, dict):
-                    samples.append(item)
-                else:
-                    samples.append({
-                        "glyph_id": str(item),
-                        "page_id": str(item).split("_")[0] if "_" in str(item) else "",
-                        "bbox": [0, 0, 0, 0],
-                        "width": arch.get("mean_width", 20),
-                        "height": arch.get("mean_height", 25),
-                        "stroke_count": arch.get("mean_strokes", 1)
-                    })
+            else:
+                samples.append({
+                    "glyph_id": str(inst),
+                    "page_id": str(inst).split("_")[0] if "_" in str(inst) else "",
+                    "bbox": [0, 0, 0, 0],
+                    "width": arch.get("mean_width", 20),
+                    "height": arch.get("mean_height", 25),
+                    "stroke_count": arch.get("mean_strokes", 1),
+                    "loop_count": arch.get("loop_count", 0),
+                    "topology_group": arch.get("topology_group", ""),
+                    "crop_uri": "",
+                    "svg_content": "",
+                    "eva_char": ""
+                })
 
         cleaned_alphabet.append({
             "type_id": arch.get("type_id"),
             "rank": arch.get("rank"),
             "cluster_index": arch.get("cluster_index"),
             "frequency": arch.get("frequency"),
+            "folio_frequency": arch.get("folio_frequency", len(samples)),
             "percentage": arch.get("percentage"),
+            "topology_group": arch.get("topology_group", ""),
+            "loop_count": arch.get("loop_count", 0),
             "exemplar_id": arch.get("exemplar_id"),
+            "exemplar_page_id": arch.get("exemplar_page_id", ""),
+            "exemplar_bbox": arch.get("exemplar_bbox", [0, 0, 0, 0]),
+            "exemplar_crop_uri": arch.get("exemplar_crop_uri", ""),
             "exemplar_png": arch.get("exemplar_png", ""),
             "exemplar_svg": arch.get("exemplar_svg", ""),
             "exemplar_svg_content": arch.get("exemplar_svg_content", ""),
             "mean_strokes": arch.get("mean_strokes"),
             "mean_height": arch.get("mean_height"),
             "mean_width": arch.get("mean_width"),
+            "mean_height_mm": arch.get("mean_height_mm"),
+            "mean_width_mm": arch.get("mean_width_mm"),
+            "mean_height_dmm": arch.get("mean_height_dmm"),
+            "mean_width_dmm": arch.get("mean_width_dmm"),
             "corpus_match": arch.get("corpus_match"),
             "corpus_matches": arch.get("corpus_matches"),
             "total_instances_count": arch.get("total_instances_count", arch.get("frequency", 0)),
@@ -121,11 +144,24 @@ def main():
 
     # 1. Index Voynich Pages
     print("[*] Indexing Voynich pages...")
-    v_json_files = sorted((voynich_dir / "pages").glob("*.json"))
+    from voynich_ductus.ingestion.codicology import natural_folio_sort_key, build_folio_codicology_registry
+
+    v_json_files = sorted((voynich_dir / "pages").glob("*.json"), key=lambda p: natural_folio_sort_key(p.stem))
+    v_pids = [jf.stem for jf in v_json_files]
+    cod_reg = build_folio_codicology_registry(v_pids)
     v_pages_stubs = []
 
     for idx, jf in enumerate(v_json_files):
         stub = parse_page_stub_fast(jf, "voynich")
+        c_info = cod_reg.get(stub["page_id"], {})
+        stub["quire_id"] = c_info.get("quire", "")
+        stub["section"] = c_info.get("section", "")
+        stub["singulion_id"] = c_info.get("singulion_id", "")
+        stub["conjoint_leaf"] = c_info.get("conjoint_leaf")
+        stub["codex_index"] = c_info.get("codex_index", idx + 1)
+        stub["ld_index"] = c_info.get("ld_index", idx + 1)
+        stub["notes"] = c_info.get("notes", "")
+
         # Pre-load full content for f1r (page 0)
         if idx == 0:
             with open(jf, "r", encoding="utf-8") as f_full:
@@ -133,6 +169,11 @@ def main():
             stub["lines"] = p_full.get("lines", [])
             stub["words"] = p_full.get("words", [])
             stub["glyphs"] = p_full.get("glyphs", [])
+            stub["glyphs_neural_pca"] = p_full.get("glyphs_neural_pca", [])
+            stub["glyphs_hybrid_consensus"] = p_full.get("glyphs_hybrid_consensus", [])
+            stub["glyph_count"] = len(stub["glyphs"])
+            stub["glyph_count_neural_pca"] = len(stub["glyphs_neural_pca"])
+            stub["glyph_count_hybrid_consensus"] = len(stub["glyphs_hybrid_consensus"])
             stub["yield_report"] = p_full.get("yield_report", {})
         v_pages_stubs.append(stub)
 
@@ -151,6 +192,10 @@ def main():
             stub["lines"] = p_full.get("lines", [])
             stub["words"] = p_full.get("words", [])
             stub["glyphs"] = p_full.get("glyphs", [])
+            stub["glyphs_neural_pca"] = p_full.get("glyphs_neural_pca", [])
+            stub["glyphs_hybrid_consensus"] = p_full.get("glyphs_hybrid_consensus", [])
+            stub["glyph_count_neural_pca"] = len(stub["glyphs_neural_pca"])
+            stub["glyph_count_hybrid_consensus"] = len(stub["glyphs_hybrid_consensus"])
         s_pages_stubs.append(stub)
 
     print(f"  [+] Indexed {len(s_pages_stubs)} Seraphinianus pages.")

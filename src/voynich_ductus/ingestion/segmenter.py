@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
 from scipy.ndimage import label, find_objects
 from skimage.measure import regionprops
+from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
 
 
 class LineSegmenter:
@@ -14,11 +15,25 @@ class LineSegmenter:
     from binarized historical manuscript pages.
     """
 
-    def __init__(self, min_line_pitch: int = 35, min_line_height: int = 18, min_word_width: int = 18, min_word_area: int = 40):
-        self.min_line_pitch = min_line_pitch
-        self.min_line_height = min_line_height
-        self.min_word_width = min_word_width
-        self.min_word_area = min_word_area
+    def __init__(
+        self,
+        min_line_pitch: int = 35,
+        min_line_height: int = 18,
+        min_word_width: int = 18,
+        min_word_area: int = 40,
+        scale_calib: Optional[MetricScaleCalibration] = None
+    ):
+        self.scale_calib = scale_calib
+        if scale_calib is not None:
+            self.min_line_pitch = max(18, int(round(scale_calib.mm_to_px(scale_calib.LINE_PITCH_MEDIEVAL_MM * 0.65))))
+            self.min_line_height = max(10, int(round(scale_calib.min_glyph_height_px)))
+            self.min_word_width = max(8, int(round(scale_calib.min_glyph_width_px)))
+            self.min_word_area = max(15, int(round(scale_calib.min_glyph_area_px * 2.0)))
+        else:
+            self.min_line_pitch = min_line_pitch
+            self.min_line_height = min_line_height
+            self.min_word_width = min_word_width
+            self.min_word_area = min_word_area
 
     def isolate_text_paragraph(self, binary_ink: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
         """
@@ -155,13 +170,18 @@ class LineSegmenter:
         results.sort(key=lambda item: item["bbox"][0])
         return results
 
-    def segment_words(self, line_ink: np.ndarray, line_offset: Tuple[int, int] = (0, 0), space_gap_min: int = 12, space_threshold: Optional[int] = None) -> List[Dict[str, Any]]:
+    def segment_words(self, line_ink: np.ndarray, line_offset: Tuple[int, int] = (0, 0), space_gap_min: Optional[int] = None, space_threshold: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Segments a text line into clean, intact words using connected component horizontal grouping
         and vertical whitespace gap detection.
         """
         if space_threshold is not None:
             space_gap_min = space_threshold
+        elif space_gap_min is None:
+            if self.scale_calib is not None:
+                space_gap_min = max(8, int(round(self.scale_calib.word_space_min_px)))
+            else:
+                space_gap_min = 12
         y_off, x_off = line_offset
 
         labeled_l, num_l = label(line_ink)

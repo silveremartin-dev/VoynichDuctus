@@ -55,30 +55,44 @@ When interacting with or extending this codebase, all AI agents must adhere to t
 ```
 
 ### 3.1 `ingestion`
-- **Goal**: Fetch scans and segment parchment into ink masks.
+- **Goal**: Fetch scans, calibrate physical resolution, and segment parchment into ink masks.
 - **Key Classes**:
+  - `MetricScaleCalibration`: Converts between physical metric units (millimeters, tenths of a millimeter) and digital scan pixels across codices (Voynich Beinecke MS 408: 225 mm, Seraphinianus: 350 mm, Gallica: 280 mm). Guarantees scale-invariant thresholds for nib widths, dot impact footprints (diameter <= 0.55 mm / 5.5 dmm), min glyph extents (0.85 mm / 8.5 dmm), scale bands (TINY <= 1.3 mm, CORE, TALL >= 3.4 mm, WIDE >= 3.4 mm), and inter-word whitespace (1.1 mm).
   - `IIIFClient`: Handles Beinecke MS 408 URL schemes, standardizes folio IDs (e.g. `f001r`, `f067v2`).
   - `Binarizer`: Implements Sauvola ($k=0.2, R=128$), Niblack, and Wolf-Jolion local adaptive thresholding.
   - `LineSegmenter`: Projects profiles and connected components for line/word bounding boxes.
+  - `SpatialWordPartitioner`: Guarantees strict disjoint spatial partitioning across all words on a page (zero shared parchment, Voronoi/watershed contested boundary arbitration).
+  - `GlyphSegmenter`: Assembles word connected components into glyphs with physical nib impact thresholding and supralinear diacritic decoupling.
 
 ### 3.2 `vectorizer`
-- **Goal**: Convert 2D pixel clusters into ordered $(x, y, t, \text{width})$ stroke trajectories.
+- **Goal**: Convert 2D pixel clusters into ordered $(x, y, t, \text{width})$ stroke trajectories with strict adherence to paleographic constraints.
+- **Key Divergence (Voynich vs. Seraphinianus)**:
+  - **Codex Seraphinianus (Modern Cursive Ribbon)**: Strictly 1 continuous stroke per connected component (`single_stroke_mode=True`, `max_strokes=1`). Follows fluid automobile-like inertia with no sharp angles > 90°, no retracing, and 100% skeleton coverage through an iterative 12-pass ridge extension loop oriented left-to-right.
+  - **Voynich Manuscript (Medieval Quill Mechanics)**: Multi-stroke calligraphic ductus with deliberate pen lifts (`single_stroke_mode=False`). Enforces a strict physical ceiling of **1 to 4 strokes maximum** per glyph (`max_strokes=4`), governed by a 40° beveled quill nib producing authentic *pleins et déliés*. Compound gallows (`cth`, `ckh`) utilize up to 4 strokes; minims, crescents, and bowls use 1 to 2 strokes.
+  - **Physical Nib Impact Threshold**: Objects $\le 8\text{ px}$ or $\text{area} \le 25\text{ px}^2$ bypass ridge tracking and are derendered as instantaneous touchdown impact points (`is_impact=True`, $\text{length}=0.0$).
 - **Key Classes**:
+  - `CalligraphicVectorizer`: Native quill physics engine (40° nib bevel) and single-stroke continuous cursive tracker.
   - `Skeletonizer`: 1D medial axis transform + Euclidean distance transform for stroke width profiling (*plein/délié*).
   - `StrokeGraphExtractor`: Converts 8-connectivity skeleton pixels to a `NetworkX` graph and isolates path segments between critical nodes (degree $\neq 2$).
   - `JunctionResolver`: Resolves crossing ambivalences via minimum bending energy (Euler-Bernoulli) and applies 15th-century right-handed scribal priors.
   - `VectorExporter`: Exports standardized SVG (with kinematic color mapping and custom `data-order` attributes) and structured JSON.
 
 ### 3.3 `embeddings`
-- **Goal**: Continuous numerical representation of strokes.
+- **Goal**: Continuous numerical representation of strokes and glyphs.
 - **Key Classes**:
   - `GeometricFeatureExtractor`: 16-D invariant descriptors (tortuosity, aspect ratio, entry/exit tangents, orientation histograms).
+  - `WordScribalEncoder` & `NeuralWordDecomposer`: Encodes intact word crops into 1D horizontal latent trajectories $Z(x) \in \mathbb{R}^{32}$ and discovers constituent glyph basis functions via spatial PCA / NMF without heuristic knife cutting.
   - `StrokeLatentProjector`: Normalization and dimensionality reduction (PCA / VAE).
+  - `DINOv2EmbeddingEngine`: Meta DINOv2 self-supervised visual features combined with physical logarithmic scale invariants ($\log h, \log w, \log \text{area}$).
 
 ### 3.4 `clustering`
 - **Goal**: Unsupervised alphabet induction and tokenization.
+- **Strict Invariance Rules**:
+  - **Topological Loop Disjointness**: `0L` (loopless), `1L` (single loop), and `2+L` (multiloop) glyphs never collide into the same canonical archetype.
+  - **Physical Scale Stratification**: Glyphs are strictly partitioned by physical scale bands (`TINY`, `CORE`, `TALL`, `WIDE`) so specks/diacritics cannot mix with letters, nor minims with tall gallows.
+  - **Corpus Census Projections**: Archetype frequencies reflect the complete corpus census (162,333 glyphs across 225 Voynich folios, 456,943 glyphs across 371 Seraphinianus pages), yielding realistic occurrences in the tens of thousands.
 - **Key Classes**:
-  - `GlyphClusterer`: Density-based clustering (DBSCAN / HDBSCAN / Agglomerative) discovering canonical glyph primitives without human labels.
+  - `GlyphClusterer` & `GlyphCatalogue`: Tripartite hybrid induction (Strict Topological Partitioning + DINOv2 & Morphological Clustering + Consensus Medoid Verification).
   - `StrokeTokenizer`: Generates unbiased token sequences (e.g. `G01-G04-G12`).
 
 ### 3.5 `diagnostics`
@@ -131,3 +145,4 @@ pytest tests/ -v
 - Type annotations on all public methods (`typing.List`, `typing.Dict`, `typing.Tuple`, `typing.Optional`, `typing.Union`).
 - Comprehensive docstrings explaining theoretical rationale and mathematical equations.
 - Non-interactive matplotlib backend (`matplotlib.use("Agg")`) for headless execution.
+- **Strict English UI**: All user interfaces, dashboards, visualizers, and web explorers (including HTML/CSS/JS labels, buttons, comboboxes, tooltips, status banners, inspector details, and codicological notes) must be written exclusively in English.
