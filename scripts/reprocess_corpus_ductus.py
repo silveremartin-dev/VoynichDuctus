@@ -450,39 +450,16 @@ def reprocess_voynich(base_dir: Path):
     page_id = page_data.get("page_id", "f1r")
     raw_words = page_data.get("words", [])
 
-    yale_raw_path = root_dir / "data" / "raw" / "scans" / "voynich" / "yale" / "f001r.jpg"
-    if yale_raw_path.exists():
-        yale_bgr = cv2.imread(str(yale_raw_path))
-        if yale_bgr is not None:
-            from voynich_ductus.ingestion.image_registration import MultimodalFolioAligner
-            aligner = MultimodalFolioAligner()
-            ref_img = cv2.imread(str(page_img_path))
-            already_yale = (ref_img is not None and ref_img.shape[:2] == yale_bgr.shape[:2])
-            if not already_yale and ref_img is not None:
-                print("  [+] Performing Multimodal Folio SIFT/RANSAC registration onto Yale HD scan (3168x2500)...")
-                reg = aligner.compute_registration(ref_img, yale_bgr, folio_id="f1r1800_to_yale")
-                if reg.get("status") == "success":
-                    M = reg["matrix_2x3"]
-                    for w in raw_words:
-                        w["bbox"] = list(aligner.transform_bbox(w["bbox"], M))
-                        if "polygon" in w and w["polygon"]:
-                            w["polygon"] = aligner.transform_polygon(w["polygon"], M)
-                    print(f"  [+] Bounding boxes accurately transformed onto Yale HD plate ({reg.get('inliers')} inliers, scale {reg.get('scale_x')}).")
-
-            # Apply CLAHE contrast enhancement on LAB L channel to restore rich iron gall ink contrast
-            lab = cv2.cvtColor(yale_bgr, cv2.COLOR_BGR2LAB)
-            l, a, b = cv2.split(lab)
-            clahe = cv2.createCLAHE(clipLimit=2.8, tileGridSize=(8, 8))
-            cl = clahe.apply(l)
-            enhanced_yale = cv2.cvtColor(cv2.merge((cl, a, b)), cv2.COLOR_LAB2BGR)
-            cv2.imwrite(str(page_img_path), enhanced_yale)
-            img = enhanced_yale
-            H_img, W_img = img.shape[:2]
-            page_data["image_width"] = int(W_img)
-            page_data["image_height"] = int(H_img)
-    else:
-        img = cv2.imread(str(page_img_path))
-        if img is None:
+    # Ensure standard corpus resolution (1272x1800) matching f1r.json coordinate space
+    img = cv2.imread(str(page_img_path))
+    if img is None:
+        raise FileNotFoundError(f"Page image not found: {page_img_path}")
+    if img.shape[0] != 1800 or img.shape[1] != 1272:
+        img = cv2.resize(img, (1272, 1800), interpolation=cv2.INTER_LANCZOS4)
+        cv2.imwrite(str(page_img_path), img)
+    H_img, W_img = img.shape[:2]
+    page_data["image_width"] = int(W_img)
+    page_data["image_height"] = int(H_img)
             raise FileNotFoundError(f"Could not load image: {page_img_path}")
         H_img, W_img = img.shape[:2]
 
