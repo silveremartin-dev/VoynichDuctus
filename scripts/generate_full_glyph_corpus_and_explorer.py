@@ -2502,7 +2502,7 @@ def generate_explorer_html(
             const page = data[currentMs].pages[currentPageIdx];
             if (page.page_img_rel) {{
                 pageImageObj = new Image();
-                pageImageObj.src = page.page_img_rel;
+                pageImageObj.src = `${{page.page_img_rel}}?v=${{page.image_width || 1272}}_${{Date.now()}}`;
                 pageImageObj.onload = () => {{
                     fitCanvasToWrapper();
                     drawCanvasOverlay();
@@ -2635,41 +2635,48 @@ def generate_explorer_html(
             const ctx = canvas.getContext('2d');
             ctx.drawImage(pageImageObj, 0, 0);
 
-            // Responsive line thickness factor so bounding boxes stay clearly visible even when zoomed out on full page
+            // Responsive scale factors matching coordinate space to canvas resolution
+            const scaleX = (page && page.image_width && page.image_width > 0) ? (canvas.width / page.image_width) : 1.0;
+            const scaleY = (page && page.image_height && page.image_height > 0) ? (canvas.height / page.image_height) : 1.0;
+
             const currentZoom = (typeof zoomScale !== 'undefined' && zoomScale > 0) ? zoomScale : 1.0;
             const lineThickness = Math.max(2.6, 3.4 / Math.sqrt(currentZoom));
             const wordThickness = Math.max(2.4, 3.0 / Math.sqrt(currentZoom));
             const glyphThickness = Math.max(2.0, 2.6 / Math.sqrt(currentZoom));
 
-            // Helper function to render tight ink polygon contour or fallback to bounding box
+            // Helper function to render tight ink polygon contour or fallback to bounding box with scaling
             function renderShape(item, isFill, isStroke) {{
                 if (item.polygon && item.polygon.length >= 3) {{
                     ctx.beginPath();
-                    ctx.moveTo(item.polygon[0][0], item.polygon[0][1]);
+                    ctx.moveTo(item.polygon[0][0] * scaleX, item.polygon[0][1] * scaleY);
                     for (let p = 1; p < item.polygon.length; p++) {{
-                        ctx.lineTo(item.polygon[p][0], item.polygon[p][1]);
+                        ctx.lineTo(item.polygon[p][0] * scaleX, item.polygon[p][1] * scaleY);
                     }}
                     ctx.closePath();
                     if (isFill) ctx.fill();
                     if (isStroke) ctx.stroke();
                 }} else if (item.bbox) {{
                     const [y0, x0, y1, x1] = item.bbox;
-                    if (isFill) ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
-                    if (isStroke) ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+                    const rx = x0 * scaleX;
+                    const ry = y0 * scaleY;
+                    const rw = (x1 - x0) * scaleX;
+                    const rh = (y1 - y0) * scaleY;
+                    if (isFill) ctx.fillRect(rx, ry, rw, rh);
+                    if (isStroke) ctx.strokeRect(rx, ry, rw, rh);
                 }}
             }}
 
-            // Active model glyph colors (consistently used across normal and focus modes)
+            // Active model glyph colors
             let glyphStroke = 'rgba(56, 189, 248, 0.90)';   // Electric Cyan (#38bdf8)
-            let glyphFill = 'rgba(56, 189, 248, 0.18)';
+            let glyphFill = 'rgba(56, 189, 248, 0.16)';
             let activeColor = '#00e5ff';
             if (activeSegmentationMode === 'neural_word_pca') {{
                 glyphStroke = 'rgba(232, 121, 249, 0.90)'; // Vivid Magenta (#e879f9)
-                glyphFill = 'rgba(232, 121, 249, 0.22)';
+                glyphFill = 'rgba(232, 121, 249, 0.18)';
                 activeColor = '#f43f5e';
             }} else if (activeSegmentationMode === 'hybrid_consensus') {{
                 glyphStroke = 'rgba(16, 185, 129, 0.90)';  // Bright Emerald (#10b981)
-                glyphFill = 'rgba(16, 185, 129, 0.22)';
+                glyphFill = 'rgba(16, 185, 129, 0.18)';
                 activeColor = '#34d399';
             }}
 
@@ -2678,11 +2685,11 @@ def generate_explorer_html(
 
             if (hasIsolation) {{
                 // Dim unselected background canvas area
-                ctx.fillStyle = 'rgba(5, 8, 16, 0.65)';
+                ctx.fillStyle = 'rgba(5, 8, 16, 0.72)';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
 
                 if (archetypeFilterVal && archetypeFilterVal !== 'ALL') {{
-                    // Highlight ALL occurrences of this archetype on the page!
+                    // Highlight ALL occurrences of this archetype on the page
                     const archGlyphs = getPageGlyphs(page).filter(g => g.canonical_type === archetypeFilterVal);
                     archGlyphs.forEach(g => {{
                         ctx.strokeStyle = activeColor;
@@ -2691,21 +2698,45 @@ def generate_explorer_html(
                         renderShape(g, true, true);
                     }});
                 }} else if (selectedWord) {{
-                    ctx.strokeStyle = '#f59e0b';
-                    ctx.lineWidth = wordThickness * 1.6;
-                    ctx.fillStyle = 'rgba(245, 158, 11, 0.32)';
-                    renderShape(selectedWord, true, true);
+                    // 1. Redraw crisp, un-dimmed parchment and ink for the isolated word (eliminating any orange muddy wash)
+                    if (selectedWord.bbox) {{
+                        const [wy0, wx0, wy1, wx1] = selectedWord.bbox;
+                        const pad = 6;
+                        const rx = Math.max(0, (wx0 - pad) * scaleX);
+                        const ry = Math.max(0, (wy0 - pad) * scaleY);
+                        const rw = Math.min(canvas.width - rx, (wx1 - wx0 + pad * 2) * scaleX);
+                        const rh = Math.min(canvas.height - ry, (wy1 - wy0 + pad * 2) * scaleY);
+                        ctx.drawImage(pageImageObj, rx, ry, rw, rh, rx, ry, rw, rh);
+                    }}
 
-                    // Child glyphs inside selected word
-                    const wordChildren = getPageGlyphs(page).filter(g => g.word_id === selectedWord.word_id);
-                    wordChildren.forEach(g => {{
-                        const isThisGlyph = selectedGlyph && selectedGlyph.glyph_id === g.glyph_id;
-                        ctx.strokeStyle = isThisGlyph ? '#ffffff' : activeColor;
-                        ctx.lineWidth = isThisGlyph ? glyphThickness * 2.0 : glyphThickness * 1.4;
-                        ctx.fillStyle = isThisGlyph ? 'rgba(255, 255, 255, 0.35)' : glyphFill;
-                        renderShape(g, true, true);
-                    }});
+                    // 2. If showWords is enabled, draw clean outer boundary without background fill
+                    if (showWords) {{
+                        ctx.strokeStyle = '#f59e0b';
+                        ctx.lineWidth = wordThickness;
+                        renderShape(selectedWord, false, true);
+                    }}
+
+                    // 3. If showGlyphs is enabled, draw constituent glyphs in active model color
+                    if (showGlyphs) {{
+                        const wordChildren = getPageGlyphs(page).filter(g => g.word_id === selectedWord.word_id);
+                        wordChildren.forEach(g => {{
+                            const isThisGlyph = selectedGlyph && selectedGlyph.glyph_id === g.glyph_id;
+                            ctx.strokeStyle = isThisGlyph ? '#ffffff' : activeColor;
+                            ctx.lineWidth = isThisGlyph ? glyphThickness * 2.2 : glyphThickness * 1.3;
+                            ctx.fillStyle = isThisGlyph ? 'rgba(255, 255, 255, 0.25)' : glyphFill;
+                            renderShape(g, true, true);
+                        }});
+                    }}
                 }} else if (selectedGlyph) {{
+                    if (selectedGlyph.bbox) {{
+                        const [gy0, gx0, gy1, gx1] = selectedGlyph.bbox;
+                        const pad = 6;
+                        const rx = Math.max(0, (gx0 - pad) * scaleX);
+                        const ry = Math.max(0, (gy0 - pad) * scaleY);
+                        const rw = Math.min(canvas.width - rx, (gx1 - gx0 + pad * 2) * scaleX);
+                        const rh = Math.min(canvas.height - ry, (gy1 - gy0 + pad * 2) * scaleY);
+                        ctx.drawImage(pageImageObj, rx, ry, rw, rh, rx, ry, rw, rh);
+                    }}
                     ctx.strokeStyle = activeColor;
                     ctx.lineWidth = glyphThickness * 1.8;
                     ctx.fillStyle = glyphFill;
@@ -2714,10 +2745,14 @@ def generate_explorer_html(
                 return;
             }}
 
-            // 1. Layer 1: Text Lines (🟣 Amethyst Purple: 2D Block or 1D Baseline Guide)
+            // 1. Layer 1: Text Lines (🟣 Amethyst Purple)
             if (showLines && page.lines) {{
                 page.lines.forEach(l => {{
                     const [ly0, lx0, ly1, lx1] = l.bbox;
+                    const sx0 = lx0 * scaleX;
+                    const sy0 = ly0 * scaleY;
+                    const sx1 = lx1 * scaleX;
+                    const sy1 = ly1 * scaleY;
                     const isSelectedLine = selectedLineId && selectedLineId === l.line_id;
                     if (isSelectedLine) {{
                         ctx.strokeStyle = '#c084fc';
@@ -2729,42 +2764,40 @@ def generate_explorer_html(
                         ctx.fillStyle = 'rgba(168, 85, 247, 0.08)';
                     }}
                     if (lineMode === '1d') {{
-                        // 1D Linear Guideline Mode (Single baseline running across words)
-                        const midY = (ly0 + ly1) / 2;
+                        const midY = (sy0 + sy1) / 2;
                         ctx.setLineDash([10, 4]);
                         ctx.beginPath();
-                        ctx.moveTo(lx0, midY);
-                        ctx.lineTo(lx1, midY);
+                        ctx.moveTo(sx0, midY);
+                        ctx.lineTo(sx1, midY);
                         ctx.stroke();
                         ctx.setLineDash([]);
-                        // Small guide ticks at extremities
                         ctx.beginPath();
-                        ctx.moveTo(lx0, ly0 + 3);
-                        ctx.lineTo(lx0, ly1 - 3);
-                        ctx.moveTo(lx1, ly0 + 3);
-                        ctx.lineTo(lx1, ly1 - 3);
+                        ctx.moveTo(sx0, sy0 + 3);
+                        ctx.lineTo(sx0, sy1 - 3);
+                        ctx.moveTo(sx1, sy0 + 3);
+                        ctx.lineTo(sx1, sy1 - 3);
                         ctx.stroke();
                     }} else {{
-                        // 2D Area Block Mode (Interline bounding space)
                         ctx.setLineDash([8, 5]);
-                        ctx.strokeRect(lx0, ly0, lx1 - lx0, ly1 - ly0);
-                        ctx.fillRect(lx0, ly0, lx1 - lx0, ly1 - ly0);
+                        ctx.strokeRect(sx0, sy0, sx1 - sx0, sy1 - sy0);
+                        ctx.fillRect(sx0, sy0, sx1 - sx0, sy1 - sy0);
                         ctx.setLineDash([]);
                     }}
-                    // Line number indicator
                     ctx.font = '11px monospace';
                     ctx.fillStyle = '#d8b4fe';
-                    ctx.fillText(l.line_id, lx0 + 4, ly0 + 13);
+                    ctx.fillText(l.line_id, sx0 + 4, sy0 + 13);
                 }});
             }}
 
-            // 2. Layer 2: Voynich Reference Consensus Boxes (📦 Amber Dashed Layout Box)
+            // 2. Layer 2: Voynich Reference Consensus Boxes
             if (showVoynichBoxes && page.words) {{
                 page.words.forEach(w => {{
                     if (!w.bbox) return;
                     const [by0, bx0, by1, bx1] = w.bbox;
-                    const bw = bx1 - bx0;
-                    const bh = by1 - by0;
+                    const bx = bx0 * scaleX;
+                    const by = by0 * scaleY;
+                    const bw = (bx1 - bx0) * scaleX;
+                    const bh = (by1 - by0) * scaleY;
                     const isSelectedWord = selectedWord && selectedWord.word_id === w.word_id;
                     const isParentWord = selectedGlyph && selectedGlyph.word_id === w.word_id;
 
@@ -2779,15 +2812,14 @@ def generate_explorer_html(
                         ctx.lineWidth = Math.max(1.3, wordThickness * 0.8);
                         ctx.fillStyle = 'rgba(245, 158, 11, 0.04)';
                     }}
-                    ctx.strokeRect(bx0, by0, bw, bh);
-                    ctx.fillRect(bx0, by0, bw, bh);
+                    ctx.strokeRect(bx, by, bw, bh);
+                    ctx.fillRect(bx, by, bw, bh);
                     ctx.setLineDash([]);
 
-                    // Display transcription or word reference label
                     const label = (w.transcriptions && (w.transcriptions.voynichese || w.transcriptions.eva)) || w.eva_text || w.word_id.split('_').slice(-1)[0];
                     ctx.font = 'bold 10px monospace';
                     ctx.fillStyle = (isSelectedWord || isParentWord) ? '#fde68a' : 'rgba(245, 158, 11, 0.90)';
-                    ctx.fillText(label, bx0 + 2, Math.max(10, by0 - 3));
+                    ctx.fillText(label, bx + 2, Math.max(10, by - 3));
                     ctx.restore();
                 }});
             }}
@@ -2797,18 +2829,14 @@ def generate_explorer_html(
                 page.words.forEach(w => {{
                     const isSelectedWord = selectedWord && selectedWord.word_id === w.word_id;
                     const isParentWord = selectedGlyph && selectedGlyph.word_id === w.word_id;
-                    if (isSelectedWord) {{
+                    if (isSelectedWord || isParentWord) {{
                         ctx.strokeStyle = '#eab308';
                         ctx.lineWidth = wordThickness * 1.6;
-                        ctx.fillStyle = 'rgba(234, 179, 8, 0.35)';
-                    }} else if (isParentWord) {{
-                        ctx.strokeStyle = '#eab308';
-                        ctx.lineWidth = wordThickness * 1.3;
-                        ctx.fillStyle = 'rgba(234, 179, 8, 0.22)';
+                        ctx.fillStyle = 'rgba(234, 179, 8, 0.20)';
                     }} else {{
                         ctx.strokeStyle = 'rgba(234, 179, 8, 0.85)';
                         ctx.lineWidth = wordThickness;
-                        ctx.fillStyle = 'rgba(234, 179, 8, 0.10)';
+                        ctx.fillStyle = 'rgba(234, 179, 8, 0.06)';
                     }}
                     renderShape(w, true, true);
                 }});
@@ -3020,12 +3048,19 @@ def generate_explorer_html(
             // Click on canvas box
             wrapper.addEventListener('click', (evt) => {{
                 if (isPanning) return;
-                const rect = wrapper.getBoundingClientRect();
-                const clickCanvasX = (evt.clientX - rect.left - panX) / zoomScale;
-                const clickCanvasY = (evt.clientY - rect.top - panY) / zoomScale;
-
                 const page = data[currentMs].pages[currentPageIdx];
                 if (!page) return;
+
+                const rect = wrapper.getBoundingClientRect();
+                const clickRawX = (evt.clientX - rect.left - panX) / zoomScale;
+                const clickRawY = (evt.clientY - rect.top - panY) / zoomScale;
+
+                const canvas = document.getElementById('page-canvas');
+                const scaleX = (page && page.image_width && page.image_width > 0) ? (canvas.width / page.image_width) : 1.0;
+                const scaleY = (page && page.image_height && page.image_height > 0) ? (canvas.height / page.image_height) : 1.0;
+
+                const clickCanvasX = clickRawX / scaleX;
+                const clickCanvasY = clickRawY / scaleY;
 
                 // Ray-casting point-in-polygon test
                 function pointInPoly(px, py, poly) {{
@@ -3196,6 +3231,27 @@ def generate_explorer_html(
             }} else {{
                 renderWordGrid();
             }}
+        }}
+
+                const serafiniIdMap = new Map();
+        function getSerafiniGlyphCode(g, fallbackIdx = 0) {{
+            if (!g) return 'G??';
+            if (g.canonical_type && g.canonical_type !== 'G??') return g.canonical_type;
+            if (serafiniIdMap.size === 0 && data['seraphinianus'] && data['seraphinianus'].catalogue && data['seraphinianus'].catalogue.alphabet) {{
+                data['seraphinianus'].catalogue.alphabet.forEach(a => {{
+                    (a.all_instances || a.sample_instances || []).forEach(inst => {{
+                        const gid = typeof inst === 'string' ? inst : inst.glyph_id;
+                        if (gid) serafiniIdMap.set(gid, a.type_id);
+                    }});
+                }});
+            }}
+            if (serafiniIdMap.has(g.glyph_id)) {{
+                const t = serafiniIdMap.get(g.glyph_id);
+                g.canonical_type = t;
+                return t;
+            }}
+            // Deterministic emergent fallback label based on index in word
+            return `S${{String(fallbackIdx + 1).padStart(2, '0')}}`;
         }}
 
         function getModelGlyphLabel(g) {{
@@ -3441,6 +3497,28 @@ def generate_explorer_html(
                             </div>
                         </div>
                     ` : ''}}
+                    ${{currentMs === 'seraphinianus' ? `
+                        <div style="background:#111827; border:1px solid #c084fc; border-radius:6px; padding:8px 10px; margin-bottom:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <span style="font-size:0.68rem; color:#c084fc; font-weight:bold; text-transform:uppercase; letter-spacing:0.04em;">SERAPHINIANUS VECTOR LETTERFORMS:</span>
+                                <span style="font-size:0.62rem; color:var(--text-muted); font-family:monospace;">${{childGlyphs.map((g, idx) => getSerafiniGlyphCode(g, idx)).join(' · ')}}</span>
+                            </div>
+                            <div style="text-align:center; background:#000; border-radius:6px; padding:8px 6px; border:1px solid #334155; min-height:56px; display:flex; align-items:center; justify-content:center; gap:6px; overflow-x:auto;">
+                                ${{childGlyphs.map((g, idx) => {{
+                                    const s = g.svg_content || getRenderableDuctusSvg(g, 3);
+                                    const code = getSerafiniGlyphCode(g, idx);
+                                    if (s) {{
+                                        return `<div style="display:inline-flex; flex-direction:column; align-items:center; background:#0a0e17; border:1px solid #334155; border-radius:4px; padding:4px 6px; min-width:38px;">
+                                            <div style="height:36px; width:auto; display:flex; align-items:center; justify-content:center;">${{s}}</div>
+                                            <span style="font-size:0.55rem; color:#c084fc; margin-top:2px; font-family:monospace;">${{code}}</span>
+                                        </div>`;
+                                    }} else {{
+                                        return `<div style="display:inline-flex; align-items:center; justify-content:center; height:36px; padding:0 6px; background:#0f172a; border:1px solid #334155; border-radius:4px; color:#c084fc; font-size:0.65rem;">${{code}}</div>`;
+                                    }}
+                                }}).join('')}}
+                            </div>
+                        </div>
+                    ` : ''}}
                     <div style="text-align:center; background:#000; border-radius:6px; padding:8px; border:1px solid var(--border);">
                         <img src="${{wordCropSrc}}" alt="${{word.word_id}}" style="max-height:100px; max-width:100%; object-fit:contain;">
                     </div>
@@ -3464,6 +3542,27 @@ def generate_explorer_html(
                 </div>
 
 
+
+                                <!-- 3-Model Decomposition Comparative Summary -->
+                <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:6px 10px; margin-bottom:8px; font-size:0.70rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <span style="color:var(--text-muted); font-weight:bold; font-size:0.65rem;">DECOMPOSITION MODELS COMPARISON:</span>
+                        <span style="font-size:0.60rem; color:${{(quillChildren.length === neuralChildren.length && neuralChildren.length === hybridChildren.length) ? '#34d399' : '#fbbf24'}}; font-weight:bold;">
+                            ${{(quillChildren.length === neuralChildren.length && neuralChildren.length === hybridChildren.length) ? '✓ HIGH CONSENSUS' : '⚡ DIVERGENT CUTS'}}
+                        </span>
+                    </div>
+                    <div style="display:flex; gap:6px; margin-bottom:3px;">
+                        <span style="background:${{activeSegmentationMode === 'heuristic_calligraphic' ? '#0c4a6e' : '#0f172a'}}; color:#38bdf8; border:1px solid #0284c7; border-radius:4px; padding:2px 6px; font-weight:bold; font-size:0.62rem;">✒️ Quill: ${{quillChildren.length}}</span>
+                        <span style="background:${{activeSegmentationMode === 'neural_word_pca' ? '#581c87' : '#0f172a'}}; color:#c084fc; border:1px solid #9333ea; border-radius:4px; padding:2px 6px; font-weight:bold; font-size:0.62rem;">🧠 Neural: ${{neuralChildren.length}}</span>
+                        <span style="background:${{activeSegmentationMode === 'hybrid_consensus' ? '#064e3b' : '#0f172a'}}; color:#34d399; border:1px solid #059669; border-radius:4px; padding:2px 6px; font-weight:bold; font-size:0.62rem;">⚖️ Hybrid: ${{hybridChildren.length}}</span>
+                    </div>
+                    <div style="font-size:0.60rem; color:var(--text-muted); line-height:1.3;">
+                        ${{(quillChildren.length === neuralChildren.length && neuralChildren.length === hybridChildren.length)
+                            ? `Letters in '${{word.word_id}}' are separated by whitespace; all 3 models independently identify ${{quillChildren.length}} glyphs.`
+                            : `Model divergence on cursive ligatures: Quill finds ${{quillChildren.length}} pen-lifts, Neural finds ${{neuralChildren.length}} latent activations, Hybrid consensus yields ${{hybridChildren.length}} validated cuts.`
+                        }}
+                    </div>
+                </div>
 
                 <div class="meta-list">
                     <div><strong>Word ID:</strong> ${{word.word_id}}</div>
@@ -3527,14 +3626,7 @@ def generate_explorer_html(
                         <div><strong>Scan Dimensions:</strong> ${{page.image_width}} × ${{page.image_height}} px <span style="color:#38bdf8;">(${{(page.image_width * 0.125).toFixed(1)}} × ${{(page.image_height * 0.125).toFixed(1)}} mm)</span></div>
                     </div>
                 </div>
-                <div style="background:#0c1222; border:1px solid #1e293b; border-radius:6px; padding:10px; font-size:0.75rem; color:var(--text-muted); line-height:1.5;">
-                    <strong style="color:var(--text-main);">🔍 Interactive Navigation Tip:</strong>
-                    <ul style="margin-top:6px; padding-left:16px;">
-                        <li>Click any <strong>word</strong> on the canvas or from the list to isolate it and inspect its constituent glyphs.</li>
-                        <li>Click any <strong>glyph</strong> to inspect its vector ductus strokes and transliteration alignment.</li>
-                        <li>Click on <strong>empty canvas space</strong> or press <code>Escape</code> to deselect and return to full page view.</li>
-                    </ul>
-                </div>
+                
             `;
         }}
 
