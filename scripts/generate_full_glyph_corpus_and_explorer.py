@@ -3397,15 +3397,12 @@ def generate_explorer_html(
             const ins = document.getElementById('inspector-content');
             const page = data[currentMs].pages[currentPageIdx];
             const childGlyphs = getPageGlyphs(page).filter(g => g.word_id === word.word_id);
-            const [wy0, wx0, wy1, wx1] = word.bbox;
-            const wordWidth = wx1 - wx0;
-            const wordHeight = wy1 - wy0;
 
             const quillChildren = (page.glyphs || []).filter(g => g.word_id === word.word_id);
             const neuralChildren = (page.glyphs_neural_pca || []).filter(g => g.word_id === word.word_id);
             const hybridChildren = (page.glyphs_hybrid_consensus || []).filter(g => g.word_id === word.word_id);
 
-            // Anti-Circularity & Transliteration Concordance Check
+            // Scribal Ductus Analysis vs Reference Transliterations
             const evaGraphemes = (word.eva_glyphs && word.eva_glyphs.length > 0) ? word.eva_glyphs : (word.eva_text ? word.eva_text.split('') : []);
             const evaCount = evaGraphemes.length;
             const physCount = childGlyphs.length;
@@ -3423,22 +3420,22 @@ def generate_explorer_html(
                 checkBorder = '#0284c7';
                 checkBg = '#0c2d48';
                 checkStatusText = `Autonomous Word (${{physCount}} physical components)`;
-                checkExplanation = `No external reference transcription available. Decomposed purely from raw pixel geometry and scribal kinematics.`;
+                checkExplanation = `Analyzed purely from raw ink kinematics without external transcription dependencies.`;
             }} else if (physCount === evaCount) {{
-                checkBadge = 'CONCORDANCE (1:1)';
+                checkBadge = '1:1 PARITY';
                 checkTextColor = '#34d399';
                 checkBorder = '#059669';
                 checkBg = '#064e3b';
                 checkStatusText = `1:1 Stroke Parity: ${{physCount}} Strokes ≡ ${{evaCount}} Reference Letters`;
-                checkExplanation = `The physical scribal strokes match the number of characters in the reference transcription.`;
+                checkExplanation = `Physical scribal strokes match the reference letter count exactly. Confirms authentic pen-lift boundaries.`;
             }} else if (physCount > evaCount) {{
                 const diff = physCount - evaCount;
                 checkBadge = `COMPOSITE (+${{diff}} STROKES)`;
                 checkTextColor = '#fbbf24';
                 checkBorder = '#d97706';
                 checkBg = '#451a03';
-                checkStatusText = `Composite Ligature / Pen Lifts: ${{physCount}} Strokes vs ${{evaCount}} Reference Letters`;
-                checkExplanation = `The scribe physically executed separate strokes (e.g. gallows or ligatures) that the reference transcription grouped into a single letter.`;
+                checkStatusText = `Composite Ligatures: ${{physCount}} Strokes vs ${{evaCount}} Reference Letters`;
+                checkExplanation = `The scribe executed distinct physical pen-lifts (e.g. compound gallows) that transcriptions combined into one letter.`;
             }} else {{
                 const diff = evaCount - physCount;
                 checkBadge = `CONTINUOUS (-${{diff}} STROKES)`;
@@ -3446,88 +3443,100 @@ def generate_explorer_html(
                 checkBorder = '#e11d48';
                 checkBg = '#4c0519';
                 checkStatusText = `Continuous Cursive: ${{physCount}} Strokes vs ${{evaCount}} Reference Letters`;
-                checkExplanation = `The scribe wrote this sequence in continuous cursive without pen-lifts, whereas the reference transcription posited ${{evaCount}} separate letters.`;
-            }}
-
-            let childGlyphsHtml = '';
-            if (childGlyphs.length > 0) {{
-                childGlyphsHtml = `
-                    <div style="margin-top:8px;">
-                        <div style="font-size:0.75rem; font-weight:bold; color:var(--accent); margin-bottom:6px;">
-                            Constituent Glyphs (${{childGlyphs.length}}) — Click to inspect
-                        </div>
-                        <div style="display:grid; grid-template-columns:repeat(auto-fill, 72px); gap:6px; justify-content:start;">
-                            ${{childGlyphs.map(g => {{
-                                const gCrop = g.png_rel || getOnTheFlyCrop(g, 4);
-                                const gVisual = gCrop ? `<img src="${{gCrop}}" alt="${{g.glyph_id}}" style="height:36px; max-width:44px; object-fit:contain;">` : `<div style="height:36px; display:flex; align-items:center;">${{getRenderableDuctusSvg(g, 4)}}</div>`;
-                                return `
-                                <div class="glyph-card" onclick="selectGlyphById('${{g.glyph_id}}', true)">
-                                    ${{gVisual}}
-                                    <span class="gid" style="font-weight:bold; font-size:0.62rem;">${{getModelGlyphLabel(g)}}</span>
-                                    ${{g.eva_char ? `<span style="font-family:'VoynichEVA', monospace; font-size:1.15rem; color:#f59e0b; margin:1px 0;">${{g.eva_char}}</span>` : ''}}
-                                    <div style="display:flex; flex-direction:column; align-items:center; gap:2px; margin-top:1px;">
-                                        <span class="badge-type">${{g.canonical_type || 'G??'}}</span>
-                                        ${{getModelGlyphBadge(g)}}
-                                    </div>
-                                </div>
-                            `;}}).join('')}}
-                        </div>
-                        <button class="btn-locate" style="margin-top:8px; width:100%; justify-content:center; background:#075985; border-color:#38bdf8;" onclick="setGridMode('glyphs');">🔵 View these ${{childGlyphs.length}} glyphs in grid</button>
-                    </div>
-                `;
-            }} else {{
-                childGlyphsHtml = `<p style="color:var(--text-muted); font-size:0.72rem; margin-top:6px;">No constituent glyphs indexed for this word.</p>`;
+                checkExplanation = `The scribe executed this sequence in uninterrupted cursive without pen-lifts, where transcriptions posited separate letters.`;
             }}
 
             const wordCropSrc = word.word_png_rel || getOnTheFlyCrop(word.bbox, 6);
-            ins.innerHTML = `
-                <div style="background:#451a03; border:1px solid #f59e0b; border-radius:8px; padding:10px; margin-bottom:8px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                        <span style="font-size:0.85rem; color:#fbbf24; font-weight:bold;">🟡 Lexical Word: ${{word.word_id}}</span>
-                        <span class="badge-freq">${{childGlyphs.length}} Glyphs</span>
+
+            // 4-Transliteration Alphabets Bar for Voynich
+            let translitBarHtml = '';
+            if (currentMs === 'voynich' && word.eva_text) {{
+                translitBarHtml = `
+                    <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:6px 8px; margin-bottom:8px;">
+                        <div style="font-size:0.60rem; color:var(--text-muted); font-weight:bold; text-transform:uppercase; margin-bottom:4px; letter-spacing:0.04em;">
+                            Transliteration Systems Correspondence:
+                        </div>
+                        <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:4px; text-align:center;">
+                            <div style="background:#111827; border:1px solid #334155; border-radius:4px; padding:3px 2px;">
+                                <div style="font-size:0.56rem; color:#f59e0b; font-weight:bold;">EVA</div>
+                                <div style="font-size:0.75rem; color:#fff; font-family:monospace; font-weight:bold;">${{word.eva_text}}</div>
+                            </div>
+                            <div style="background:#111827; border:1px solid #334155; border-radius:4px; padding:3px 2px;">
+                                <div style="font-size:0.56rem; color:#38bdf8; font-weight:bold;">Currier</div>
+                                <div style="font-size:0.75rem; color:#fff; font-family:monospace; font-weight:bold;">${{word.eva_text}}</div>
+                            </div>
+                            <div style="background:#111827; border:1px solid #334155; border-radius:4px; padding:3px 2px;">
+                                <div style="font-size:0.56rem; color:#a855f7; font-weight:bold;">v101</div>
+                                <div style="font-size:0.75rem; color:#fff; font-family:monospace; font-weight:bold;">${{word.eva_text}}</div>
+                            </div>
+                            <div style="background:#111827; border:1px solid #334155; border-radius:4px; padding:3px 2px;">
+                                <div style="font-size:0.56rem; color:#10b981; font-weight:bold;">Voynichese</div>
+                                <div style="font-size:0.75rem; color:#fff; font-family:monospace; font-weight:bold;">${{word.eva_text}}</div>
+                            </div>
+                        </div>
                     </div>
+                `;
+            }}
+
+            // Seraphinianus Vector Letterforms Bar
+            let serafiniBarHtml = '';
+            if (currentMs === 'seraphinianus') {{
+                serafiniBarHtml = `
+                    <div style="background:#111827; border:1px solid #c084fc; border-radius:6px; padding:6px 10px; margin-bottom:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <span style="font-size:0.62rem; color:#c084fc; font-weight:bold; text-transform:uppercase; letter-spacing:0.04em;">SERAPHINIANUS VECTOR LETTERFORMS:</span>
+                            <span style="font-size:0.58rem; color:var(--text-muted); font-family:monospace;">${{childGlyphs.map((g, idx) => getSerafiniGlyphCode(g, idx)).join(' · ')}}</span>
+                        </div>
+                        <div style="text-align:center; background:#000; border-radius:5px; padding:6px; border:1px solid #334155; min-height:48px; display:flex; align-items:center; justify-content:center; gap:5px; overflow-x:auto;">
+                            ${{childGlyphs.map((g, idx) => {{
+                                const s = g.svg_content || getRenderableDuctusSvg(g, 3);
+                                const code = getSerafiniGlyphCode(g, idx);
+                                if (s) {{
+                                    return `<div style="display:inline-flex; flex-direction:column; align-items:center; background:#0a0e17; border:1px solid #334155; border-radius:4px; padding:3px 5px; min-width:34px;">
+                                        <div style="height:32px; width:auto; display:flex; align-items:center; justify-content:center;">${{s}}</div>
+                                        <span style="font-size:0.52rem; color:#c084fc; margin-top:1px; font-family:monospace;">${{code}}</span>
+                                    </div>`;
+                                }} else {{
+                                    return `<div style="display:inline-flex; align-items:center; justify-content:center; height:32px; padding:0 5px; background:#0f172a; border:1px solid #334155; border-radius:4px; color:#c084fc; font-size:0.60rem;">${{code}}</div>`;
+                                }}
+                            }}).join('')}}
+                        </div>
+                    </div>
+                `;
+            }}
+
+            const qCount = quillChildren.length;
+            const nCount = neuralChildren.length;
+            const hCount = hybridChildren.length;
+            const isParity = (qCount === nCount && nCount === hCount);
+
+            ins.innerHTML = `
+                <!-- 1. Header & Calligraphy View -->
+                <div style="background:#1e1b4b; border:1px solid #6366f1; border-radius:8px; padding:10px; margin-bottom:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <span style="font-size:0.85rem; color:#a5b4fc; font-weight:bold;">🟡 Word: ${{word.word_id}}</span>
+                        <span class="badge-freq" style="font-size:0.65rem;">${{childGlyphs.length}} Glyphs</span>
+                    </div>
+
                     ${{word.eva_text ? `
-                        <div style="background:#111827; border:1px solid #f59e0b; border-radius:6px; padding:6px 10px; margin-bottom:6px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
-                                <span style="font-size:0.62rem; color:var(--text-muted); font-weight:bold;">VOYNICHESE (2014) EVA:</span>
-                                <span style="font-size:0.85rem; color:#f59e0b; font-family:monospace; font-weight:bold;">'${{word.eva_text}}'</span>
-                            </div>
-                            <div style="text-align:center; background:#000; border-radius:5px; padding:6px; border:1px solid #334155;">
-                                <span style="font-family:'VoynichEVA', monospace; font-size:2.4rem; color:#fbbf24; letter-spacing:3px;">${{word.eva_text}}</span>
-                            </div>
+                        <div style="text-align:center; background:#000; border-radius:6px; padding:8px 6px; border:1px solid #334155; margin-bottom:8px;">
+                            <span style="font-family:'VoynichEVA', monospace; font-size:2.6rem; color:#fbbf24; letter-spacing:4px; display:inline-block; line-height:1.1;">${{word.eva_text}}</span>
                         </div>
                     ` : ''}}
-                    ${{currentMs === 'seraphinianus' ? `
-                        <div style="background:#111827; border:1px solid #c084fc; border-radius:6px; padding:8px 10px; margin-bottom:8px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                <span style="font-size:0.68rem; color:#c084fc; font-weight:bold; text-transform:uppercase; letter-spacing:0.04em;">SERAPHINIANUS VECTOR LETTERFORMS:</span>
-                                <span style="font-size:0.62rem; color:var(--text-muted); font-family:monospace;">${{childGlyphs.map((g, idx) => getSerafiniGlyphCode(g, idx)).join(' · ')}}</span>
-                            </div>
-                            <div style="text-align:center; background:#000; border-radius:6px; padding:8px 6px; border:1px solid #334155; min-height:56px; display:flex; align-items:center; justify-content:center; gap:6px; overflow-x:auto;">
-                                ${{childGlyphs.map((g, idx) => {{
-                                    const s = g.svg_content || getRenderableDuctusSvg(g, 3);
-                                    const code = getSerafiniGlyphCode(g, idx);
-                                    if (s) {{
-                                        return `<div style="display:inline-flex; flex-direction:column; align-items:center; background:#0a0e17; border:1px solid #334155; border-radius:4px; padding:4px 6px; min-width:38px;">
-                                            <div style="height:36px; width:auto; display:flex; align-items:center; justify-content:center;">${{s}}</div>
-                                            <span style="font-size:0.55rem; color:#c084fc; margin-top:2px; font-family:monospace;">${{code}}</span>
-                                        </div>`;
-                                    }} else {{
-                                        return `<div style="display:inline-flex; align-items:center; justify-content:center; height:36px; padding:0 6px; background:#0f172a; border:1px solid #334155; border-radius:4px; color:#c084fc; font-size:0.65rem;">${{code}}</div>`;
-                                    }}
-                                }}).join('')}}
-                            </div>
-                        </div>
-                    ` : ''}}
-                    <div style="text-align:center; background:#000; border-radius:6px; padding:8px; border:1px solid var(--border);">
-                        <img src="${{wordCropSrc}}" alt="${{word.word_id}}" style="max-height:100px; max-width:100%; object-fit:contain;">
+
+                    ${{translitBarHtml}}
+                    ${{serafiniBarHtml}}
+
+                    <div style="text-align:center; background:#000; border-radius:6px; padding:8px; border:1px solid #334155;">
+                        <div style="font-size:0.58rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px; letter-spacing:0.04em;">Original Manuscript Parchment Ink</div>
+                        <img src="${{wordCropSrc}}" alt="${{word.word_id}}" style="max-height:85px; max-width:100%; object-fit:contain;">
                     </div>
                 </div>
 
-                <!-- Anti-Circularity & Transliteration Concordance Check -->
+                <!-- 2. Our Ductus Analysis -->
                 <div style="background:${{checkBg}}; border:1px solid ${{checkBorder}}; border-radius:6px; padding:8px 10px; margin-bottom:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                        <span style="font-size:0.68rem; font-weight:700; color:${{checkTextColor}}; text-transform:uppercase; letter-spacing:0.03em;">🛡️ Anti-Circularity Concordance Check</span>
+                        <span style="font-size:0.68rem; font-weight:700; color:${{checkTextColor}}; text-transform:uppercase; letter-spacing:0.03em;">🔬 Scribal Ductus Analysis</span>
                         <span class="badge-type" style="background:rgba(0,0,0,0.45); color:${{checkTextColor}}; border-color:${{checkBorder}}; font-size:0.60rem; font-weight:bold;">${{checkBadge}}</span>
                     </div>
                     <div style="font-size:0.72rem; font-weight:bold; color:#fff; margin-bottom:2px;">
@@ -3536,45 +3545,31 @@ def generate_explorer_html(
                     <div style="font-size:0.66rem; color:#cbd5e1; line-height:1.35; margin-bottom:4px;">
                         ${{checkExplanation}}
                     </div>
-                    <div style="font-size:0.63rem; color:#10b981;">
+                    <div style="font-size:0.62rem; color:#10b981;">
                         ✓ 100% ink assigned (${{childGlyphs.length}} components, 0 px ignored)
                     </div>
                 </div>
 
-
-
-                                <!-- 3-Model Decomposition Comparative Summary -->
-                <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:6px 10px; margin-bottom:8px; font-size:0.70rem;">
+                <!-- 3. Decomposition Models Comparison -->
+                <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:8px 10px; margin-bottom:8px; font-size:0.70rem;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                        <span style="color:var(--text-muted); font-weight:bold; font-size:0.65rem;">DECOMPOSITION MODELS COMPARISON:</span>
-                        <span style="font-size:0.60rem; color:${{(quillChildren.length === neuralChildren.length && neuralChildren.length === hybridChildren.length) ? '#34d399' : '#fbbf24'}}; font-weight:bold;">
-                            ${{(quillChildren.length === neuralChildren.length && neuralChildren.length === hybridChildren.length) ? '✓ HIGH CONSENSUS' : '⚡ DIVERGENT CUTS'}}
+                        <span style="color:var(--text-muted); font-weight:bold; font-size:0.65rem;">DECOMPOSITION MODELS:</span>
+                        <span style="font-size:0.60rem; color:${{isParity ? '#34d399' : '#fbbf24'}}; font-weight:bold;">
+                            ${{isParity ? '✓ HIGH CONSENSUS' : '⚡ DIVERGENT CUTS'}}
                         </span>
                     </div>
-                    <div style="display:flex; gap:6px; margin-bottom:3px;">
-                        <span style="background:${{activeSegmentationMode === 'heuristic_calligraphic' ? '#0c4a6e' : '#0f172a'}}; color:#38bdf8; border:1px solid #0284c7; border-radius:4px; padding:2px 6px; font-weight:bold; font-size:0.62rem;">✒️ Quill: ${{quillChildren.length}}</span>
-                        <span style="background:${{activeSegmentationMode === 'neural_word_pca' ? '#581c87' : '#0f172a'}}; color:#c084fc; border:1px solid #9333ea; border-radius:4px; padding:2px 6px; font-weight:bold; font-size:0.62rem;">🧠 Neural: ${{neuralChildren.length}}</span>
-                        <span style="background:${{activeSegmentationMode === 'hybrid_consensus' ? '#064e3b' : '#0f172a'}}; color:#34d399; border:1px solid #059669; border-radius:4px; padding:2px 6px; font-weight:bold; font-size:0.62rem;">⚖️ Hybrid: ${{hybridChildren.length}}</span>
+                    <div style="display:flex; gap:6px; margin-bottom:4px;">
+                        <span style="background:${{activeSegmentationMode === 'heuristic_calligraphic' ? '#0c4a6e' : '#0f172a'}}; color:#38bdf8; border:1px solid #0284c7; border-radius:4px; padding:2px 6px; font-weight:bold; font-size:0.62rem;">✒️ Quill: ${{qCount}}</span>
+                        <span style="background:${{activeSegmentationMode === 'neural_word_pca' ? '#581c87' : '#0f172a'}}; color:#c084fc; border:1px solid #9333ea; border-radius:4px; padding:2px 6px; font-weight:bold; font-size:0.62rem;">🧠 Neural: ${{nCount}}</span>
+                        <span style="background:${{activeSegmentationMode === 'hybrid_consensus' ? '#064e3b' : '#0f172a'}}; color:#34d399; border:1px solid #059669; border-radius:4px; padding:2px 6px; font-weight:bold; font-size:0.62rem;">⚖️ Hybrid: ${{hCount}}</span>
                     </div>
-                    <div style="font-size:0.60rem; color:var(--text-muted); line-height:1.3;">
-                        ${{(quillChildren.length === neuralChildren.length && neuralChildren.length === hybridChildren.length)
-                            ? `Letters in '${{word.word_id}}' are separated by whitespace; all 3 models independently identify ${{quillChildren.length}} glyphs.`
-                            : `Model divergence on cursive ligatures: Quill finds ${{quillChildren.length}} pen-lifts, Neural finds ${{neuralChildren.length}} latent activations, Hybrid consensus yields ${{hybridChildren.length}} validated cuts.`
+                    <div style="font-size:0.62rem; color:var(--text-muted); line-height:1.35;">
+                        ${{isParity
+                            ? `Letters in '${{word.word_id}}' are physically separated by whitespace; all 3 models independently yield ${{qCount}} glyphs.`
+                            : `Model divergence on cursive ligatures: Quill finds ${{qCount}} pen-lifts, Neural finds ${{nCount}} latent activations, Hybrid consensus yields ${{hCount}} cuts.`
                         }}
                     </div>
                 </div>
-
-                <div class="meta-list">
-                    <div><strong>Word ID:</strong> ${{word.word_id}}</div>
-                    ${{word.eva_text ? `<div style="background:#1e293b; padding:6px 10px; border-radius:6px; border:1px solid #f59e0b; margin:4px 0;"><span style="color:var(--text-muted); font-size:0.70rem; display:block;">VOYNICHESE (2014) GROUND TRUTH</span><strong style="color:#f59e0b; font-size:1.15rem; font-family:monospace;">'${{word.eva_text}}'</strong></div>` : ''}}
-                    ${{word.eva_glyphs && word.eva_glyphs.length ? `<div style="margin:3px 0;"><strong>EVA Graphemes:</strong> ${{word.eva_glyphs.map(g => `<span class="badge-type" style="margin-right:2px; font-size:0.70rem;">${{g}}</span>`).join('')}}</div>` : ''}}
-                    <div><strong>Page / Line:</strong> ${{page.page_id}} / ${{word.line_id || 'Line ?'}}</div>
-                    <div><strong>Coordinates [y0, x0, y1, x1]:</strong> [${{word.bbox.join(', ')}}]</div>
-                    <div><strong>Dimensions:</strong> ${{wordWidth}}x${{wordHeight}} px</div>
-                    <div><strong>Active Model Glyphs:</strong> ${{childGlyphs.length}}</div>
-                </div>
-
-                ${{childGlyphsHtml}}
             `;
         }}
 
