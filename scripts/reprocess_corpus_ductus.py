@@ -321,7 +321,7 @@ def reprocess_seraphinianus(base_dir: Path):
             svg = VectorExporter.to_svg(n_strokes, max(10, gw), max(10, gh))
 
             ng_rec = {
-                "glyph_id": f"{page_id}_{line_id}_{word_id}_N{n_idx:02d}",
+                "glyph_id": f"{page_id}_{word_id}_N{n_idx:02d}" if line_id in word_id else f"{page_id}_{line_id}_{word_id}_N{n_idx:02d}",
                 "page_id": page_id,
                 "line_id": line_id,
                 "word_id": word_id,
@@ -378,7 +378,7 @@ def reprocess_seraphinianus(base_dir: Path):
             svg = VectorExporter.to_svg(h_strokes, max(10, gw), max(10, gh))
 
             hg_rec = {
-                "glyph_id": f"{page_id}_{line_id}_{word_id}_H{h_idx:02d}",
+                "glyph_id": f"{page_id}_{word_id}_H{h_idx:02d}" if line_id in word_id else f"{page_id}_{line_id}_{word_id}_H{h_idx:02d}",
                 "page_id": page_id,
                 "line_id": line_id,
                 "word_id": word_id,
@@ -460,8 +460,6 @@ def reprocess_voynich(base_dir: Path):
     H_img, W_img = img.shape[:2]
     page_data["image_width"] = int(W_img)
     page_data["image_height"] = int(H_img)
-            raise FileNotFoundError(f"Could not load image: {page_img_path}")
-        H_img, W_img = img.shape[:2]
 
     # 1. Enforce strict disjoint spatial partitioning on Voynich words (0 overlaps)
     words = SpatialWordPartitioner.resolve_disjoint_word_partitions(raw_words, (H_img, W_img))
@@ -662,7 +660,7 @@ def reprocess_voynich(base_dir: Path):
             svg = VectorExporter.to_svg(n_strokes, max(10, gw), max(10, gh))
 
             ng_rec = {
-                "glyph_id": f"{page_id}_{line_id}_{word_id}_N{n_idx:02d}",
+                "glyph_id": f"{page_id}_{word_id}_N{n_idx:02d}" if line_id in word_id else f"{page_id}_{line_id}_{word_id}_N{n_idx:02d}",
                 "page_id": page_id,
                 "line_id": line_id,
                 "word_id": word_id,
@@ -719,7 +717,7 @@ def reprocess_voynich(base_dir: Path):
             svg = VectorExporter.to_svg(h_strokes, max(10, gw), max(10, gh))
 
             hg_rec = {
-                "glyph_id": f"{page_id}_{line_id}_{word_id}_H{h_idx:02d}",
+                "glyph_id": f"{page_id}_{word_id}_H{h_idx:02d}" if line_id in word_id else f"{page_id}_{line_id}_{word_id}_H{h_idx:02d}",
                 "page_id": page_id,
                 "line_id": line_id,
                 "word_id": word_id,

@@ -1075,7 +1075,6 @@ def generate_explorer_html(
                         <button id="btn-toggle-voynich-boxes" class="layer-pill layer-pill-voynich-boxes active" onclick="toggleLayer('voynich_boxes')" title="Toggle Voynich reference consensus boxes (Key B)">📦 Voynich Boxes</button>
                         <button id="btn-toggle-words" class="layer-pill layer-pill-words active" onclick="toggleLayer('words')" title="Toggle word bounding boxes (Key W)">🟡 Words</button>
                         <button id="btn-toggle-glyphs" class="layer-pill layer-pill-glyphs active" onclick="toggleLayer('glyphs')" title="Toggle extracted glyph bounding boxes (Key G)">🔵 Glyphs</button>
-                        <button id="btn-toggle-focus" class="layer-pill layer-pill-focus" onclick="toggleFocusMode()" title="Isolate selected item only, dimming all others (Key F)">🎯 Isolate</button>
                     </div>
                 </div>
 
@@ -1100,20 +1099,23 @@ def generate_explorer_html(
                 </div>
             </div>
 
-            <!-- 3. Extracted Items (Words First, Glyphs Second) -->
+            <!-- 3. Extracted Items (Words & Glyphs) -->
             <div class="panel">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:6px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:5px; margin-bottom:6px; gap:6px;">
+                    <h3 style="margin:0; border:none; padding:0; font-size:0.85rem; color:var(--accent);" title="Extracted words and constituent glyphs on this folio">
+                        Words &amp; Glyphs
+                    </h3>
                     <div class="nav-tabs" style="background:#0b1329; border:1px solid #1e293b; padding:2px; border-radius:6px; margin:0;">
-                        <button id="btn-grid-words" class="tab-btn active" onclick="setGridMode('words')" style="padding:3px 8px; font-size:0.72rem;">🟡 Words</button>
-                        <button id="btn-grid-glyphs" class="tab-btn" onclick="setGridMode('glyphs')" style="padding:3px 8px; font-size:0.72rem;">🔵 Glyphs</button>
-                    </div>
-                    <div id="filter-container" style="display:none;">
-                        <select id="archetype-filter" class="select-filter" onchange="filterGlyphsByArchetype(this.value)" style="font-size:0.70rem; padding:2px 4px;">
-                            <option value="ALL">All Archetypes</option>
-                        </select>
+                        <button id="btn-grid-words" class="tab-btn active" onclick="setGridMode('words')" style="padding:2px 8px; font-size:0.70rem;" title="View all lexical words on this folio">🟡 Words</button>
+                        <button id="btn-grid-glyphs" class="tab-btn" onclick="setGridMode('glyphs')" style="padding:2px 8px; font-size:0.70rem;" title="View constituent glyphs on this folio">🔵 Glyphs</button>
                     </div>
                 </div>
-                <div style="font-size:0.75rem; font-weight:bold; color:var(--accent); margin-bottom:6px;" id="items-title">Extracted Words</div>
+                <div id="filter-container" style="display:none; margin-bottom:6px;">
+                    <select id="archetype-filter" class="select-filter" onchange="filterGlyphsByArchetype(this.value)" style="width:100%; font-size:0.70rem; padding:3px 6px;" title="Filter glyphs on page by canonical archetype">
+                        <option value="ALL">All Archetypes</option>
+                    </select>
+                </div>
+                <div style="font-size:0.74rem; font-weight:bold; color:var(--accent); margin-bottom:6px;" id="items-title">Extracted Words</div>
                 <div class="glyphs-grid" id="glyphs-grid"></div>
             </div>
 
@@ -1251,302 +1253,199 @@ def generate_explorer_html(
                         <span>📖</span> Scientific Methodology, Calibration Protocols &amp; User Guide
                     </h2>
                     <p style="color:var(--text-muted); font-size:0.85rem; margin-top:4px; line-height:1.5;">
-                        Comprehensive reference documentation explaining the physical metric calibration, the three stroke segmentation paradigms, the anti-circularity firewall (Proposition 4), and codicological navigation.
+                        Comprehensive reference documentation explaining the physical metric calibration, the three stroke segmentation paradigms, the anti-circularity firewall (Ouroboros principle), and codicological navigation.
                     </p>
                 </div>
 
                 <!-- Methodology Sub-Navigation Tabs -->
                 <div class="methodology-subtabs">
-                    <button id="btn-subtab-metric" class="tab-btn active" onclick="setMethodologySubTab('metric')" title="Physical metric scale calibration, millimetric conversions, and nib footprint thresholds">📏 1. Metric Calibration &amp; Scales</button>
-                    <button id="btn-subtab-paradigms" class="tab-btn" onclick="setMethodologySubTab('paradigms')" title="Detailed comparative breakdown of Quill Ductus, Neural Word PCA, and Hybrid Consensus">🖋️ 2. Three Segmentation Paradigms</button>
-                    <button id="btn-subtab-anticirc" class="tab-btn" onclick="setMethodologySubTab('anticirc')" title="Proposition 4, Popperian discordance detector, and zero-ouroboros anti-circularity firewall">🛡️ 3. Anti-Circularity &amp; Proposition 4</button>
-                    <button id="btn-subtab-manual" class="tab-btn" onclick="setMethodologySubTab('manual')" title="Codicological quire structure, Singulion ordering, layer controls, and keyboard shortcuts">🧭 4. Codicology &amp; User Manual</button>
+                    <button id="btn-subtab-goal" class="tab-btn active" onclick="setMethodologySubTab('goal')" title="Project mission: what we are trying to achieve through digital paleography without translation claims">🎯 1. Project Goal &amp; Approach</button>
+                    <button id="btn-subtab-sources" class="tab-btn" onclick="setMethodologySubTab('sources')" title="Manuscript sources, physical nib differences (Voynich 40° quill vs Seraphinianus round nib), 3 BnF calibration codices">📚 2. Sources &amp; Codices</button>
+                    <button id="btn-subtab-paradigms" class="tab-btn" onclick="setMethodologySubTab('paradigms')" title="Detailed comparative breakdown of Quill Ductus (40°), Neural Word PCA, and Hybrid Consensus">🖋️ 3. Three Segmentation Models</button>
+                    <button id="btn-subtab-ouroboros" class="tab-btn" onclick="setMethodologySubTab('ouroboros')" title="The Ouroboros risk ('le serpent qui se mord la queue') and our strict anti-circularity guarantee">🐍 4. The Ouroboros &amp; Anti-Circularity</button>
                 </div>
 
-                <!-- PANE 1: Metric Scale Calibration & Invariant Thresholds -->
-                <div id="methodology-pane-metric" class="methodology-pane">
+                <!-- PANE 1: Project Goal & Scientific Mission -->
+                <div id="methodology-pane-goal" class="methodology-pane">
                     <div class="methodology-card">
-                        <h3>📏 Physical Metric Scale Calibration Across Codices</h3>
-                        <p style="color:var(--text-muted); font-size:0.82rem; line-height:1.6;">
-                            Digital paleography cannot rely on raw pixel coordinates, because digital scan resolutions vary drastically across digitization campaigns. VoynichDuctus calibrates every manuscript against physical millimeter measurements documented in library conservation records. All measurements are internally computed in <strong>decimillimeters (dmm = 0.1 mm)</strong> to maintain integer precision without floating-point drift.
+                        <h3>🎯 What We Are Trying To Do (Scientific Mission)</h3>
+                        <p style="color:var(--text-muted); font-size:0.84rem; line-height:1.65; margin-bottom:12px;">
+                            <strong>VoynichDuctus</strong> is an open-source scientific pipeline for digital paleography and stroke vectorization. 
+                            Its primary purpose is <strong>not</strong> to translate the Voynich Manuscript or claim a linguistic decipherment. 
+                            Instead, its goal is to <strong>decouple paleographical analysis from subjective human transcription alphabets</strong> (such as the 1990s EVA scheme).
+                        </p>
+                        <div style="background:#090d16; border-left:4px solid var(--accent); border-radius:4px; padding:12px 16px; margin-bottom:14px; font-size:0.80rem; line-height:1.6;">
+                            <strong style="color:var(--accent);">The Core Problem in Current Research:</strong><br>
+                            For decades, computational studies have taken human transliterations (like EVA) as "ground truth." 
+                            However, transcribers grouped or split characters based on visual similarities to Latin letters, introducing human bias. 
+                            If an AI model is trained on EVA, it only mirrors human preconceptions — it proves nothing about how the original scribe actually moved their hand.
+                        </div>
+                        <p style="color:var(--text-muted); font-size:0.82rem; line-height:1.6; margin-bottom:12px;">
+                            <strong>Our Objective: Offline-to-Online Ductus Derendering:</strong><br>
+                            We treat the high-resolution digitized page scans purely as physical traces of ink deposited on parchment. 
+                            By modeling ink thickness, edge contours, pen angles, and pen-lifts, our pipeline reconstructs the <strong>temporal scribal movements (ductus)</strong>. 
+                            From these raw kinematics, unsupervised clustering algorithms discover the <strong>natural, emergent alphabet</strong> of the manuscript without human supervision.
+                        </p>
+                        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:10px; margin-top:8px;">
+                            <div style="background:#0c1222; border:1px solid #1e293b; border-radius:6px; padding:10px; font-size:0.75rem;">
+                                <strong style="color:#10b981;">1. Physical Grounding:</strong> Measurements in millimeters ($mm$) and tenths of a millimeter ($dmm$), calibrated against library conservation records.
+                            </div>
+                            <div style="background:#0c1222; border:1px solid #1e293b; border-radius:6px; padding:10px; font-size:0.75rem;">
+                                <strong style="color:#38bdf8;">2. Kinematic Derendering:</strong> Pen touchdown points, stroke directions, Euler-Bernoulli minimum bending energy, and pen lifts.
+                            </div>
+                            <div style="background:#0c1222; border:1px solid #1e293b; border-radius:6px; padding:10px; font-size:0.75rem;">
+                                <strong style="color:#f59e0b;">3. Objective Alphabet Induction:</strong> Unsupervised topological &amp; morphological clustering discovering true scribal archetypes.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANE 2: Sources, Codices & Calibration Manuscripts -->
+                <div id="methodology-pane-sources" class="methodology-pane" style="display:none;">
+                    <div class="methodology-card">
+                        <h3>📚 The Corpus: Two Divergent Calligraphic Worlds</h3>
+                        <p style="color:var(--text-muted); font-size:0.82rem; line-height:1.6; margin-bottom:12px;">
+                            To ensure our vectorizer and clustering engine do not overfit to a single hand, we benchmark against two radically different codices:
                         </p>
                         <table class="methodology-table">
                             <thead>
                                 <tr>
                                     <th>Manuscript / Codex</th>
-                                    <th>Conservation Source</th>
-                                    <th>Physical Folio Height</th>
-                                    <th>Normalized Scan Height</th>
-                                    <th>Calibration Scale Factor</th>
-                                    <th>Ink Rheology &amp; Spread</th>
+                                    <th>Origin &amp; Digitization Source</th>
+                                    <th>Writing Instrument &amp; Ductus Physics</th>
+                                    <th>Reference Transcription Schemes</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td><strong style="color:var(--voynich-color);">Voynich Manuscript</strong> (Beinecke MS 408)</td>
-                                    <td>Beinecke Rare Book &amp; Manuscript Library, Yale University</td>
-                                    <td><strong>225 mm</strong> (2250 dmm)</td>
-                                    <td>1800 px</td>
-                                    <td><strong>0.125 mm/px</strong> (1.25 dmm/px | 8.0 px/mm)</td>
-                                    <td>Iron-gall ink on parchment, 0.22–0.35 mm lateral diffusion</td>
+                                    <td><strong style="color:var(--voynich-color);">Voynich Manuscript</strong><br>(Beinecke MS 408)</td>
+                                    <td>Beinecke Rare Book &amp; Manuscript Library, Yale University scans &amp; Voynichese (2014) registration.</td>
+                                    <td><strong>15th-Century Goose Quill (40° Bevel Nib):</strong> Multi-stroke calligraphic ductus with deliberate pen-lifts (1 to 4 strokes per letter, e.g. compound gallows). Pronounced <em>pleins et déliés</em> (thick downstrokes, thin upstrokes).</td>
+                                    <td>EVA (European Voynich Alphabet), Currier Transliteration, v101 Standard, Voynichese (2014).</td>
                                 </tr>
                                 <tr>
-                                    <td><strong style="color:var(--serafini-color);">Codex Seraphinianus</strong> (Luigi Serafini, 1981)</td>
-                                    <td>Franco Maria Ricci (FMR) First Edition, Milan</td>
-                                    <td><strong>350 mm</strong> (3500 dmm)</td>
-                                    <td>2187 px</td>
-                                    <td><strong>0.160 mm/px</strong> (1.60 dmm/px | 6.25 px/mm)</td>
-                                    <td>Modern synthetic pigment ribbon ink, high edge acutance</td>
-                                </tr>
-                                <tr>
-                                    <td><strong style="color:#f59e0b;">BnF Latin 6823</strong> (Liber de herbis)</td>
-                                    <td>Bibliothèque nationale de France (Gallica IIIF)</td>
-                                    <td><strong>280 mm</strong> (2800 dmm)</td>
-                                    <td>2000 px</td>
-                                    <td><strong>0.140 mm/px</strong> (1.40 dmm/px | 7.14 px/mm)</td>
-                                    <td>14th–15th c. Italian monastic iron-gall scriptorium ink</td>
+                                    <td><strong style="color:var(--serafini-color);">Codex Seraphinianus</strong><br>(Luigi Serafini, 1981)</td>
+                                    <td>Franco Maria Ricci (FMR) first edition scans, Milan (371 pages).</td>
+                                    <td><strong>Modern Round Pen Nib (Monoline Ribbon):</strong> Strictly 1 continuous stroke per connected component (no 40° bevel, no medieval pen lifts). Fluid, continuous automobile-like inertia without sharp angles &gt; 90°.</td>
+                                    <td>Serafini (1981 Original Typology), Deri (2015 Cursive Graphemes), Bulik &amp; Betti (2011 Structural).</td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
 
                     <div class="methodology-card">
-                        <h3>⚖️ Physical Paleographical Invariant Threshold Rules</h3>
+                        <h3>🏛️ Calibration Grounding: The 3 BnF Medieval Codices (Gallica IIIF)</h3>
                         <p style="color:var(--text-muted); font-size:0.82rem; line-height:1.6; margin-bottom:10px;">
-                            The physical scale calibration guarantees that segmentation parameters remain strictly invariant across scales and digitization resolutions:
+                            Quill mechanics (nib width, bevel angle, ink diffusion, pen touchdown impact) cannot be invented arbitrarily: they are grounded and calibrated against authentic 14th- and 15th-century Latin manuscripts from the Bibliothèque nationale de France (BnF) digitized via Gallica IIIF:
                         </p>
                         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px;">
-                            <div style="background:#090d16; border:1px solid var(--border); border-radius:6px; padding:10px;">
-                                <div style="color:var(--accent); font-weight:bold; font-size:0.80rem; margin-bottom:4px;">🖋️ Physical Quill Nib Width (0.55 mm)</div>
-                                <div style="color:var(--text-muted); font-size:0.75rem; line-height:1.4;">
-                                    Represents the typical cut tip width of a 15th-century goose quill (0.55 mm = 5.5 dmm = 4.4 px on Voynich scans).
+                            <div style="background:#090d16; border:1px solid #f59e0b; border-radius:6px; padding:12px;">
+                                <div style="color:#f59e0b; font-weight:bold; font-size:0.85rem; margin-bottom:4px;">1. BnF Latin 6823 (Liber de herbis)</div>
+                                <div style="color:var(--text-muted); font-size:0.75rem; line-height:1.5;">
+                                    <strong>Title:</strong> <em>Manfredus de Monte Imperiali, Liber de herbis</em> (ca. 1330–1400)<br>
+                                    <strong>Script:</strong> Gothic Humanistic Cursive / Bastarda.<br>
+                                    <strong>Calibrated Parameter:</strong> Fixed 40° quill nib bevel angle and iron-gall ink diffusion profile (0.22–0.35 mm).
                                 </div>
                             </div>
-                            <div style="background:#090d16; border:1px solid var(--border); border-radius:6px; padding:10px;">
-                                <div style="color:#10b981; font-weight:bold; font-size:0.80rem; margin-bottom:4px;">🎯 Nib Impact Footprint (&le; 0.55 mm)</div>
-                                <div style="color:var(--text-muted); font-size:0.75rem; line-height:1.4;">
-                                    Ink objects with diameter &le; 0.55 mm (or &le; 8 px, area &le; 25 px²) are classified as instantaneous pen touchdown impact dots (<code>is_impact=True</code>, <code>length=0.0</code>) rather than continuous stroke paths.
+                            <div style="background:#090d16; border:1px solid #38bdf8; border-radius:6px; padding:12px;">
+                                <div style="color:#38bdf8; font-weight:bold; font-size:0.85rem; margin-bottom:4px;">2. BnF Latin 17868 (Medical &amp; Botanical)</div>
+                                <div style="color:var(--text-muted); font-size:0.75rem; line-height:1.5;">
+                                    <strong>Title:</strong> <em>Compilation médicale et botanique</em> (15th c.)<br>
+                                    <strong>Script:</strong> Gothic Textualis scriptorium hand.<br>
+                                    <strong>Calibrated Parameter:</strong> Minimum bending energy ∫ κ²(s) ds for crossing arbitration and right-handed touchdown priors.
                                 </div>
                             </div>
-                            <div style="background:#090d16; border:1px solid var(--border); border-radius:6px; padding:10px;">
-                                <div style="color:#f59e0b; font-weight:bold; font-size:0.80rem; margin-bottom:4px;">↔️ Inter-Word Whitespace (&ge; 1.1 mm)</div>
-                                <div style="color:var(--text-muted); font-size:0.75rem; line-height:1.4;">
-                                    A physical whitespace gap &ge; 1.1 mm (11 dmm = 8.8 px) defines guaranteed lexical word separation, preventing accidental cross-word ligature bridging.
-                                </div>
-                            </div>
-                            <div style="background:#090d16; border:1px solid var(--border); border-radius:6px; padding:10px;">
-                                <div style="color:#c084fc; font-weight:bold; font-size:0.80rem; margin-bottom:4px;">📊 Four Physical Scale Stratification Bands</div>
-                                <div style="color:var(--text-muted); font-size:0.75rem; line-height:1.4;">
-                                    Glyphs are partitioned into 4 non-overlapping scale tiers: <strong>TINY</strong> (&le; 1.3 mm, diacritics/spatters), <strong>CORE</strong> (1.3–3.4 mm, standard minims/bowls), <strong>TALL</strong> (&ge; 3.4 mm, gallows/ascenders), and <strong>WIDE</strong> (&ge; 3.4 mm, horizontal crossbars).
+                            <div style="background:#090d16; border:1px solid #10b981; border-radius:6px; padding:12px;">
+                                <div style="color:#10b981; font-weight:bold; font-size:0.85rem; margin-bottom:4px;">3. BnF Latin 10533304x (Chadewe Colin)</div>
+                                <div style="color:var(--text-muted); font-size:0.75rem; line-height:1.5;">
+                                    <strong>Title:</strong> <em>Apocalypse glosée de Chadewe Colin</em> (14th c.)<br>
+                                    <strong>Script:</strong> Gothic Textualis / Bastarda.<br>
+                                    <strong>Calibrated Parameter:</strong> Cursive ligature cut thresholds, ascender/descender ratios, and inter-word whitespace (≥ 1.1 mm).
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- PANE 2: Three Segmentation Paradigms -->
+                <!-- PANE 3: Three Segmentation Models -->
                 <div id="methodology-pane-paradigms" class="methodology-pane" style="display:none;">
                     <div class="methodology-card">
-                        <h3>ℹ️ Fundamental Distinction: Word Boundaries vs Glyph Decomposition</h3>
+                        <h3>ℹ️ Word Invariance vs Intra-Word Letter Decomposition</h3>
                         <p style="color:var(--text-muted); font-size:0.82rem; line-height:1.6;">
-                            A critical architectural principle of VoynichDuctus is the <strong>strict decoupling between lexical word partitioning and intra-word glyph decomposition</strong>:
+                            Our pipeline maintains a strict separation of concerns across spatial hierarchies:
                         </p>
                         <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:12px; margin-top:8px; line-height:1.6; font-size:0.78rem;">
-                            <div><strong style="color:#10b981;">1. Lexical Words are Spatial Invariants:</strong> Across all 225 folios, words are defined by physical whitespace boundaries and Voronoi/watershed spatial partitioning. All 3 models preserve the exact same 37,601 word containers (0 shared parchment, zero overlaps).</div>
-                            <div style="margin-top:6px;"><strong style="color:#38bdf8;">2. What the 3 Models Govern:</strong> The models do not change where words begin and end; they govern how ink inside an intact lexical word is decomposed into constituent glyph archetypes.</div>
+                            <div><strong style="color:#10b981;">1. Lexical Words are Invariant:</strong> Across all 225 folios, words are defined by physical whitespace boundaries and Voronoi/watershed spatial partitioning. All 3 models preserve the exact same 37,601 word containers (zero shared parchment, 0 overlaps).</div>
+                            <div style="margin-top:6px;"><strong style="color:#38bdf8;">2. What the 3 Models Govern:</strong> The models do not change word boundaries; they test three competing scientific approaches to breaking the ink inside a word into letters.</div>
                         </div>
                     </div>
 
                     <div class="methodology-card">
-                        <h3>⚙️ Comparative Analysis of the Three Segmentation Paradigms</h3>
+                        <h3>⚙️ The Three Segmentation Paradigms</h3>
                         <table class="methodology-table">
                             <thead>
                                 <tr>
                                     <th>Model Paradigm</th>
                                     <th>Application Scope</th>
-                                    <th>Algorithmic Mechanism</th>
-                                    <th>Calligraphic / Paleographic Prior</th>
-                                    <th>Objective &amp; Strengths</th>
+                                    <th>How It Works</th>
+                                    <th>Scientific Objective</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td><strong style="color:#38bdf8;">1. Quill Ductus</strong><br>(Physical 40° Mechanics)</td>
+                                    <td><strong style="color:#38bdf8;">1. Quill Ductus (40°)</strong></td>
                                     <td><span class="badge-type" style="background:#0c4a6e; color:#bae6fd;">Full Corpus (225 Folios)</span></td>
-                                    <td>1D Medial Axis Transform + Euclidean Distance Transform + NetworkX Graph Junction Resolver.</td>
-                                    <td>Fixed 40° nib bevel angle, pleins et déliés thickness profiling, strict physical ceiling of 1–4 strokes per character, supralinear diacritic decoupling.</td>
-                                    <td>Accurately reconstructs the biomechanical movements of a medieval right-handed scribe with realistic quill pen lifts.</td>
+                                    <td>1D Medial Axis Transform + Euclidean Distance Transform + NetworkX Graph Junction Resolver with 40° quill nib mechanics and right-handed touchdown priors.</td>
+                                    <td>Reconstructs authentic physical pen-lifts and calligraphic mechanics of a medieval right-handed scribe.</td>
                                 </tr>
                                 <tr>
-                                    <td><strong style="color:#c084fc;">2. AI Decomposition</strong><br>(Neural Spatial PCA)</td>
+                                    <td><strong style="color:#c084fc;">2. AI Neural PCA</strong></td>
                                     <td><span class="badge-type" style="background:#581c87; color:#f3e8ff;">Comparative Benchmark (f1r)</span></td>
-                                    <td>Deep spatial convolutional encoder generating 1D continuous latent trajectories Z(x) &isin; &Ropf;³² + Non-Negative Matrix Factorization (NMF).</td>
-                                    <td>Knife-free unsupervised spatial basis induction without heuristic geometric cutting.</td>
-                                    <td>Tests whether glyph boundaries emerge naturally from continuous visual representations without rule-based assumptions.</td>
+                                    <td>Deep spatial convolutional encoder generating 1D continuous horizontal latent trajectories Z(x) &isin; &Ropf;³² + Non-Negative Matrix Factorization (NMF).</td>
+                                    <td>Tests whether letter boundaries emerge purely from unsupervised spatial basis functions without geometric rules.</td>
                                 </tr>
                                 <tr>
-                                    <td><strong style="color:#10b981;">3. Hybrid Consensus</strong><br>(Physical ∩ AI)</td>
+                                    <td><strong style="color:#10b981;">3. Hybrid Consensus</strong></td>
                                     <td><span class="badge-type" style="background:#064e3b; color:#a7f3d0;">Validation Benchmark (f1r)</span></td>
-                                    <td>Strict geometric centroid intersection (&epsilon; &le; 3 px) between Model 1 (quill physics) and Model 2 (neural decomposition).</td>
-                                    <td>Multi-model concordance: a boundary is validated only when two completely independent paradigms agree.</td>
-                                    <td>Provides the highest standard of mathematical proof, isolating robust glyph centroids that are free from single-model artifacts.</td>
+                                    <td>Strict geometric intersection (&epsilon; &le; 3 px) between Model 1 (quill physics) and Model 2 (neural decomposition).</td>
+                                    <td>Provides highest mathematical stability: a letter boundary is validated only when two completely independent paradigms agree.</td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
 
-                <!-- PANE 3: Anti-Circularity & Proposition 4 -->
-                <div id="methodology-pane-anticirc" class="methodology-pane" style="display:none;">
+                <!-- PANE 4: The Ouroboros & Anti-Circularity -->
+                <div id="methodology-pane-ouroboros" class="methodology-pane" style="display:none;">
                     <div class="methodology-card">
                         <h3>🐍 The Ouroboros Risk ("Le serpent qui se mord la queue")</h3>
-                        <p style="color:var(--text-muted); font-size:0.82rem; line-height:1.6;">
-                            In Voynich studies, researchers frequently fall into circular reasoning: they adopt subjective 20th-century transliteration schemes (like the European Voynich Alphabet, EVA) as ground truth, segment the text into EVA letters, and then claim their computational results confirm the linguistic structure of the manuscript. This is an epistemic feedback loop where the analysis merely mirrors human subjective priors.
+                        <p style="color:var(--text-muted); font-size:0.84rem; line-height:1.65; margin-bottom:12px;">
+                            In paleography, circular reasoning is the primary pitfall: researchers adopt a transcription alphabet (like EVA), 
+                            cut the words into EVA letters, and then claim their statistical algorithms "confirm" the language structure. 
+                            This is an <strong>Ouroboros</strong> (a snake eating its own tail): the computer simply outputs what the human transcriber put into it.
                         </p>
-                        <div style="background:#090d16; border-left:4px solid #ef4444; border-radius:4px; padding:10px 14px; margin-top:10px; font-size:0.78rem; line-height:1.5;">
-                            <strong style="color:#ef4444;">VoynichDuctus Anti-Circularity Guarantee:</strong>
-                            Stroke segmentation, kinematics inference, and archetype clustering are conducted <strong>100% blind to EVA, Currier, and human transliterations</strong>. Transcription schemes are loaded exclusively downstream as empirical diagnostic comparators.
+                        <div style="background:#090d16; border-left:4px solid #10b981; border-radius:4px; padding:12px 16px; margin-bottom:14px; font-size:0.80rem; line-height:1.6;">
+                            <strong style="color:#10b981;">The Anti-Circularity Guarantee:</strong><br>
+                            In VoynichDuctus, stroke segmentation, ductus extraction, and archetype clustering are performed 
+                            <strong>100% blind to EVA, Currier, and Latin transcriptions</strong>. 
+                            The pipeline sees only ink density and parchment geometry.
                         </div>
-                    </div>
-
-                    <div class="methodology-card">
-                        <h3>🔬 Proposition 4: Popperian Falsification &amp; Discordance Engine</h3>
-                        <p style="color:var(--text-muted); font-size:0.82rem; line-height:1.6; margin-bottom:10px;">
-                            Proposition 4 formulates a falsifiable Popperian test by comparing the physically extracted stroke components against standard transliteration counts for every lexical word:
+                        <p style="color:var(--text-muted); font-size:0.82rem; line-height:1.6; margin-bottom:12px;">
+                            <strong>How Downstream Transcription Comparison Works:</strong><br>
+                            Only <em>after</em> physical strokes and archetypes are fully extracted do we compare them against reference transcriptions (EVA, Voynichese 2014) in the Inspector. 
+                            This comparison reveals three genuine physical phenomena:
                         </p>
-                        <table class="methodology-table">
-                            <thead>
-                                <tr>
-                                    <th>Diagnostic State</th>
-                                    <th>Condition</th>
-                                    <th>Paleographical Interpretation</th>
-                                    <th>Significance for Ductus Theory</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td><strong style="color:#10b981;">Concordance</strong></td>
-                                    <td>N<sub>ductus</sub> = N<sub>EVA</sub></td>
-                                    <td>Physical scribal kinematics and manual transcription identify the exact same number of discrete graphemes.</td>
-                                    <td>Validates that the historical transcription accurately matches physical pen lifts for this lexical unit.</td>
-                                </tr>
-                                <tr>
-                                    <td><strong style="color:#f59e0b;">Sub-Glyphic Cleavage</strong></td>
-                                    <td>N<sub>ductus</sub> &gt; N<sub>EVA</sub></td>
-                                    <td>Physical quill mechanics reveals pen lifts or distinct strokes inside what manual schemes treat as a single letter.</td>
-                                    <td>Demonstrates that compound characters (such as gallows <code>cth</code>, <code>ckh</code>) are composite ligatures composed of 3 to 4 distinct pen movements.</td>
-                                </tr>
-                                <tr>
-                                    <td><strong style="color:#c084fc;">Graphemic Conflation</strong></td>
-                                    <td>N<sub>ductus</sub> &lt; N<sub>EVA</sub></td>
-                                    <td>The scribe executed in a single continuous stroke what manual schemes divide into two separate letters.</td>
-                                    <td>Reveals natural cursive ductus shortcuts and continuous pen trajectories that human transcribers over-segmented.</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                        <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:10px; margin-top:12px; display:flex; justify-content:space-between; align-items:center; font-size:0.75rem;">
-                            <span><strong style="color:#10b981;">🛡️ Zero Dropped Ink Guarantee:</strong> 100% of the ink pixels inside every bounding box are assigned to physical strokes. Exactly 0 px of ink are ignored.</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- PANE 4: Codicology & User Manual -->
-                <div id="methodology-pane-manual" class="methodology-pane" style="display:none;">
-                    <div class="methodology-card">
-                        <h3>📜 Manuscript Codicological Structure</h3>
-                        <p style="color:var(--text-muted); font-size:0.82rem; line-height:1.6;">
-                            The Voynich Manuscript (Beinecke MS 408) comprises 225 folios across 20 quires, organized into 6 traditional thematic sections:
-                        </p>
-                        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:10px; margin-top:10px;">
-                            <div style="background:#090d16; border:1px solid var(--border); border-radius:6px; padding:10px; font-size:0.75rem;">
-                                <strong style="color:#10b981;">🌿 Herbal Section (f1r–f66v):</strong> Large botanical watercolors with descriptive paragraphs of cursive text.
+                        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:10px; margin-top:8px;">
+                            <div style="background:#091e17; border:1px solid #059669; border-radius:6px; padding:10px; font-size:0.75rem;">
+                                <strong style="color:#34d399;">1. Concordance (1:1 Parity):</strong> The physical strokes match the transcription character count exactly. Validates that the historical transcriber observed authentic pen-lifts.
                             </div>
-                            <div style="background:#090d16; border:1px solid var(--border); border-radius:6px; padding:10px; font-size:0.75rem;">
-                                <strong style="color:#38bdf8;">⭐ Astronomical / Astrological (f67r1–f73v):</strong> Circular diagrams with sun, moon, stars, and zodiac medallions.
+                            <div style="background:#2e1065; border:1px solid #7c3aed; border-radius:6px; padding:10px; font-size:0.75rem;">
+                                <strong style="color:#c084fc;">2. Composite Ligatures:</strong> Ductus detects pen-lifts inside a complex character (e.g. gallows <code>cth</code>, <code>ckh</code> made of 3 to 4 distinct strokes grouped by EVA into one).
                             </div>
-                            <div style="background:#090d16; border:1px solid var(--border); border-radius:6px; padding:10px; font-size:0.75rem;">
-                                <strong style="color:#06b6d4;">🛁 Biological / Balneological (f75r–f84v):</strong> Dense networks of water basins, conduits, and female figures.
-                            </div>
-                            <div style="background:#090d16; border:1px solid var(--border); border-radius:6px; padding:10px; font-size:0.75rem;">
-                                <strong style="color:#c084fc;">🌌 Cosmological (f85r1–f86v6):</strong> Famous 9-fold rosette foldout with interconnecting causeways.
-                            </div>
-                            <div style="background:#090d16; border:1px solid var(--border); border-radius:6px; padding:10px; font-size:0.75rem;">
-                                <strong style="color:#f59e0b;">🏺 Pharmaceutical (f87r–f102v2):</strong> Apothecary jars alongside botanical roots and plants.
-                            </div>
-                            <div style="background:#090d16; border:1px solid var(--border); border-radius:6px; padding:10px; font-size:0.75rem;">
-                                <strong style="color:#ef4444;">📜 Recipes / Text (f103r–f116v):</strong> Over 300 short paragraphs each marked with a seven-pointed star.
+                            <div style="background:#3b0764; border:1px solid #d946ef; border-radius:6px; padding:10px; font-size:0.75rem;">
+                                <strong style="color:#f472b6;">3. Continuous Cursive:</strong> The scribe executed in a single uninterrupted stroke what transcribers split into two or three letters (e.g. running minims).
                             </div>
                         </div>
-                    </div>
-
-                    <div class="methodology-card">
-                        <h3>⌨️ Interactive Canvas Controls &amp; Keyboard Shortcuts</h3>
-                        <table class="methodology-table">
-                            <thead>
-                                <tr>
-                                    <th>Action / Control</th>
-                                    <th>Mouse Interaction</th>
-                                    <th>Keyboard Shortcut</th>
-                                    <th>Description</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td><strong>Zoom In / Out</strong></td>
-                                    <td>Mouse Wheel / Toolbar +/- Buttons</td>
-                                    <td><code>+</code> / <code>-</code></td>
-                                    <td>Zooms into parchment fiber and ink edge details.</td>
-                                </tr>
-                                <tr>
-                                    <td><strong>Pan Viewport</strong></td>
-                                    <td>Click and Drag on Canvas / Minimap</td>
-                                    <td>Arrow Keys</td>
-                                    <td>Moves the canvas viewport smoothly across large folios.</td>
-                                </tr>
-                                <tr>
-                                    <td><strong>Fit to Window</strong></td>
-                                    <td>Double-Click Canvas / Fit Button</td>
-                                    <td><code>Space</code> / <code>0</code></td>
-                                    <td>Automatically centers and fits the full manuscript page in the view.</td>
-                                </tr>
-                                <tr>
-                                    <td><strong>Toggle Lines</strong></td>
-                                    <td>Click 🟣 Lines Pill</td>
-                                    <td><code>L</code></td>
-                                    <td>Toggles horizontal baseline text line detections.</td>
-                                </tr>
-                                <tr>
-                                    <td><strong>Toggle Voynich Boxes</strong></td>
-                                    <td>Click 📦 Voynich Boxes Pill</td>
-                                    <td><code>B</code></td>
-                                    <td>Toggles official consensus reference word bounding boxes.</td>
-                                </tr>
-                                <tr>
-                                    <td><strong>Toggle Words</strong></td>
-                                    <td>Click 🟡 Words Pill</td>
-                                    <td><code>W</code></td>
-                                    <td>Toggles spatial disjoint partitioned lexical word boxes.</td>
-                                </tr>
-                                <tr>
-                                    <td><strong>Toggle Glyphs</strong></td>
-                                    <td>Click 🔵 Glyphs Pill</td>
-                                    <td><code>G</code></td>
-                                    <td>Toggles extracted glyph bounding boxes and stroke trajectories.</td>
-                                </tr>
-                                <tr>
-                                    <td><strong>Isolate Selection</strong></td>
-                                    <td>Click 🎯 Isolate Pill</td>
-                                    <td><code>F</code></td>
-                                    <td>Dims all other words and glyphs to inspect only the selected item.</td>
-                                </tr>
-                                <tr>
-                                    <td><strong>Folio Navigation</strong></td>
-                                    <td>Prev / Next Buttons</td>
-                                    <td><code>◀</code> / <code>▶</code> (Left / Right)</td>
-                                    <td>Jumps to the previous or next manuscript folio in order.</td>
-                                </tr>
-                            </tbody>
-                        </table>
                     </div>
                 </div>
             </div>
@@ -1966,7 +1865,7 @@ def generate_explorer_html(
         }}
 
         function setMethodologySubTab(subTabId) {{
-            const tabs = ['metric', 'paradigms', 'anticirc', 'manual'];
+            const tabs = ['goal', 'sources', 'paradigms', 'ouroboros'];
             tabs.forEach(t => {{
                 const btn = document.getElementById('btn-subtab-' + t);
                 const pane = document.getElementById('methodology-pane-' + t);
@@ -2047,6 +1946,9 @@ def generate_explorer_html(
 
             if (currentTab === 'pages') {{
                 renderPagesTab();
+                if (!selectedWord && !selectedGlyph && (!archetypeFilterVal || archetypeFilterVal === 'ALL')) {{
+                    renderInspectorEmpty();
+                }}
             }} else {{
                 renderCatalogueTab();
             }}
@@ -2234,8 +2136,19 @@ def generate_explorer_html(
 
         function filterGlyphsByArchetype(val) {{
             archetypeFilterVal = val;
-            renderGlyphGrid();
-            drawCanvasOverlay();
+            const sel = document.getElementById('archetype-filter');
+            if (sel) sel.value = val;
+            if (val !== 'ALL') {{
+                selectedGlyph = null;
+                selectedWord = null;
+                selectedLineId = null;
+                if (gridMode !== 'glyphs') setGridMode('glyphs');
+                else renderGlyphGrid();
+                drawCanvasOverlay();
+                renderInspectorArchetype(val);
+            }} else {{
+                deselectAll();
+            }}
         }}
 
         const cropCache = new Map();
@@ -2486,11 +2399,6 @@ def generate_explorer_html(
                 if (showGlyphs) btnG.classList.add('active');
                 else btnG.classList.remove('active');
             }}
-            const btnF = document.getElementById('btn-toggle-focus');
-            if (btnF) {{
-                if (focusMode) btnF.classList.add('active');
-                else btnF.classList.remove('active');
-            }}
         }}
 
         function toggleLayer(layer) {{
@@ -2507,19 +2415,13 @@ def generate_explorer_html(
             drawCanvasOverlay();
         }}
 
-        function toggleFocusMode() {{
-            focusMode = !focusMode;
-            updateLayerButtonStates();
-            drawCanvasOverlay();
-        }}
-
         window.addEventListener('keydown', (e) => {{
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
             if (e.key === 'l' || e.key === 'L') toggleLayer('lines');
             if (e.key === 'b' || e.key === 'B') toggleLayer('voynich_boxes');
             if (e.key === 'w' || e.key === 'W') toggleLayer('words');
             if (e.key === 'g' || e.key === 'G') toggleLayer('glyphs');
-            if (e.key === 'f' || e.key === 'F') toggleFocusMode();
+            if (e.key === 'Escape') deselectAll();
             if (e.key === 'ArrowLeft') {{
                 prevPage();
                 e.preventDefault();
@@ -2578,33 +2480,42 @@ def generate_explorer_html(
                 activeColor = '#34d399';
             }}
 
-            // If Focus Mode is active and an item is selected, ONLY draw the focused selection!
-            if (focusMode && (selectedGlyph || selectedWord)) {{
+            // Automatic Isolation: if an item is selected or an archetype filter is active, isolate it and dim others!
+            const hasIsolation = Boolean(selectedWord || selectedGlyph || (archetypeFilterVal && archetypeFilterVal !== 'ALL'));
+
+            if (hasIsolation) {{
                 // Dim unselected background canvas area
-                ctx.fillStyle = 'rgba(5, 8, 16, 0.70)';
+                ctx.fillStyle = 'rgba(5, 8, 16, 0.65)';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-                if (selectedWord) {{
+                if (archetypeFilterVal && archetypeFilterVal !== 'ALL') {{
+                    // Highlight ALL occurrences of this archetype on the page!
+                    const archGlyphs = getPageGlyphs(page).filter(g => g.canonical_type === archetypeFilterVal);
+                    archGlyphs.forEach(g => {{
+                        ctx.strokeStyle = activeColor;
+                        ctx.lineWidth = glyphThickness * 1.5;
+                        ctx.fillStyle = glyphFill;
+                        renderShape(g, true, true);
+                    }});
+                }} else if (selectedWord) {{
                     ctx.strokeStyle = '#f59e0b';
                     ctx.lineWidth = wordThickness * 1.6;
                     ctx.fillStyle = 'rgba(245, 158, 11, 0.32)';
                     renderShape(selectedWord, true, true);
 
-                    // Child glyphs inside focused word: use the active model's exact color!
+                    // Child glyphs inside selected word
                     const wordChildren = getPageGlyphs(page).filter(g => g.word_id === selectedWord.word_id);
-                    if (wordChildren.length > 0) {{
-                        wordChildren.forEach(g => {{
-                            ctx.strokeStyle = activeColor;
-                            ctx.lineWidth = glyphThickness * 1.4;
-                            ctx.fillStyle = glyphFill;
-                            renderShape(g, true, true);
-                        }});
-                    }}
-                }}
-                if (selectedGlyph) {{
+                    wordChildren.forEach(g => {{
+                        const isThisGlyph = selectedGlyph && selectedGlyph.glyph_id === g.glyph_id;
+                        ctx.strokeStyle = isThisGlyph ? '#ffffff' : activeColor;
+                        ctx.lineWidth = isThisGlyph ? glyphThickness * 2.0 : glyphThickness * 1.4;
+                        ctx.fillStyle = isThisGlyph ? 'rgba(255, 255, 255, 0.35)' : glyphFill;
+                        renderShape(g, true, true);
+                    }});
+                }} else if (selectedGlyph) {{
                     ctx.strokeStyle = activeColor;
-                    ctx.lineWidth = glyphThickness * 2.2;
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+                    ctx.lineWidth = glyphThickness * 1.8;
+                    ctx.fillStyle = glyphFill;
                     renderShape(selectedGlyph, true, true);
                 }}
                 return;
@@ -2837,41 +2748,30 @@ def generate_explorer_html(
             if (selectedGlyph) renderInspector();
         }}
 
+        function deselectAll() {{
+            selectedWord = null;
+            selectedGlyph = null;
+            selectedLineId = null;
+            archetypeFilterVal = 'ALL';
+            const archFilter = document.getElementById('archetype-filter');
+            if (archFilter) archFilter.value = 'ALL';
+            drawCanvasOverlay();
+            renderCurrentGrid();
+            renderInspectorEmpty();
+        }}
+
         function selectWord(word, shouldAutoZoom = true) {{
             selectedWord = word;
-            const page = data[currentMs].pages[currentPageIdx];
-            const childGlyphs = page ? getPageGlyphs(page).filter(g => g.word_id === word.word_id) : [];
-            if (childGlyphs.length > 0) {{
-                selectedGlyph = childGlyphs[0];
-            }} else {{
-                selectedGlyph = null;
-            }}
-            if (word && word.line_id && !selectedLineId) {{
-                selectedLineId = word.line_id;
-            }}
+            selectedGlyph = null;
+            selectedLineId = word.line_id || null;
+            archetypeFilterVal = 'ALL';
 
             drawCanvasOverlay();
             if (shouldAutoZoom) {{
                 autoZoomOnWord(word);
             }}
 
-            const grid = document.getElementById('glyphs-grid');
-            if (grid && gridMode === 'words') {{
-                const prev = grid.querySelector('.word-card.selected');
-                if (prev) prev.classList.remove('selected');
-                const selCard = document.getElementById(`card-word-${{word.word_id}}`);
-                if (selCard) {{
-                    selCard.classList.add('selected');
-                    selCard.scrollIntoView({{ block: 'nearest', behavior: 'smooth' }});
-                }}
-                const lineTitleSuffix = selectedLineId ? ` (${{selectedLineId}})` : '';
-                const resetBtn = `<button class="btn-tool" onclick="event.stopPropagation(); selectedLineId=null; selectedWord=null; renderCurrentGrid(); drawCanvasOverlay();" style="width:auto; padding:2px 7px; font-size:0.65rem; background:#374151; margin-left:6px;" title="Show all words on this page">✕ All Words</button>`;
-                const showGlyphsBtn = `<button class="btn-tool" onclick="event.stopPropagation(); setGridMode('glyphs');" style="width:auto; padding:2px 7px; font-size:0.65rem; background:#0369a1; border-color:#38bdf8; color:#fff; margin-left:4px;" title="View constituent glyphs">🔵 View Glyphs (${{childGlyphs.length}})</button>`;
-                const titleEl = document.getElementById('items-title');
-                if (titleEl) titleEl.innerHTML = `<span>${{page.page_id}}${{lineTitleSuffix}} · Word ${{word.word_id.split('_').slice(-2).join('_')}}</span>${{resetBtn}}${{showGlyphsBtn}}`;
-            }} else {{
-                renderCurrentGrid();
-            }}
+            renderCurrentGrid();
             renderInspectorWord(word);
         }}
 
@@ -3010,6 +2910,9 @@ def generate_explorer_html(
                         return;
                     }}
                 }}
+
+                // 4. Clicked outside on empty canvas -> deselect all!
+                deselectAll();
             }});
 
             // Double click canvas to reset / fit page
@@ -3124,36 +3027,28 @@ def generate_explorer_html(
 
         function renderGlyphGrid() {{
             const page = data[currentMs].pages[currentPageIdx];
-            let filteredGlyphs = getPageGlyphs(page);
-            let wordSuffix = '';
+            let allGlyphs = getPageGlyphs(page);
+            let filteredGlyphs = allGlyphs;
+            let titleDesc = '';
 
-            // If a word is selected, filter to its constituent child glyphs!
-            if (selectedWord) {{
-                const wordChildren = filteredGlyphs.filter(g => g.word_id === selectedWord.word_id);
-                if (wordChildren.length > 0) {{
-                    filteredGlyphs = wordChildren;
-                    wordSuffix = ` · Word ${{selectedWord.word_id.split('_').slice(-2).join('_')}}`;
-                }}
-            }} else if (selectedLineId) {{
-                filteredGlyphs = filteredGlyphs.filter(g => g.line_id === selectedLineId);
-            }}
-            if (archetypeFilterVal !== 'ALL') {{
-                filteredGlyphs = filteredGlyphs.filter(g => g.canonical_type === archetypeFilterVal);
+            if (archetypeFilterVal && archetypeFilterVal !== 'ALL') {{
+                filteredGlyphs = allGlyphs.filter(g => g.canonical_type === archetypeFilterVal);
+                titleDesc = ` · Archetype ${{archetypeFilterVal}} (${{filteredGlyphs.length}} on ${{page.page_id}})`;
+            }} else if (selectedWord) {{
+                filteredGlyphs = allGlyphs.filter(g => g.word_id === selectedWord.word_id);
+                titleDesc = ` · Word ${{selectedWord.word_id}} (${{filteredGlyphs.length}} glyphs)`;
+            }} else {{
+                titleDesc = ` · All ${{filteredGlyphs.length}} Glyphs`;
             }}
 
             const modelName = activeSegmentationMode === 'neural_word_pca' ? 'Neural PCA' : (activeSegmentationMode === 'hybrid_consensus' ? 'Consensus' : 'Quill Ductus');
-            const lineTitleSuffix = selectedLineId ? ` (${{selectedLineId}})` : '';
-            const resetBtn = (selectedWord || selectedLineId)
-                ? `<button class="btn-tool" onclick="event.stopPropagation(); clearWordSelection();" style="width:auto; padding:2px 7px; font-size:0.65rem; background:#374151; margin-left:6px;" title="Show all glyphs on this page">✕ All</button>`
-                : '';
-            document.getElementById('items-title').innerHTML = `<span>${{page.page_id}}${{lineTitleSuffix}}${{wordSuffix}} — ${{filteredGlyphs.length}} ${{modelName}} Glyphs</span>${{resetBtn}}`;
+            document.getElementById('items-title').innerHTML = `<span>${{page.page_id}}${{titleDesc}} [${{modelName}}]</span>`;
             
             const grid = document.getElementById('glyphs-grid');
             if (grid) grid.classList.remove('words-mode');
             const prevScroll = grid.scrollTop;
 
-            // Ultra-fast pagination: render chunk of 64 glyphs to keep UI instant (< 50ms)
-            const isFullList = !selectedWord && !selectedLineId && archetypeFilterVal === 'ALL';
+            const isFullList = !selectedWord && (!archetypeFilterVal || archetypeFilterVal === 'ALL');
             const displayGlyphs = isFullList ? filteredGlyphs.slice(0, activeGlyphLimit) : filteredGlyphs;
             const hasMore = isFullList && filteredGlyphs.length > activeGlyphLimit;
 
@@ -3207,45 +3102,30 @@ def generate_explorer_html(
             const page = data[currentMs].pages[currentPageIdx];
             let allWords = page.words || [];
             let words = allWords;
-            if (selectedLineId) {{
-                const filtered = allWords.filter(w => w.line_id === selectedLineId);
-                if (filtered.length > 0) {{
-                    words = filtered;
-                }} else {{
-                    selectedLineId = null;
-                }}
-            }}
 
             const childGlyphs = selectedWord ? getPageGlyphs(page).filter(g => g.word_id === selectedWord.word_id) : [];
-            const lineTitleSuffix = selectedLineId ? ` (${{selectedLineId}})` : '';
-            const wordTitleSuffix = selectedWord ? ` · Word ${{selectedWord.word_id.split('_').slice(-2).join('_')}}` : '';
-            const resetBtn = (selectedLineId || selectedWord)
-                ? `<button class="btn-tool" onclick="event.stopPropagation(); selectedLineId=null; selectedWord=null; renderCurrentGrid(); drawCanvasOverlay();" style="width:auto; padding:2px 7px; font-size:0.65rem; background:#374151; margin-left:6px;" title="Show all words on this page">✕ All Words</button>`
-                : '';
+            const wordTitleSuffix = selectedWord ? ` · Selected: ${{selectedWord.word_id}}` : ` · All ${{words.length}} Words`;
             const showGlyphsBtn = selectedWord
-                ? `<button class="btn-tool" onclick="event.stopPropagation(); setGridMode('glyphs');" style="width:auto; padding:2px 7px; font-size:0.65rem; background:#0369a1; border-color:#38bdf8; color:#fff; margin-left:4px;" title="View constituent glyphs">🔵 View Glyphs (${{childGlyphs.length}})</button>`
+                ? `<button class="btn-tool" onclick="event.stopPropagation(); setGridMode('glyphs');" style="width:auto; padding:2px 7px; font-size:0.65rem; background:#0369a1; border-color:#38bdf8; color:#fff; margin-left:6px;" title="View constituent glyphs">🔵 View ${{childGlyphs.length}} Glyphs</button>`
                 : '';
-            document.getElementById('items-title').innerHTML = `<span>${{page.page_id}}${{lineTitleSuffix}}${{wordTitleSuffix}} — ${{words.length}} Words</span>${{resetBtn}}${{showGlyphsBtn}}`;
+            document.getElementById('items-title').innerHTML = `<span>${{page.page_id}}${{wordTitleSuffix}}</span>${{showGlyphsBtn}}`;
             
             const grid = document.getElementById('glyphs-grid');
             if (grid) grid.classList.add('words-mode');
             if (words.length === 0) {{
                 grid.innerHTML = `<div style="color:var(--text-muted); font-size:0.75rem; padding:16px; text-align:center;">
-                    <div>No words found in this filter.</div>
-                    <button class="btn-locate" style="margin-top:8px;" onclick="selectedLineId=null; selectedWord=null; renderCurrentGrid();">Show all ${{allWords.length}} words</button>
+                    <div>No words found on this folio.</div>
                 </div>`;
                 return;
             }}
 
             const prevScroll = grid.scrollTop;
-            const isFullList = !selectedLineId;
-            const displayWords = isFullList ? words.slice(0, activeWordLimit) : words;
-            const hasMore = isFullList && words.length > activeWordLimit;
+            const displayWords = words;
 
             let wordsHtml = displayWords.map(w => {{
                 const isSelected = selectedWord && selectedWord.word_id === w.word_id;
                 const cGlyphs = getPageGlyphs(page).filter(g => g.word_id === w.word_id);
-                const wordLabel = w.word_id.split('_').slice(-2).join('_');
+                const wordLabel = w.word_id;
                 const cropSrc = w.word_png_rel || getOnTheFlyCrop(w.bbox, 6);
                 return `
                     <div id="card-word-${{w.word_id}}" class="word-card ${{isSelected ? 'selected' : ''}}" onclick="selectWordById('${{w.word_id}}', true)">
@@ -3255,19 +3135,6 @@ def generate_explorer_html(
                     </div>
                 `;
             }}).join('');
-
-            if (hasMore) {{
-                wordsHtml += `
-                    <div style="grid-column: 1 / -1; display:flex; gap:8px; justify-content:center; padding:12px 4px;">
-                        <button class="btn-tool" onclick="event.stopPropagation(); activeWordLimit += 50; renderWordGrid();" style="width:auto; padding:5px 12px; font-size:0.72rem; background:#1e293b; border-color:#f59e0b; color:#fbbf24; font-weight:600;">
-                            ⬇ Load Next 50 Words (${{Math.min(activeWordLimit, words.length)}} / ${{words.length}})
-                        </button>
-                        <button class="btn-tool" onclick="event.stopPropagation(); activeWordLimit = 9999; renderWordGrid();" style="width:auto; padding:5px 10px; font-size:0.70rem; background:#0f172a; color:var(--text-muted);">
-                            ⚡ Load All Words
-                        </button>
-                    </div>
-                `;
-            }}
 
             grid.innerHTML = wordsHtml;
             grid.scrollTop = prevScroll;
@@ -3289,48 +3156,48 @@ def generate_explorer_html(
             const neuralChildren = (page.glyphs_neural_pca || []).filter(g => g.word_id === word.word_id);
             const hybridChildren = (page.glyphs_hybrid_consensus || []).filter(g => g.word_id === word.word_id);
 
-            // Proposition 4: Popperian Falsification & Scientific Discordance Engine
+            // Anti-Circularity & Transliteration Concordance Check
             const evaGraphemes = (word.eva_glyphs && word.eva_glyphs.length > 0) ? word.eva_glyphs : (word.eva_text ? word.eva_text.split('') : []);
             const evaCount = evaGraphemes.length;
             const physCount = childGlyphs.length;
 
-            let prop4Badge = '';
-            let prop4StatusText = '';
-            let prop4Explanation = '';
-            let prop4Bg = '';
-            let prop4Border = '';
-            let prop4TextColor = '';
+            let checkBadge = '';
+            let checkStatusText = '';
+            let checkExplanation = '';
+            let checkBg = '';
+            let checkBorder = '';
+            let checkTextColor = '';
 
             if (evaCount === 0) {{
-                prop4Badge = 'UNSUPERVISED';
-                prop4TextColor = '#38bdf8';
-                prop4Border = '#0284c7';
-                prop4Bg = '#0c2d48';
-                prop4StatusText = `Emergent Autonomous Word (${{physCount}} physical components)`;
-                prop4Explanation = `No external human transcription available. Decomposed purely from raw 2D pixel geometry and quill kinematics with zero circular bias.`;
+                checkBadge = 'AUTONOMOUS';
+                checkTextColor = '#38bdf8';
+                checkBorder = '#0284c7';
+                checkBg = '#0c2d48';
+                checkStatusText = `Autonomous Word (${{physCount}} physical components)`;
+                checkExplanation = `No external reference transcription available. Decomposed purely from raw pixel geometry and scribal kinematics.`;
             }} else if (physCount === evaCount) {{
-                prop4Badge = 'CONCORDANCE VALIDATED (100%)';
-                prop4TextColor = '#34d399';
-                prop4Border = '#059669';
-                prop4Bg = '#064e3b';
-                prop4StatusText = `Perfect Isomorphism: ${{physCount}} Physical Units ≡ ${{evaCount}} Reference Letters`;
-                prop4Explanation = `Strict 1-to-1 parity between scribal kinematics and external consensus transcription. Validates that the emergent physical ductus reproduces human paleographical segmentations without manual tuning.`;
+                checkBadge = 'CONCORDANCE (1:1)';
+                checkTextColor = '#34d399';
+                checkBorder = '#059669';
+                checkBg = '#064e3b';
+                checkStatusText = `1:1 Stroke Parity: ${{physCount}} Strokes ≡ ${{evaCount}} Reference Letters`;
+                checkExplanation = `The physical scribal strokes match the number of characters in the reference transcription.`;
             }} else if (physCount > evaCount) {{
                 const diff = physCount - evaCount;
-                prop4Badge = `DISCORDANCE (+${{diff}} UNITS)`;
-                prop4TextColor = '#fbbf24';
-                prop4Border = '#d97706';
-                prop4Bg = '#451a03';
-                prop4StatusText = `Sub-Glyphic Cleavage: ${{physCount}} Physical Units vs ${{evaCount}} Composite Letters`;
-                prop4Explanation = `Physical quill mechanics detected ${{diff}} additional pen-lift(s) or distinct strokes within composite characters (e.g. compound gallows 'cth'/'ckh' or complex ligatures). Popperian falsification: Subjective EVA grouped multiple strokes that the scribe physically separated.`;
+                checkBadge = `COMPOSITE (+${{diff}} STROKES)`;
+                checkTextColor = '#fbbf24';
+                checkBorder = '#d97706';
+                checkBg = '#451a03';
+                checkStatusText = `Composite Ligature / Pen Lifts: ${{physCount}} Strokes vs ${{evaCount}} Reference Letters`;
+                checkExplanation = `The scribe physically executed separate strokes (e.g. gallows or ligatures) that the reference transcription grouped into a single letter.`;
             }} else {{
                 const diff = evaCount - physCount;
-                prop4Badge = `DISCORDANCE (-${{diff}} UNITS)`;
-                prop4TextColor = '#f43f5e';
-                prop4Border = '#e11d48';
-                prop4Bg = '#4c0519';
-                prop4StatusText = `Graphemic Conflation: ${{physCount}} Physical Units vs ${{evaCount}} Discrete Letters`;
-                prop4Explanation = `Continuous scribal cursive or running minims (e.g. 'iii') executed without pen-lift were tracked as a single kinematic component, whereas EVA transcription posited ${{evaCount}} separate characters.`;
+                checkBadge = `CONTINUOUS (-${{diff}} STROKES)`;
+                checkTextColor = '#f43f5e';
+                checkBorder = '#e11d48';
+                checkBg = '#4c0519';
+                checkStatusText = `Continuous Cursive: ${{physCount}} Strokes vs ${{evaCount}} Reference Letters`;
+                checkExplanation = `The scribe wrote this sequence in continuous cursive without pen-lifts, whereas the reference transcription posited ${{evaCount}} separate letters.`;
             }}
 
             let childGlyphsHtml = '';
@@ -3386,39 +3253,24 @@ def generate_explorer_html(
                     </div>
                 </div>
 
-                <!-- Proposition 4: Popperian Falsification & Scientific Discordance Detector -->
-                <div style="background:${{prop4Bg}}; border:1px solid ${{prop4Border}}; border-radius:6px; padding:9px 11px; margin-bottom:8px;">
+                <!-- Anti-Circularity & Transliteration Concordance Check -->
+                <div style="background:${{checkBg}}; border:1px solid ${{checkBorder}}; border-radius:6px; padding:8px 10px; margin-bottom:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                        <span style="font-size:0.70rem; font-weight:800; color:${{prop4TextColor}}; text-transform:uppercase; letter-spacing:0.04em;">🔬 Proposition 4: Popperian Falsification Test</span>
-                        <span class="badge-type" style="background:rgba(0,0,0,0.45); color:${{prop4TextColor}}; border-color:${{prop4Border}}; font-size:0.62rem; font-weight:bold;">${{prop4Badge}}</span>
+                        <span style="font-size:0.68rem; font-weight:700; color:${{checkTextColor}}; text-transform:uppercase; letter-spacing:0.03em;">🛡️ Anti-Circularity Concordance Check</span>
+                        <span class="badge-type" style="background:rgba(0,0,0,0.45); color:${{checkTextColor}}; border-color:${{checkBorder}}; font-size:0.60rem; font-weight:bold;">${{checkBadge}}</span>
                     </div>
-                    <div style="font-size:0.75rem; font-weight:bold; color:#fff; margin-bottom:3px;">
-                        ${{prop4StatusText}}
+                    <div style="font-size:0.72rem; font-weight:bold; color:#fff; margin-bottom:2px;">
+                        ${{checkStatusText}}
                     </div>
-                    <div style="font-size:0.68rem; color:#cbd5e1; line-height:1.35; margin-bottom:6px;">
-                        ${{prop4Explanation}}
+                    <div style="font-size:0.66rem; color:#cbd5e1; line-height:1.35; margin-bottom:4px;">
+                        ${{checkExplanation}}
                     </div>
-                    <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.35); border-radius:4px; padding:4px 8px; font-size:0.65rem; border:1px solid rgba(255,255,255,0.06);">
-                        <span style="color:#10b981; font-weight:bold;">🛡️ Zero Dropped Ink Guarantee:</span>
-                        <span style="color:#94a3b8;">100% ink inside box assigned (${{childGlyphs.length}} physical components, 0 px ignored)</span>
+                    <div style="font-size:0.63rem; color:#10b981;">
+                        ✓ 100% ink assigned (${{childGlyphs.length}} components, 0 px ignored)
                     </div>
                 </div>
 
-                <!-- Interactive Multi-Model Segmentation Comparison -->
-                <div style="background:#0f172a; border:1px solid var(--border); border-radius:6px; padding:8px; margin-bottom:8px;">
-                    <div style="font-size:0.68rem; font-weight:700; color:var(--text-muted); margin-bottom:5px; text-transform:uppercase; letter-spacing:0.04em;">Model Segmentation Comparison:</div>
-                    <div style="display:flex; gap:5px; flex-wrap:wrap;">
-                        <button class="btn-tool" onclick="setSegmentationMode('heuristic_calligraphic');" style="width:auto; padding:3px 8px; font-size:0.68rem; background:${{activeSegmentationMode === 'heuristic_calligraphic' ? '#0369a1' : '#1e293b'}}; border-color:#38bdf8; color:#fff;" title="Physical quill nib mechanics (40° bevel, pen lifts)">
-                            ✒️ Quill: <strong>${{quillChildren.length}}</strong>
-                        </button>
-                        <button class="btn-tool" onclick="setSegmentationMode('neural_word_pca');" style="width:auto; padding:3px 8px; font-size:0.68rem; background:${{activeSegmentationMode === 'neural_word_pca' ? '#6b21a8' : '#1e293b'}}; border-color:#c084fc; color:#fff;" title="Self-supervised neural spatial PCA basis">
-                            🧠 Neural: <strong>${{neuralChildren.length}}</strong>
-                        </button>
-                        <button class="btn-tool" onclick="setSegmentationMode('hybrid_consensus');" style="width:auto; padding:3px 8px; font-size:0.68rem; background:${{activeSegmentationMode === 'hybrid_consensus' ? '#065f46' : '#1e293b'}}; border-color:#10b981; color:#fff;" title="Consensus between physical quill and neural model">
-                            ⚖️ Consensus: <strong>${{hybridChildren.length}}</strong>
-                        </button>
-                    </div>
-                </div>
+
 
                 <div class="meta-list">
                     <div><strong>Word ID:</strong> ${{word.word_id}}</div>
@@ -3451,10 +3303,77 @@ def generate_explorer_html(
             }}
         }}
 
+        function renderInspectorEmpty() {{
+            const ins = document.getElementById('inspector-content');
+            if (!ins) return;
+            const page = data[currentMs].pages[currentPageIdx];
+            if (!page) {{
+                ins.innerHTML = `<p style="color:var(--text-muted); margin-top:40px; text-align:center;">Select any word or glyph from the folio canvas or list to inspect its ductus kinematics.</p>`;
+                return;
+            }}
+            const activeGlyphs = getPageGlyphs(page);
+            const modelNames = {{
+                'heuristic_calligraphic': 'Quill Ductus (Physical 40°)',
+                'neural_word_pca': 'AI Decomposition (Neural PCA)',
+                'hybrid_consensus': 'Hybrid Consensus'
+            }};
+            const activeLabel = modelNames[activeSegmentationMode] || activeSegmentationMode;
+
+            ins.innerHTML = `
+                <div style="background:#0f172a; border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-size:0.95rem; color:var(--accent); font-weight:bold;">Folio ${{page.page_id}} Overview</span>
+                        <span class="badge-type" style="background:#0369a1; color:#fff;">${{page.section || 'Herbal'}}</span>
+                    </div>
+                    <div class="meta-list">
+                        <div><strong>Folio ID:</strong> ${{page.page_id}}</div>
+                        <div><strong>Quire / Order:</strong> ${{page.quire_id || 'Q01'}} · Singulion ${{page.singulion_id || 'S01'}}</div>
+                        <div><strong>Total Lines:</strong> ${{page.lines ? page.lines.length : page.line_count}} baseline lines</div>
+                        <div><strong>Lexical Words:</strong> ${{page.words ? page.words.length : page.word_count}} words (0 overlaps, disjoint partition)</div>
+                        <div><strong>Active Model Glyphs:</strong> ${{activeGlyphs.length}} (${{activeLabel}})</div>
+                        <div><strong>Scan Dimensions:</strong> ${{page.image_width}} × ${{page.image_height}} px <span style="color:#38bdf8;">(${{(page.image_width * 0.125).toFixed(1)}} × ${{(page.image_height * 0.125).toFixed(1)}} mm)</span></div>
+                    </div>
+                </div>
+                <div style="background:#0c1222; border:1px solid #1e293b; border-radius:6px; padding:10px; font-size:0.75rem; color:var(--text-muted); line-height:1.5;">
+                    <strong style="color:var(--text-main);">🔍 Interactive Navigation Tip:</strong>
+                    <ul style="margin-top:6px; padding-left:16px;">
+                        <li>Click any <strong>word</strong> on the canvas or from the list to isolate it and inspect its constituent glyphs.</li>
+                        <li>Click any <strong>glyph</strong> to inspect its vector ductus strokes and transliteration alignment.</li>
+                        <li>Click on <strong>empty canvas space</strong> or press <code>Escape</code> to deselect and return to full page view.</li>
+                    </ul>
+                </div>
+            `;
+        }}
+
+        function renderInspectorArchetype(archVal) {{
+            const ins = document.getElementById('inspector-content');
+            if (!ins) return;
+            const page = data[currentMs].pages[currentPageIdx];
+            const archGlyphs = getPageGlyphs(page).filter(g => g.canonical_type === archVal);
+            const cat = data[currentMs].catalogue;
+            const arch = cat.alphabet.find(a => a.type_id === archVal);
+
+            ins.innerHTML = `
+                <div style="background:#0c1222; border:1px solid var(--accent); border-radius:8px; padding:12px; margin-bottom:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-size:0.95rem; color:var(--accent); font-weight:bold;">Archetype ${{archVal}}</span>
+                        <span class="badge-type" style="background:#0369a1; color:#fff;">${{archGlyphs.length}} on ${{page.page_id}}</span>
+                    </div>
+                    <div class="meta-list">
+                        <div><strong>Canonical Type:</strong> ${{archVal}} (Rank #${{arch ? arch.rank : '?'}})</div>
+                        <div><strong>Corpus Frequency:</strong> ${{arch ? arch.frequency : '?'}} occurrences</div>
+                        <div><strong>Page Occurrences:</strong> ${{archGlyphs.length}} instances on folio ${{page.page_id}}</div>
+                        <div><strong>Topology Group:</strong> ${{arch ? arch.topology_group : 'Core'}} (${{arch ? arch.loop_count : 0}} loops)</div>
+                    </div>
+                    <button class="btn-locate" style="margin-top:8px;" onclick="deselectAll()">✕ Clear Archetype Filter</button>
+                </div>
+            `;
+        }}
+
         function renderInspector() {{
             const ins = document.getElementById('inspector-content');
             if (!selectedGlyph) {{
-                ins.innerHTML = `<p style="color:var(--text-muted); margin-top:40px; text-align:center;">Select any glyph or word from the grid or page overlay to inspect its coordinates and vector ductus.</p>`;
+                renderInspectorEmpty();
                 return;
             }}
 
