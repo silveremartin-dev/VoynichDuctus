@@ -26,8 +26,10 @@ from voynich_ductus.ingestion.binarization import Binarizer
 from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
 from voynich_ductus.ingestion.spatial_partitioner import SpatialWordPartitioner
 from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
-from voynich_ductus.embeddings.word_neural_decomposer import (
+from voynich_ductus.embeddings.word_decomposition import (
     WordScribalEncoder,
+    NeuralWordDecomposition,
+    HybridConsensusWordDecomposition,
     NeuralWordDecomposer,
     HybridNeuroKinematicDecomposer,
     cross_evaluate_options_consensus
@@ -38,6 +40,35 @@ from voynich_ductus.vectorizer.stroke_graph import StrokeGraphExtractor
 from voynich_ductus.vectorizer.junction_resolver import JunctionResolver
 from voynich_ductus.vectorizer.export_format import VectorExporter
 from voynich_ductus.clustering.glyph_catalogue import GlyphCatalogue
+
+
+def extract_euler_bernoulli_ductus(g_mask: np.ndarray, skel_eng: Skeletonizer, graph_ext: StrokeGraphExtractor, resolver: JunctionResolver, max_strokes: int = 4) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Computes the pure Euler-Bernoulli Topological Skeleton Ductus (1D medial axis + NetworkX graph + minimum bending energy).
+    Used for direct side-by-side comparison next to our 40-deg Quill Calligraphic Ductus.
+    """
+    gh, gw = g_mask.shape[:2]
+    try:
+        skel, widths = skel_eng.extract_skeleton(g_mask)
+        G = graph_ext.build_pixel_graph(skel, widths)
+        raw = graph_ext.decompose_into_strokes(G)
+        eb_strokes = resolver.resolve_and_order_strokes(raw) if raw else []
+        if max_strokes > 0:
+            eb_strokes = eb_strokes[:max_strokes]
+    except Exception:
+        eb_strokes = []
+
+    if not eb_strokes:
+        eb_strokes = [{
+            "stroke_id": "eb_s00",
+            "order_index": 0,
+            "points": [(float(gh * 0.25), float(gw * 0.5), 1.8), (float(gh * 0.75), float(gw * 0.5), 1.8)],
+            "length": 2.0,
+            "start": (float(gh * 0.25), float(gw * 0.5)),
+            "end": (float(gh * 0.75), float(gw * 0.5))
+        }]
+    eb_svg = VectorExporter.to_svg(eb_strokes, max(10, gw), max(10, gh))
+    return eb_strokes, eb_svg
 
 
 def build_isolated_crop_uri(patch_bgr: np.ndarray, g_mask: np.ndarray) -> str:
@@ -75,7 +106,8 @@ def tokenize_eva_word(eva_word: str) -> List[str]:
 def realign_voynich_word_eva_tokens(words: List[Dict[str, Any]], glyphs: List[Dict[str, Any]]):
     """
     Aligns constituent glyphs of each word with its EVA ground-truth tokens
-    using horizontal relative position + topological compatibility (loops & height).
+    using strictly monotonic left-to-right sequence mapping.
+    Ensures that glyphs are never scrambled and always preserve reading order.
     """
     word_map = {w["word_id"]: w for w in words if "word_id" in w}
     by_word: Dict[str, List[Dict[str, Any]]] = {}
@@ -83,59 +115,31 @@ def realign_voynich_word_eva_tokens(words: List[Dict[str, Any]], glyphs: List[Di
         wid = g.get("word_id", "")
         by_word.setdefault(wid, []).append(g)
 
-    loop_eva_set = {"o", "a", "y", "d", "q", "8"}
-    tall_eva_set = {"k", "t", "p", "f", "cth", "ckh", "cph", "cfh", "d", "l"}
-    wide_eva_set = {"ch", "sh", "ii", "iii", "ee", "m", "cth", "ckh"}
-
     for wid, w_glyphs in by_word.items():
         w_glyphs.sort(key=lambda item: item.get("bbox", [0, 0, 0, 0])[1])
         w_obj = word_map.get(wid, {})
         eva_text = w_obj.get("eva_text") or (w_glyphs[0].get("ref_eva_text", "") if w_glyphs else "")
         tokens = tokenize_eva_word(eva_text)
-        if not tokens:
+        if not tokens or not w_glyphs:
             continue
 
-        if len(w_glyphs) == len(tokens):
+        N = len(w_glyphs)
+        K = len(tokens)
+
+        if N == 1:
+            w_glyphs[0]["eva_char"] = tokens[0]
+            continue
+
+        if N == K:
             for g, tok in zip(w_glyphs, tokens):
                 g["eva_char"] = tok
             continue
 
-        x_mins = [g.get("bbox", [0, 0, 0, 0])[1] for g in w_glyphs]
-        x_maxs = [g.get("bbox", [0, 0, 0, 0])[3] for g in w_glyphs]
-        w_left = float(min(x_mins))
-        w_span = max(1.0, float(max(x_maxs) - w_left))
-
-        K = len(tokens)
-        for g in w_glyphs:
-            gx_center = 0.5 * (g.get("bbox", [0, 0, 0, 0])[1] + g.get("bbox", [0, 0, 0, 0])[3])
-            rel_x = np.clip((gx_center - w_left) / w_span, 0.0, 0.999)
-            expected_k = rel_x * K
-
-            g_loops = int(g.get("loop_count", 0))
-            gh = float(g.get("height", 20))
-            gw = float(g.get("width", 15))
-
-            best_tok = tokens[min(K - 1, int(round(expected_k)))]
-            best_score = -1e9
-            k_start = max(0, int(np.floor(expected_k)) - 1)
-            k_end = min(K - 1, int(np.ceil(expected_k)) + 1)
-            for k_cand in range(k_start, k_end + 1):
-                tok = tokens[k_cand]
-                pos_pen = abs(k_cand - expected_k) * 1.25
-                compat = 0.0
-                if g_loops >= 1 and tok in loop_eva_set:
-                    compat += 1.5
-                elif g_loops == 0 and tok not in loop_eva_set:
-                    compat += 0.8
-                if gh >= 26 and tok in tall_eva_set:
-                    compat += 1.2
-                if gw >= 22 and tok in wide_eva_set:
-                    compat += 1.0
-                score = compat - pos_pen
-                if score > best_score:
-                    best_score = score
-                    best_tok = tok
-            g["eva_char"] = best_tok
+        # Strictly monotonic left-to-right assignment:
+        # Maps index i in [0..N-1] to token index k in [0..K-1]
+        for i, g in enumerate(w_glyphs):
+            k = min(K - 1, int(i * K / N))
+            g["eva_char"] = tokens[k]
 
 
 def reprocess_seraphinianus(base_dir: Path):
@@ -156,6 +160,9 @@ def reprocess_seraphinianus(base_dir: Path):
     binarizer = Binarizer()
     segmenter = GlyphSegmenter(scale_calib=scale_calib)
     tracker = CalligraphicVectorizer(nib_angle_deg=40.0)
+    skel_eng = Skeletonizer()
+    graph_ext = StrokeGraphExtractor()
+    resolver = JunctionResolver()
 
     page_id = page_data.get("page_id", "serafini_p030")
     raw_words = page_data.get("words", [])
@@ -258,6 +265,7 @@ def reprocess_seraphinianus(base_dir: Path):
                 s["page_points"] = [[float(p[0] + gy0), float(p[1] + gx0), float(p[2])] for p in s.get("points", [])]
 
             svg = VectorExporter.to_svg(strokes, max(10, gw), max(10, gh))
+            eb_strokes, eb_svg = extract_euler_bernoulli_ductus(g_mask, skel_eng, graph_ext, resolver, max_strokes=6)
             glyph_id = f"{page_id}_{line_id}_{word_id}_G{glyph_idx:02d}"
 
             g_rec = {
@@ -282,6 +290,9 @@ def reprocess_seraphinianus(base_dir: Path):
                 "strokes": strokes,
                 "ductus_svg": svg,
                 "svg_content": svg,
+                "euler_stroke_count": len(eb_strokes),
+                "euler_strokes": eb_strokes,
+                "euler_svg_content": eb_svg,
                 "png_rel": "",
                 "svg_rel": "",
                 "mask": g_mask,
@@ -319,6 +330,7 @@ def reprocess_seraphinianus(base_dir: Path):
             for s in n_strokes:
                 s["page_points"] = [[float(p[0] + gy0), float(p[1] + gx0), float(p[2])] for p in s.get("points", [])]
             svg = VectorExporter.to_svg(n_strokes, max(10, gw), max(10, gh))
+            eb_strokes, eb_svg = extract_euler_bernoulli_ductus(ng_mask, skel_eng, graph_ext, resolver, max_strokes=6)
 
             ng_rec = {
                 "glyph_id": f"{page_id}_{word_id}_N{n_idx:02d}" if line_id in word_id else f"{page_id}_{line_id}_{word_id}_N{n_idx:02d}",
@@ -341,6 +353,9 @@ def reprocess_seraphinianus(base_dir: Path):
                 "strokes": n_strokes,
                 "ductus_svg": svg,
                 "svg_content": svg,
+                "euler_stroke_count": len(eb_strokes),
+                "euler_strokes": eb_strokes,
+                "euler_svg_content": eb_svg,
                 "png_rel": "",
                 "svg_rel": "",
                 "crop_uri": crop_uri,
@@ -376,6 +391,7 @@ def reprocess_seraphinianus(base_dir: Path):
             for s in h_strokes:
                 s["page_points"] = [[float(p[0] + gy0), float(p[1] + gx0), float(p[2])] for p in s.get("points", [])]
             svg = VectorExporter.to_svg(h_strokes, max(10, gw), max(10, gh))
+            eb_strokes, eb_svg = extract_euler_bernoulli_ductus(hg_mask, skel_eng, graph_ext, resolver, max_strokes=6)
 
             hg_rec = {
                 "glyph_id": f"{page_id}_{word_id}_H{h_idx:02d}" if line_id in word_id else f"{page_id}_{line_id}_{word_id}_H{h_idx:02d}",
@@ -398,6 +414,9 @@ def reprocess_seraphinianus(base_dir: Path):
                 "strokes": h_strokes,
                 "ductus_svg": svg,
                 "svg_content": svg,
+                "euler_stroke_count": len(eb_strokes),
+                "euler_strokes": eb_strokes,
+                "euler_svg_content": eb_svg,
                 "png_rel": "",
                 "svg_rel": "",
                 "crop_uri": crop_uri,
@@ -485,6 +504,9 @@ def reprocess_voynich(base_dir: Path):
     binarizer = Binarizer()
     segmenter = GlyphSegmenter(scale_calib=scale_calib)
     tracker = CalligraphicVectorizer(nib_angle_deg=40.0)
+    skel_eng = Skeletonizer()
+    graph_ext = StrokeGraphExtractor()
+    resolver = JunctionResolver()
     skel_eng = Skeletonizer()
     graph_ext = StrokeGraphExtractor()
     resolver = JunctionResolver()
@@ -586,6 +608,7 @@ def reprocess_voynich(base_dir: Path):
                 s["page_points"] = [[float(p[0] + gy0), float(p[1] + gx0), float(p[2])] for p in s.get("points", [])]
 
             svg = VectorExporter.to_svg(strokes, max(10, gw), max(10, gh))
+            eb_strokes, eb_svg = extract_euler_bernoulli_ductus(g_mask, skel_eng, graph_ext, resolver, max_strokes=6)
             if word_id.startswith(f"{line_id}_"):
                 glyph_id = f"{page_id}_{word_id}_G{glyph_idx:02d}"
             else:
@@ -615,6 +638,9 @@ def reprocess_voynich(base_dir: Path):
                 "strokes": strokes,
                 "ductus_svg": svg,
                 "svg_content": svg,
+                "euler_stroke_count": len(eb_strokes),
+                "euler_strokes": eb_strokes,
+                "euler_svg_content": eb_svg,
                 "eva_char": eva_c,
                 "ref_eva_text": eva_text,
                 "png_rel": "",
@@ -654,6 +680,7 @@ def reprocess_voynich(base_dir: Path):
             for s in n_strokes:
                 s["page_points"] = [[float(p[0] + gy0), float(p[1] + gx0), float(p[2])] for p in s.get("points", [])]
             svg = VectorExporter.to_svg(n_strokes, max(10, gw), max(10, gh))
+            eb_strokes, eb_svg = extract_euler_bernoulli_ductus(ng_mask, skel_eng, graph_ext, resolver, max_strokes=6)
 
             ng_rec = {
                 "glyph_id": f"{page_id}_{word_id}_N{n_idx:02d}" if line_id in word_id else f"{page_id}_{line_id}_{word_id}_N{n_idx:02d}",
@@ -676,6 +703,9 @@ def reprocess_voynich(base_dir: Path):
                 "strokes": n_strokes,
                 "ductus_svg": svg,
                 "svg_content": svg,
+                "euler_stroke_count": len(eb_strokes),
+                "euler_strokes": eb_strokes,
+                "euler_svg_content": eb_svg,
                 "png_rel": "",
                 "svg_rel": "",
                 "crop_uri": crop_uri,
@@ -711,6 +741,7 @@ def reprocess_voynich(base_dir: Path):
             for s in h_strokes:
                 s["page_points"] = [[float(p[0] + gy0), float(p[1] + gx0), float(p[2])] for p in s.get("points", [])]
             svg = VectorExporter.to_svg(h_strokes, max(10, gw), max(10, gh))
+            eb_strokes, eb_svg = extract_euler_bernoulli_ductus(hg_mask, skel_eng, graph_ext, resolver, max_strokes=6)
 
             hg_rec = {
                 "glyph_id": f"{page_id}_{word_id}_H{h_idx:02d}" if line_id in word_id else f"{page_id}_{line_id}_{word_id}_H{h_idx:02d}",
@@ -733,6 +764,9 @@ def reprocess_voynich(base_dir: Path):
                 "strokes": h_strokes,
                 "ductus_svg": svg,
                 "svg_content": svg,
+                "euler_stroke_count": len(eb_strokes),
+                "euler_strokes": eb_strokes,
+                "euler_svg_content": eb_svg,
                 "png_rel": "",
                 "svg_rel": "",
                 "crop_uri": crop_uri,

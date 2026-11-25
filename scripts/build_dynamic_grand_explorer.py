@@ -45,6 +45,8 @@ def clean_catalogue_for_embed(cat_dict: dict) -> dict:
                     "topology_group": inst.get("topology_group", arch.get("topology_group", "")),
                     "crop_uri": inst.get("crop_uri", ""),
                     "svg_content": inst.get("svg_content", inst.get("ductus_svg", "")),
+                    "euler_svg_content": inst.get("euler_svg_content", ""),
+                    "euler_stroke_count": inst.get("euler_stroke_count", len(inst.get("euler_strokes", []))),
                     "eva_char": inst.get("eva_char", "")
                 })
             else:
@@ -78,6 +80,7 @@ def clean_catalogue_for_embed(cat_dict: dict) -> dict:
             "exemplar_png": arch.get("exemplar_png", ""),
             "exemplar_svg": arch.get("exemplar_svg", ""),
             "exemplar_svg_content": arch.get("exemplar_svg_content", ""),
+            "exemplar_euler_svg_content": arch.get("exemplar_euler_svg_content", ""),
             "mean_strokes": arch.get("mean_strokes"),
             "mean_height": arch.get("mean_height"),
             "mean_width": arch.get("mean_width"),

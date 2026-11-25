@@ -49,11 +49,11 @@ data/
 | **1. Ingestion** | Multimodal SIFT/RANSAC Aligner | 🟢 **Production (100%)** | 225/225 folios processed; subpixel registration solves translation ($T_x, T_y$) and camera tilt on Yale master plates. |
 | **1. Ingestion** | Line Segmentation (FFT Pitch) | 🟢 **Stable (96%)** | Robust detection of text line baselines across irregular parchment lines. |
 | **1. Ingestion** | Word Segmentation | 🟢 **Stable (95%)** | Reliable lexical bounding box isolation on whitespace gaps (37,420 words). |
-| **1. Ingestion** | Glyph Isolation / Ligature Splitting | 🟢 **Stable (98%)** | Connected-component integrity protects broad letters from artificial mid-body cuts. |
-| **2. Vectorizer** | Skeletonization & Graph Extraction | 🟢 **Stable (98%)** | Medial axis transform + Euclidean distance map for nib profiling. |
-| **2. Vectorizer** | Junction Resolver & Ductus Ordering | 🟢 **Operational (100%)** | Euler-Bernoulli momentum ($\cos \Delta \theta \ge 0.5$), 11 o'clock CCW loops, and distance valley minim splitting. |
-| **3. Embeddings** | Feature Representation | 🟢 **Operational (DINOv2)** | Invariant 768-D deep self-supervised ViT patch embeddings + 16-D physical moments. |
-| **4. Clustering** | Strict Archetype Induction | 🟢 **Operational (100%)** | 35 canonical Voynich archetypes (`G01`–`G35`), 55 Seraphini archetypes, with tagged outlier rejection bins. |
+| **1. Ingestion / Decomposition** | Word Decomposition (`word_decomposition`: A, B, C) | 🟢 **Operational (100%)** | 3 independent word-to-glyph decompositions (A: Topological & Valley, B: Spatial PCA, C: Hybrid Consensus), each with full Dual Ductus. |
+| **2. Vectorizer** | Anti-Brownian Quill 40° & Spur Pruning | 🟢 **Operational (100%)** | Lateral spur pruning + full nib-footprint extinction (`wake_mask`) + RDP spline smoothing eliminating internal zigzag bounce. |
+| **2. Vectorizer** | Side-by-Side Euler-Bernoulli Skeleton | 🟢 **Operational (100%)** | 1D Medial Axis + `NetworkX` Euler-Bernoulli minimum bending energy skeleton displayed side-by-side next to every Quill Ductus. |
+| **3. Embeddings** | DINOv2 (16-D PCA) + Kinematic Descriptors | 🟢 **Operational (DINOv2)** | Top-16 PCA projection of 768-D Meta DINOv2 embeddings fused with high-weight kinematic ductus features (`stroke_count`, `tortuosity`, tangents). |
+| **4. Clustering** | Strict Archetype & Graphical Symbol Induction | 🟢 **Operational (100%)** | 49 canonical Voynich archetypes (`G01`–`G49`), 57 Seraphinianus graphical SVG symbol archetypes (`G01`–`G57`), with loop & scale locks. |
 | **5. Diagnostics** | Information Theory & Memory | 🟢 **Stable (100%)** | Shannon $H_1, H_2$, Hurst $H$ (DFA), LZMA compressibility benchmarks across full corpus. |
 | **6. Generators** | Synthetic Baselines | 🟢 **Stable (100%)** | Timm self-citation buffer, Rugg Cardan grilles, Latin Herbals. |
 
@@ -65,13 +65,17 @@ data/
 - **Root Cause**: The ligature splitter used narrow width thresholds (`width <= 45px`) and vertical projection column sum dips. Complex characters with wide loops or gallows crossbars were falsely interpreted as multiple conjoined letters and cut at the middle.
 - **Fix**: Guarantee that single connected ink components under 80px remain unbroken unless an explicit multi-loop baseline ligature is mathematically detected.
 
-### 4.2 Ductus Kinematic Aberrations (Why colors and directions jumped randomly)
-- **Root Cause**: Junction resolution previously linked any two skeleton segments whose endpoints were within 8px, without checking directional continuity ($\cos \theta$). This caused 180° hairpin reversals where pen trajectories looped back unnaturally.
-- **Fix**: Implement Euler-Bernoulli tangent continuity ($\min \Delta \theta$) enforcing smooth forward momentum ($\cos \theta \ge 0.2$), with separate stroke creation when an abrupt direction change occurs.
+### 4.2 Ductus Kinematic Aberrations & Anti-Brownian Nib-Footprint Tracking
+- **Root Cause**: Earlier ridge tracking used tiny 1.15 px micro-steps with a 3×3 pixel visited footprint and a 10-step memory decay on unpruned medial-axis skeletons, allowing the tracker to bounce 20–30 times back-and-forth inside the thickness of a single quill stem ("Brownian motion") and make hairpin U-turns.
+- **Fix**:
+  1. **Lateral Spur Pruning (`prune_skeleton_spurs`)**: Strips medial-axis border spurs shorter than the local Euclidean distance transform (EDT) nib radius before tracking.
+  2. **Full Nib-Footprint Extinction (`_mark_nib_footprint_visited` & `wake_mask`)**: Extinguishes the entire physical width of the quill ($r = d_{\text{EDT}} + 1.6\text{ px}$) along the stroke path so a trajectory can never bounce laterally or reverse inside a stem.
+  3. **Ramer-Douglas-Peucker & Gaussian Smoothing (`_rdp_simplify_with_width`)**: Simplifies trajectories to essential calligraphic control points while preserving closed loops (`1L`/`2+L`).
+  4. **Side-by-Side Euler-Bernoulli Skeleton**: Computes and displays the pure `NetworkX` Euler-Bernoulli minimum bending energy skeleton alongside every Quill Calligraphic Ductus (40°) across all 3 Word Decompositions (`A`, `B`, `C`).
 
-### 4.3 Clustering Collapse (Why different letters were grouped together)
-- **Root Cause**: 16 hand-crafted geometric features (aspect ratio, surface area, bounding box width) are mathematically degenerate: a vertical stroke and a small round loop can share the exact same area and aspect ratio.
-- **Fix**: Integrate **Meta DINOv2 (Vision Transformer)** patch embeddings. DINOv2 represents global shape, stroke topology, and texture in a 768-D latent space where visual distance directly reflects morphological identity.
+### 4.3 Joint Kinematic Ductus + DINOv2 (16-D PCA) Archetype Clustering
+- **Root Cause**: Slicing raw arbitrary neurons (`dino_emb[:16]`) or under-weighting kinematic features meant neither the reconstructed ductus nor the full 768-D DINOv2 space optimally drove archetype clustering.
+- **Fix**: `GlyphCatalogue.extract_glyph_features()` now projects the full 768-D **Meta DINOv2 (Vision Transformer)** embeddings onto their top-16 principal components (`PCA(n_components=16, random_state=42)`) with $L_2$ normalization (`weight * 2.5`), and fuses them with high-weight kinematic ductus descriptors (`stroke_count * 3.5`, `tortuosity * 3.0`, entry/exit tangents `* 2.5`, 5-bin orientation histogram `* 2.2`, width variance `* 2.0`) and metric scale invariants. For *Codex Seraphinianus*, all 57 induced archetypes (`G01`–`G57`) are displayed directly as **graphical vector SVG symbols** rather than arbitrary ASCII codes.
 
 ### 4.4 Multimodal SIFT/RANSAC Registration (Yale HD vs Glance: +750% Pixel Jump)
 - **Root Cause of Past Yale Failures**: Past attempts to map Voynichese coordinates onto Yale Beinecke HD scans assumed a simple scale factor. In reality, Yale scans contain page-specific cropping shifts ($T_x = 234\text{ to }500\text{ px}$, $T_y = 117\text{ to }233\text{ px}$) and camera tilts ($\theta \in [-1.5^\circ, +1.5^\circ]$).

@@ -19,17 +19,17 @@
 - [1. What VoynichDuctus Does: An Experimental Laboratory for Autonomous Script Recognition & Ductus Induction](#1-what-voynichductus-does-an-experimental-laboratory-for-autonomous-script-recognition--ductus-induction)
 - [2. Visual Tour & Interactive Grand Glyph Explorer (`grand_glyph_explorer.html`)](#2-visual-tour--interactive-grand-glyph-explorer-grand_glyph_explorerhtml)
   - [2.1 Synchronized 4-Panel Workbench & Word-Level Ductus Inspector](#21-synchronized-4-panel-workbench--word-level-ductus-inspector)
-  - [2.2 Glyph-Level Kinematic Ductus & Multi-Scheme Alignment](#22-glyph-level-kinematic-ductus--multi-scheme-alignment)
-  - [2.3 5-Way AI Vision & Ductus Engine Comparison Modal](#23-5-way-ai-vision--ductus-engine-comparison-modal)
-  - [2.4 Unsupervised Canonical Alphabet & Archetype Catalogue](#24-unsupervised-canonical-alphabet--archetype-catalogue)
+  - [2.2 Glyph-Level Dual-Ductus Comparison (Quill 40° vs. Euler-Bernoulli Skeleton)](#22-glyph-level-dual-ductus-comparison-quill-40-vs-euler-bernoulli-skeleton)
+  - [2.3 Three Independent Word Decomposition Modes (`word_decomposition`: A, B, C)](#23-three-independent-word-decomposition-modes-word_decomposition-a-b-c)
+  - [2.4 Unsupervised Canonical Alphabet & Graphical Symbol Catalogue](#24-unsupervised-canonical-alphabet--graphical-symbol-catalogue)
   - [2.5 Cross-Folio Archetype Variations & 1-Click Page Localization](#25-cross-folio-archetype-variations--1-click-page-localization)
-  - [2.6 Codex Seraphinianus: Continuous Cursive Ribbon Derendering](#26-codex-seraphinianus-continuous-cursive-ribbon-derendering)
+  - [2.6 Codex Seraphinianus: Continuous Cursive Ribbon & Emergent Vector Symbols](#26-codex-seraphinianus-continuous-cursive-ribbon--emergent-vector-symbols)
   - [2.7 Built-In Scientific Methodology & BnF Gallica Calibration Reference](#27-built-in-scientific-methodology--bnf-gallica-calibration-reference)
 - [3. The Epistemic Trap: Human Transliteration Bias & The Anti-Circularity Firewall](#3-the-epistemic-trap-human-transliteration-bias--the-anti-circularity-firewall)
 - [4. End-to-End 6-Stage Pipeline Architecture](#4-end-to-end-6-stage-pipeline-architecture)
-- [5. Autonomous Multi-Scale Recognition: From Raw Parchment to Disjoint Words & Letters](#5-autonomous-multi-scale-recognition-from-raw-parchment-to-disjoint-words--letters)
+- [5. Autonomous Multi-Scale Recognition: From Raw Parchment to Disjoint Words & Word Decomposition](#5-autonomous-multi-scale-recognition-from-raw-parchment-to-disjoint-words--word-decomposition)
 - [6. Scribal Physics & Dual-Ductus Kinematics: Medieval Quill vs. Modern Cursive Ribbon](#6-scribal-physics--dual-ductus-kinematics-medieval-quill-vs-modern-cursive-ribbon)
-- [7. The 5 Independent Vision & Ductus Paradigms](#7-the-5-independent-vision--ductus-paradigms)
+- [7. Dual-Engine Ductus & DINOv2 (16-D PCA) Archetype Induction](#7-dual-engine-ductus--dinov2-16-d-pca-archetype-induction)
 - [8. Unsupervised Archetype Induction & Popperian Falsification (Proposition 4)](#8-unsupervised-archetype-induction--popperian-falsification-proposition-4)
 - [9. Corpus Scale & Information-Theoretic Diagnostics Benchmark](#9-corpus-scale--information-theoretic-diagnostics-benchmark)
 - [10. Extending the Laboratory to New Manuscripts & Writing Systems](#10-extending-the-laboratory-to-new-manuscripts--writing-systems)
@@ -45,13 +45,15 @@
 **What does this project actually do?**  
 Give `VoynichDuctus` raw scans of any manuscript—whether historical, undeciphered, or completely invented—and it executes a **100% automated, end-to-end paleographical analysis without any human intervention or prior alphabet**:
 
-1. **Automatic Spatial Recognition (Lines $\to$ Words $\to$ Letters & Glyphs)**:
+1. **Automatic Spatial Recognition (Lines $\to$ Words $\to$ Word Decomposition into Letters & Glyphs)**:
    - Filters out colored illustrations and parchment stains, detects text lines, and partitions the page into **strictly disjoint lexical words** (via Voronoi/watershed boundary arbitration with zero overlapping boxes).
-   - Decomposes each word into its constituent **letters, glyphs, and decoupled supralinear diacritics** using three parallel paradigms: physical nib mechanics (*Quill Ductus*), unsupervised deep spatial decomposition (*AI Neural PCA / NMF*), and their intersection (*Hybrid Consensus*).
-2. **Automatic Kinematic Ductus Reconstruction (*Offline-to-Online Derendering*)**:
-   - Infers how the writer's hand actually moved across the page: converts static 2D ink pixels into ordered vector stroke trajectories $(x, y, t, \text{width})$, recovering initial pen touchdowns (`●`), chronological stroke order (`1` $\to$ `2` $\to$ `3` $\to$ `4`), pen lifts, nib bevel angles (*pleins et déliés*), and minimum-bending-energy junction crossings.
-3. **Automatic Unsupervised Alphabet & Archetype Induction**:
-   - Without knowing what alphabet is written on the page, the engine projects every extracted glyph into a self-supervised visual & topological space (**Meta DINOv2 ViT 768-D embeddings + 16-D geometric descriptors + physical millimeter scale bands**) and clusters them into an **emergent canonical alphabet of archetypes** (`G01`, `G02`, ...), complete with medoid exemplars, allograph variations, and machine transliteration streams.
+   - Decomposes each word into its constituent **letters, glyphs, and decoupled supralinear diacritics** using three parallel **Word Decomposition (`word_decomposition`)** modes: **A · Topological & Valley (40°)**, **B · Spatial PCA Decomposition** (`||dZ/dx||` horizontal latent transitions), and **C · Hybrid Consensus** (their geometric intersection with loop protection). Every glyph across all 3 decompositions receives its own complete Dual-Engine Ductus.
+2. **Automatic Dual-Engine Kinematic Ductus Reconstruction (*Offline-to-Online Derendering*)**:
+   - Infers how the writer's hand actually moved across the page and displays **two complementary ductus reconstructions side-by-side** for every glyph:
+     1. **Quill Calligraphic Ductus (40° Nib)**: Physical ridge tracker with lateral spur pruning, full nib-footprint extinction (`wake_mask` preventing internal zigzag or U-turns inside thick stems), Ramer-Douglas-Peucker spline simplification, and chronological stroke order (`●` Green touchdown, `1` $\to$ `2` $\to$ `3` $\to$ `4`).
+     2. **Euler-Bernoulli Topological Skeleton**: Pure 1D Medial Axis Transform + `NetworkX` graph junction resolver minimizing bending energy $\int \kappa^2(s)\,ds$.
+3. **Automatic Unsupervised Alphabet & Graphical Archetype Induction**:
+   - Without knowing what alphabet is written on the page, the engine projects every extracted glyph into a joint visual, kinematic, and topological space (**16-D PCA projection of Meta DINOv2 ViT 768-D embeddings + high-weight kinematic ductus descriptors + physical millimeter scale bands**) and clusters them into an **emergent canonical alphabet of archetypes** (`G01`–`G49` for Voynich; `G01`–`G57` graphical vector symbols for Codex Seraphinianus).
 
 ### Why Two Flagship Codices? (Voynich MS vs. Codex Seraphinianus) — And Why It Extends to Any Project
 
@@ -60,9 +62,9 @@ Although the project is named **VoynichDuctus** after its initial benchmark, it 
 | Experimental Dimension | 1. Voynich Manuscript (*Beinecke MS 408*, ca. 1404–1438) | 2. *Codex Seraphinianus* (Luigi Serafini, 1981) | 3. Extensibility to Other Manuscripts & Scripts |
 | :--- | :--- | :--- | :--- |
 | **Nature of the Script** | Undeciphered 15th-century medieval codex (225 folios). | Famous 20th-century **asemic encyclopedia** (371 pages) written in an imaginary, untranscribed cursive script with **no existing alphabet or human transliteration**. | Any historical manuscript, undeciphered writing system (Rohonc Codex, Rongorongo, Linear A, Indus script), medieval palimpsest, or calligraphic corpus. |
-| **Why It Is in the Lab** | **Testbed for Falsifying Human Transliterations (EVA)**: Tests whether physical quill strokes match or refute 1990s human ASCII transcriptions (*Proposition 4*). | **Ultimate Blind Test for Pure Unsupervised Discovery**: Because no transcription exists for *Seraphinianus*, the pipeline must recognize all **68,430 words** and **456,943 glyphs**, reconstruct their continuous cursive ribbon ductus, induce **55 canonical archetypes (`G01`–`G55`)**, and produce the **first complete autonomous machine transliteration** of the codex from scratch. | **Universal Metric & Kinematic Plug-and-Play**: Calibrates automatically to any page size in millimeters (`MetricScaleCalibration`) and any writing tool (broad quill, reed calame, brush, or monoline stylus). |
+| **Why It Is in the Lab** | **Testbed for Falsifying Human Transliterations (EVA)**: Tests whether physical quill strokes match or refute 1990s human ASCII transcriptions (*Proposition 4*). | **Ultimate Blind Test for Pure Unsupervised Discovery**: Because no transcription exists for *Seraphinianus*, the pipeline recognizes all **68,430 words** and **456,943 glyphs**, reconstructs their continuous cursive ribbon ductus, induces **57 canonical graphical symbol archetypes (`G01`–`G57`)**, and produces the **first complete autonomous machine transliteration** of the codex from scratch. | **Universal Metric & Kinematic Plug-and-Play**: Calibrates automatically to any page size in millimeters (`MetricScaleCalibration`) and any writing tool (broad quill, reed calame, brush, or monoline stylus). |
 | **Physical Ductus Mode** | **Multi-Stroke Medieval Quill (`1 to 4 strokes/glyph`)**: 40° beveled goose quill producing *pleins et déliés* and deliberate pen lifts (calibrated on 3 BnF Gallica medieval codices). | **Single-Stroke Cursive Ribbon (`1 continuous stroke/glyph`)**: Modern monoline fineliner (`single_stroke_mode=True`) moving with smooth automotive inertia and zero internal pen lifts. | Configurable physical profile (`single_stroke_mode`, `max_strokes`, `nib_angle_deg`) tailored to the target scriptorium or medium. |
-| **Processed Corpus Scale** | **225 folios** $\to$ **37,212 disjoint words** $\to$ **162,333 canonical glyphs** (**35–48 archetypes**). | **371 pages** $\to$ **68,430 disjoint words** $\to$ **456,943 glyphs** (**55 emergent archetypes**). | Ready for batch processing locally or at cloud scale (Docker / Google Cloud Run). |
+| **Processed Corpus Scale** | **225 folios** $\to$ **37,212 disjoint words** $\to$ **162,333 canonical glyphs** (**49 archetypes `G01`–`G49`**). | **371 pages** $\to$ **68,430 disjoint words** $\to$ **456,943 glyphs** (**57 emergent graphical symbol archetypes `G01`–`G57`**). | Ready for batch processing locally or at cloud scale (Docker / Google Cloud Run). |
 
 ---
 
@@ -82,40 +84,37 @@ The pipeline compiles its entire multi-codex output into a standalone, zero-depe
 
 ---
 
-### 2.2 Glyph-Level Kinematic Ductus & Multi-Scheme Alignment
+### 2.2 Glyph-Level Dual-Ductus Comparison (Quill 40° vs. Euler-Bernoulli Skeleton)
 
-![Glyph-Level Kinematic Ductus Reconstruction & 3-Way Comparison](docs/images/02_voynich_glyph_ductus_inspector.png)
+![Glyph-Level Kinematic Ductus Reconstruction & 4-Way Comparison](docs/images/02_voynich_glyph_ductus_inspector.png)
 
 *Figure 2 — Drilling down into an individual glyph (`f1r_L01_W00_G01`, Archetype `G01`, 2 strokes) inside word `L01_W00`:*
 - **Constituent Glyph Strip**: Navigate sequentially (`◀ Prev Glyph` / `Next Glyph ▶`) across the characters composing the active word.
-- **3-Way Side-by-Side Visual Verification**:
+- **4-Box Side-by-Side Visual Verification**:
   1. **Original Scan Crop**: High-contrast parchment crop of the isolated character.
-  2. **Kinematic Ductus**: Reconstructed vector trajectory with chronological color encoding (`● Green Dot` = Pen Touchdown, `— Cyan` = Stroke 1, `— Emerald` = Stroke 2 post pen-lift, `— Amber` = Stroke 3, `— Violet` = Stroke 4+).
-  3. **Canonical Reference Font**: Visual comparison with reference paleographic typography.
-- **4-Scheme Transliteration Alignment & Confidence**: Simultaneous posterior cross-checking against `EVA`, `Currier`, `v101`, and `Voynichese (2014)` with one-click SVG vector export (`⬇ Download Glyph SVG`).
+  2. **Quill Ductus (40° Nib)**: Our physical calligraphic reconstruction with chronological color encoding (`● Green Dot` = Pen Touchdown, `— Cyan` = Stroke 1, `— Emerald` = Stroke 2 post pen-lift, `— Amber` = Stroke 3, `— Violet` = Stroke 4), full nib-footprint extinction (no internal Brownian bounce), and Ramer-Douglas-Peucker spline smoothing.
+  3. **Euler-Bernoulli Skeleton**: Side-by-side comparative topological skeleton graph extracted via 1D Medial Axis Transform + `NetworkX` minimum bending energy $\int \kappa^2(s)\,ds$.
+  4. **Canonical Reference Font (Voynich) / Emergent Archetype Symbol (Seraphinianus)**: Visual comparison with reference paleographic typography (`VoynichEVA`) or the induced graphical SVG symbol (`G01`–`G57`).
+- **Transliteration Alignment & Graphical Topology**: Simultaneous posterior cross-checking against `EVA`, `Currier`, `v101`, and `Voynichese (2014)` for Voynich, or **Emergent Serafinian Graphical Symbol & Topology** (SVG Archetype Symbol + Euler-Bernoulli Graph + Morphological Family SVG) for Codex Seraphinianus.
 
 ---
 
-### 2.3 5-Way AI Vision & Ductus Engine Comparison Modal
+### 2.3 Three Independent Word Decomposition Modes (`word_decomposition`: A, B, C)
 
-![5-Way AI Vision & Ductus Engine Comparison Modal](docs/images/03_5way_ai_vision_ductus_comparison.png)
-
-*Figure 3 — Clicking `🔬 5-Way AI Vision & Ductus Engine Comparison` opens a side-by-side laboratory benchmark evaluating five distinct computer vision and derendering engines on the exact same glyph:*
-1. **In-House Physical Nib Model (`0.42 ms CPU`)**: 40° beveled quill mechanics on Euclidean distance ridges with 100% unbroken loop preservation.
-2. **Euler-Bernoulli Topological Skeleton (`0.38 ms CPU`)**: 1D Medial Axis Transform + `NetworkX` graph junction resolver minimizing curvature bending energy $\int \kappa^2(s)\,ds$.
-3. **Kinematic Flow Net U-Net (`1.20 ms Neural`)**: Deep convolutional velocity field predicting unit tangent vectors $\hat{\mathbf{u}}(x,y)$, touchdowns $P(t=0)$, and pen lifts $P(t=1)$.
-4. **Meta DINOv2 Self-Supervised ViT (`768-D Patch Tokens`)**: Vision Transformer attention graph providing 98.4% clustering invariance across parchment stains and aging.
-5. **Google DeepMind InkSight Derenderer (`(x, y, t, p) Trajectory`)**: Autoregressive sequence-to-sequence transformer predicting continuous pen motion from 2D pixel crops.
+Using the **`Word Decomposition`** selector in the Canvas toolbar (or keyboard keys `1`, `2`, `3`), researchers can switch dynamically between three independent hypotheses for splitting words into constituent glyphs—with full **Quill 40° + Euler-Bernoulli Dual Ductus** computed on every glyph of all three decompositions:
+1. **`A · Topological & Valley (40°)` (`GlyphSegmenter`)**: Connected components + supralinear diacritic decoupling ($\le 0.55\text{ mm}$) + vertical projection & Euclidean Distance Transform (EDT) ink valleys that strictly respect closed loops.
+2. **`B · Spatial PCA Decomposition` (`NeuralWordDecomposition`)**: Encodes the intact word crop into a 1D horizontal latent trajectory $Z(x) \in \mathbb{R}^{32}$ via `WordScribalEncoder` and places cuts at local peaks of the latent transition velocity $\|dZ/dx\|$.
+3. **`C · Hybrid Consensus` (`HybridConsensusWordDecomposition`)**: Retains cuts where Decompositions A and B geometrically intersect ($\epsilon \le 3\text{ px}$) while enforcing Euler loop integrity.
 
 ---
 
-### 2.4 Unsupervised Canonical Alphabet & Archetype Catalogue
+### 2.4 Unsupervised Canonical Alphabet & Graphical Symbol Catalogue
 
 ![Canonical Alphabet Archetypes & Standard Transliteration Corpora](docs/images/04_canonical_alphabet_catalogue.png)
 
 *Figure 4 — The **Canonical Alphabet & Corpora** tab (`setTab('catalogue')`):*
-- Displays the emergent alphabet induced purely from ink geometry, topological loop invariants (`0L`, `1L`, `2+L`), and physical millimeter scale bands (`TINY`, `CORE`, `TALL`, `WIDE`).
-- Each archetype card (`Type G01` with 25,468 occurrences / 15.69% of corpus, `Type G02` with 17,655 occurrences / 10.88%, etc.) reports its medoid scan crop, kinematic ductus SVG, reference correspondence across 4 historical schemes, mean stroke count, loop count, and physical dimensions in both pixels and calibrated millimeters (`mm` / `dmm`).
+- Displays the emergent alphabet induced purely from ink geometry, kinematic ductus features, 16-D PCA DINOv2 embeddings, topological loop invariants (`0L`, `1L`, `2+L`), and physical millimeter scale bands (`TINY`, `CORE`, `TALL`, `WIDE`).
+- Each archetype card (`49 archetypes G01–G49` for Voynich; `57 archetypes G01–G57` for Seraphinianus) displays a **4-column visual comparison** (`SCAN` | `QUILL DUCTUS` | `EULER-BERNOULLI` | `CANONICAL FONT / SYMBOL`), corpus occurrence count, loop lock badge, and physical dimensions in pixels and millimeters (`mm` / `dmm`).
 
 ---
 
@@ -124,20 +123,21 @@ The pipeline compiles its entire multi-codex output into a standalone, zero-depe
 ![Archetype Variations Modal & Cross-Corpus Localization](docs/images/05_archetype_variations_explorer.png)
 
 *Figure 5 — Clicking any archetype card opens the **Archetype Morphological Variations Explorer**:*
-- Inspect all physical instances of an induced archetype across the manuscript (e.g., `Type G01` strictly locked to `1 Loop • TALL_GALLOWS_1LOOP__TALL`).
+- Inspect all physical instances of an induced archetype across the manuscript, complete with its 4-box header banner (`SCAN` | `QUILL 40°` | `EULER-BERN.` | `SYMBOL / REFERENCE`).
 - Each variation card shows the local `SCAN` crop alongside its reconstructed `DUCTUS` trajectory, physical metric dimensions (`mm`), stroke count, and a **`📍 Locate on f1r`** button that jumps directly to the folio canvas and highlights the exact glyph in context.
 
 ---
 
-### 2.6 Codex Seraphinianus: Continuous Cursive Ribbon Derendering
+### 2.6 Codex Seraphinianus: Continuous Cursive Ribbon & Emergent Vector Symbols
 
 ![Codex Seraphinianus Word-Level Continuous Ribbon Inspector](docs/images/06_seraphinianus_continuous_ribbon_word.png)
 
 ![Codex Seraphinianus Glyph-Level Single-Stroke Ductus](docs/images/07_seraphinianus_glyph_ductus.png)
 
 *Figure 6 — Switching the top header to **Codex Seraphinianus** on plate `serafini_p030`:*
-- **Top View (Word-Level Autonomous Transliteration)**: Word `L004_W00` is automatically segmented and transcribed into emergent vector letterforms (`G41 · G38 · G15 · G15 · G10 · G23`). The Inspector compares the 3 intra-word decomposition models (`Quill: 6`, `Neural: 7`, `Hybrid: 7`) under strict `AUTONOMOUS` mode (zero external transcription dependency).
-- **Bottom View (Glyph-Level Continuous Ribbon Ductus)**: Enforces Serafini's modern fineliner physics (`single_stroke_mode=True`, `max_strokes=1`), tracing the entire curvilinear character in a single uninterrupted stroke with smooth automotive inertia.
+- **Word-Level Autonomous Transliteration**: Words are automatically segmented and transcribed into emergent vector letterforms (`G01`–`G57`).
+- **Graphical Vector Symbols Instead of Fake ASCII Codes**: Because no standardized ASCII alphabet exists for *Codex Seraphinianus*, the Explorer renders **actual graphical SVG symbols** for every archetype (`Archetype Symbol SVG`, `Euler-Bernoulli Graph SVG`, and `Morphological Family SVG`) alongside certified loop counts (`0L/1L/2+L`) and metric dimensions in `mm`.
+- **Single-Stroke Continuous Ribbon Ductus**: Enforces Serafini's modern fineliner physics (`single_stroke_mode=True`, `max_strokes=1`), tracing the entire curvilinear character in a single uninterrupted stroke with smooth automotive inertia.
 
 ---
 
@@ -260,18 +260,24 @@ To serve as an automated laboratory across heterogeneous manuscripts, `VoynichDu
 5. **Supralinear Diacritic & Nib Impact Decoupling**:
    - Instantaneous vertical pen touches ($\max(h,w) \le 0.55\text{ mm}$) and floating supralinear accents are decoupled as structured glyph attributes rather than polluting the base character skeleton.
 
-6. **Three Competing Intra-Word Letter Decomposition Models**:
-   - **Model 1 (`Quill Ductus 40°`)**: Physical calligraphic segmentation governed by nib geometry, distance-transform valleys on confluent minims, and right-handed touchdown priors.
-   - **Model 2 (`AI Neural PCA`)**: Unsupervised convolutional encoding (`WordScribalEncoder`) mapping intact word crops into 1D horizontal latent trajectories $Z(x) \in \mathbb{R}^{32}$ and discovering letter basis functions via spatial PCA / NMF (`NeuralWordDecomposer`).
-   - **Model 3 (`Hybrid Consensus`)**: Strict geometric agreement ($\epsilon \le 3\text{ px}$) between physical quill kinematics and neural basis decomposition.
+6. **Three Independent Word Decomposition Modes (`word_decomposition`: A, B, C)**:
+   - **Decomposition A (`A · Topological & Valley 40°` — `GlyphSegmenter`)**: Physical calligraphic segmentation governed by connected components, supralinear diacritic decoupling ($\le 0.55\text{ mm}$), and Euclidean Distance Transform (EDT) ink valleys that never slice through a closed loop.
+   - **Decomposition B (`B · Spatial PCA Decomposition` — `NeuralWordDecomposition`)**: Unsupervised convolutional encoding (`WordScribalEncoder`) mapping intact word crops into 1D horizontal latent trajectories $Z(x) \in \mathbb{R}^{32}$ and placing letter boundaries at local peaks of latent transition velocity $\|dZ/dx\|$.
+   - **Decomposition C (`C · Hybrid Consensus` — `HybridConsensusWordDecomposition`)**: Strict geometric agreement ($\epsilon \le 3\text{ px}$) between Decomposition A and Decomposition B with Euler loop protection.
+   - **Complete Dual Ductus on All 3 Decompositions**: Every glyph produced by Decomposition A, B, or C is independently vectorized by both the **Quill Calligraphic Ductus (40°)** engine and the **Euler-Bernoulli Topological Skeleton** engine.
 
 ---
 
 ## 6. Scribal Physics & Dual-Ductus Kinematics: Medieval Quill vs. Modern Cursive Ribbon
 
-While the spatial recognition pipeline is universal, `CalligraphicVectorizer` adapts its physical differential equations to the writing instrument of each corpus:
+While the spatial recognition pipeline is universal, `CalligraphicVectorizer` adapts its physical differential equations to the writing instrument of each corpus and eliminates artificial skeleton jitter:
 
-### A. Medieval Broad-Nib Quill Physics (Voynich & BnF Gallica Codices)
+### A. Anti-Brownian Calligraphic Tracking Guarantees
+1. **Lateral Spur Pruning (`prune_skeleton_spurs`)**: Microscopic medial-axis spurs generated by parchment grain along thick stroke borders (shorter than the local EDT nib radius) are pruned prior to tracking.
+2. **Full Nib-Footprint Extinction (`_mark_nib_footprint_visited` & `wake_mask`)**: As the virtual nib advances, the entire physical cross-section of the quill ($r = d_{\text{EDT}} + 1.6\text{ px}$) is extinguished in the unvisited mask and protected by a full-width wake mask, making it physically impossible for a stroke to bounce back-and-forth or make hairpin U-turns inside the thickness of a single stem.
+3. **Ramer-Douglas-Peucker & Gaussian Spline Smoothing (`_rdp_simplify_with_width`)**: Raw pixel steps are simplified to true calligraphic inflection points while preserving closed loops (`1L`/`2+L`).
+
+### B. Medieval Broad-Nib Quill Physics (Voynich & BnF Gallica Codices)
 Calibrated via `MedievalScribalTrainer` against three authentic 14th/15th-century codices from the Bibliothèque nationale de France (*BnF Latin 6823*, *Latin 17868*, *Latin 10533304x*):
 - **40° Bevel Pleins & Déliés Law**: Stroke width is governed by the angle $\theta$ of pen travel relative to the fixed $40^\circ$ quill bevel:
   $$w(\theta) = (W_{\text{nib}} - w_0) \cdot |\sin(\theta - 40^\circ)| + w_0$$
@@ -282,7 +288,7 @@ Calibrated via `MedievalScribalTrainer` against three authentic 14th/15th-centur
   - **3 strokes**: Simple gallows and benched stems (`k`, `t`, `d`).
   - **4 strokes**: Compound gallows (`cth`, `ckh`, `cph`, `cfh`).
 
-### B. Modern Monoline Ribbon Physics (Codex Seraphinianus)
+### C. Modern Monoline Ribbon Physics (Codex Seraphinianus)
 - **Strictly 1 Continuous Stroke (`single_stroke_mode=True`, `max_strokes=1`)**: Executed with a 20th-century technical fineliner without pen lifts inside a glyph.
 - **Automotive Inertial Dynamics**: Traces 100% of the skeleton via a 12-pass bidirectional ridge extension loop with smooth turning radii (no sharp angles $> 90^\circ$ and zero backtracking).
 
@@ -297,17 +303,15 @@ Calibrated via `MedievalScribalTrainer` against three authentic 14th/15th-centur
 
 ---
 
-## 7. The 5 Independent Vision & Ductus Paradigms
+## 7. Dual-Engine Ductus & DINOv2 (16-D PCA) Archetype Induction
 
-Every extracted glyph can be analyzed and benchmarked across 5 distinct paleographical engines (`ComparativeVectorizerBenchmark`):
+Rather than cluttering the workspace with redundant heuristics, `VoynichDuctus` focuses on a **clean architectural separation** between **Dual-Engine Ductus Derendering** (displayed side-by-side on every glyph) and **Joint Kinematic + DINOv2 Archetype Clustering**:
 
-| Engine / Paradigm | Architecture & Mathematical Formulation | CPU / GPU Latency | Stroke / Cluster Fidelity | Primary Scientific Role |
-| :--- | :--- | :---: | :---: | :--- |
-| **1. Physical Nib Model** *(In-House Engine)* | $40^\circ$ beveled quill physics on Euclidean Distance Transform (EDT) ridges + Flash & Hogan minimum-jerk prior | **0.42 ms** (CPU) | **96.8%** | Fast, zero-hallucination kinematic derendering preserving unbroken closed loops and *pleins/déliés*. |
-| **2. Euler-Bernoulli Skeleton** | 1D Medial Axis Transform + `NetworkX` topological graph minimizing bending energy $E = \int \kappa^2(s)\,ds$ | **0.38–1.18 ms** (CPU) | **94.2%** | Deterministic graph baseline for bifurcation topology and crossing resolution. |
-| **3. Scribal Kinematic Flow Net** | Dense U-Net convolutional network predicting unit tangent flow $\hat{\mathbf{u}}(x,y)$, touchdowns $P(t=0)$, and lifts $P(t=1)$ | **1.20–2.85 ms** (Neural) | **95.4%** | Robust continuous velocity field estimation on stained, faded, or degraded vellum. |
-| **4. Meta DINOv2 ViT** | Self-supervised Vision Transformer (`ViT-S/14` & `ViT-B/14`) producing 768-D patch token embeddings | **8.40 ms** (GPU/Batch) | **98.4%** *(Clustering)* | Illumination-invariant morphological feature space for unsupervised alphabet induction. |
-| **5. Google InkSight Adapter** | Seq2Seq autoregressive Vision-Language Transformer predicting $(x_t, y_t, \text{lift}_t)$ (with deterministic geometric fallback) | **34.2 ms** (GPU) | **94.0%** | External state-of-the-art offline-to-online handwriting derendering benchmark. |
+| Subsystem | Architecture & Mathematical Formulation | CPU / GPU Latency | Primary Scientific Role in Pipeline |
+| :--- | :--- | :---: | :--- |
+| **1. Quill Calligraphic Ductus (40°)** *(Primary Engine)* | $40^\circ$ beveled quill physics on EDT ridges + spur pruning + full nib-footprint extinction (`wake_mask`) + RDP spline smoothing | **0.42 ms** (CPU) | Primary physical derendering engine reconstructing realistic 1–4 quill strokes (Voynich) or 1-stroke continuous ribbons (Seraphinianus) with unbroken closed loops. |
+| **2. Euler-Bernoulli Topological Skeleton** *(Comparative Graph)* | 1D Medial Axis Transform + `NetworkX` topological graph minimizing bending energy $E = \int \kappa^2(s)\,ds$ across degree $\neq 2$ junctions | **0.95 ms** (CPU) | Displayed **side-by-side next to every Quill Ductus** in the Explorer to show pure graph-skeleton junction resolution vs. physical quill mechanics. |
+| **3. Joint Kinematic Ductus + Meta DINOv2 (16-D PCA)** *(Clustering Engine)* | High-weight kinematic ductus descriptors (`stroke_count * 3.5`, `tortuosity * 3.0`, entry/exit tangents `* 2.5`, 5-bin orientation histogram `* 2.2`) + **Top-16 PCA projection of 768-D Meta DINOv2 ViT embeddings** (`weight * 2.5`) | **Batch GPU/CPU** | Drives unsupervised induction of the **49 Voynich archetypes (`G01`–`G49`)** and **57 Seraphinianus graphical symbol archetypes (`G01`–`G57`)**. |
 
 ---
 
@@ -337,7 +341,7 @@ In Panel 4 of the Explorer, the number of physical components $N$ extracted insi
 | **Processed Folios / Pages** | **225 / 225 folios (100%)** | **371 / 371 pages (100%)** |
 | **Disjoint Lexical Words (0 Overlaps)** | **37,212 words** (Voronoi disjoint partitions) | **68,430 words** (Spatial word containers) |
 | **Total Segmented Corpus Glyphs** | **162,333 canonical glyphs** (>200,000 raw components) | **456,943 full-corpus glyphs** (5,258 benchmark medoids) |
-| **Induced Canonical Alphabet** | **35–48 Canonical Archetypes (`G01`–`G48`)** | **55 Canonical Archetypes (`G01`–`G55` / `S01`–`S55`)** |
+| **Induced Canonical Alphabet** | **49 Canonical Archetypes (`G01`–`G49`)** | **57 Graphical Symbol Archetypes (`G01`–`G57`)** |
 | **Dominant Archetype Frequency** | `Type G01`: **25,468 occurrences** (15.69%) | `Type G01`: **31,732 occurrences** |
 
 ### B. Information-Theoretic Benchmark (`scripts/run_comprehensive_diagnostics.py`)

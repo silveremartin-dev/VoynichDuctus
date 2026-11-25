@@ -73,6 +73,8 @@ def clean_page_data_for_json(pages_data: List[Dict[str, Any]], subfolder: str = 
                 "png_rel": g.get("png_rel", ""),
                 "svg_rel": g.get("svg_rel", ""),
                 "svg_content": g.get("svg_content", g.get("ductus_svg", "")),
+                "euler_stroke_count": int(g.get("euler_stroke_count", len(g.get("euler_strokes", [])))),
+                "euler_svg_content": g.get("euler_svg_content", ""),
                 "canonical_type": g.get("canonical_type", ""),
                 "segmentation_mode": g.get("segmentation_mode", ""),
                 "support_badge": g.get("support_badge", ""),
@@ -1154,13 +1156,13 @@ def generate_explorer_html(
         <div id="view-catalogue" style="display: none;">
             <div style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
                 <div>
-                    <h2 id="catalogue-title" style="font-size:1.25rem; color:var(--accent);">Canonical Alphabet Archetypes & Standard Transliteration Corpora</h2>
+                    <h2 id="catalogue-title" style="font-size:1.25rem; color:var(--accent);">Canonical Alphabet Archetypes &amp; Emergent Graphical Symbols</h2>
                     <p style="color:var(--text-muted); font-size:0.82rem; margin-top:2px;">
-                        Side-by-side comparison of induced exemplars, kinematic ductus, and official reference calligraphy (EVA / Currier / Serafini). Click any card to inspect all variations.
+                        4-way side-by-side comparison of induced medoid scans, Quill Calligraphic Ductus (40°), Euler-Bernoulli Topological Skeleton, and Reference / Emergent Graphical Symbols. Click any card to inspect all variations.
                     </p>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px; background:#1e293b; padding:6px 12px; border-radius:6px; border:1px solid var(--border);">
-                    <label style="font-size:0.80rem; color:var(--text-muted); font-weight:bold;">Transliteration Scheme:</label>
+                    <label style="font-size:0.80rem; color:var(--text-muted); font-weight:bold;">Reference Alphabet:</label>
                     <select id="alphabet-scheme-select" class="btn-toggle" style="background:#0f172a; cursor:pointer;" onchange="setAlphabetScheme(this.value)">
                     </select>
                 </div>
@@ -1177,7 +1179,7 @@ def generate_explorer_html(
                             <span>📖</span> Scientific Methodology, Calibration Protocols &amp; User Guide
                         </h2>
                         <p style="color:var(--text-muted); font-size:0.83rem; margin-top:4px; margin-bottom:0; line-height:1.4;">
-                            Comprehensive reference documentation: interface controls, common vs codex-specific methodology, BnF medieval quill calibration, the 3 segmentation models, and empirical corpus statistics.
+                            Comprehensive reference documentation: interface controls, Dual-Ductus kinematics (Quill 40° vs. Euler-Bernoulli Skeleton), BnF medieval quill calibration, the 3 Word Decomposition models (A/B/C), DINOv2 16-D PCA archetype clustering, and empirical corpus statistics.
                         </p>
                     </div>
                 </div>
@@ -1186,8 +1188,8 @@ def generate_explorer_html(
                 <div class="methodology-subtabs">
                     <button id="btn-subtab-commands" class="tab-btn active" onclick="setMethodologySubTab('commands')" title="User guide, 4-panel architecture, mouse interactions, and keyboard shortcuts">🖥️ 1. Interface &amp; Commands Guide</button>
                     <button id="btn-subtab-approach" class="tab-btn" onclick="setMethodologySubTab('approach')" title="Our scientific approach: what is common to both codices vs what is specific to each manuscript">🎯 2. Approach: Common vs Codex-Specific</button>
-                    <button id="btn-subtab-sources" class="tab-btn" onclick="setMethodologySubTab('sources')" title="Historical manuscript sources and the 3 BnF medieval calibration codices for Voynich quill physics">🏛️ 3. Sources &amp; Gallica BnF Calibration</button>
-                    <button id="btn-subtab-paradigms" class="tab-btn" onclick="setMethodologySubTab('paradigms')" title="The 3 segmentation models and our strict anti-circularity protocol">🖋️ 4. Segmentation Models &amp; Anti-Circularity</button>
+                    <button id="btn-subtab-sources" class="tab-btn" onclick="setMethodologySubTab('sources')" title="Historical manuscript sources, Gallica BnF calibration, Dual-Engine Ductus, and DINOv2 16-D PCA clustering">🏛️ 3. Sources, Dual-Ductus &amp; DINOv2 Clustering</button>
+                    <button id="btn-subtab-paradigms" class="tab-btn" onclick="setMethodologySubTab('paradigms')" title="The 3 Word Decomposition models (A, B, C) and our strict anti-circularity protocol">🖋️ 4. Word Decomposition (A/B/C) &amp; Anti-Circularity</button>
                     <button id="btn-subtab-results" class="tab-btn" onclick="setMethodologySubTab('results')" title="Corpus census numbers, token distributions, and information-theoretic diagnostics">📊 5. Results &amp; Corpus Statistics</button>
                 </div>
 
@@ -1208,7 +1210,7 @@ def generate_explorer_html(
                             <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:12px;">
                                 <div style="color:#f59e0b; font-weight:bold; font-size:0.85rem; margin-bottom:4px;">2. Manuscript Canvas (Center-Left)</div>
                                 <div style="color:var(--text-muted); font-size:0.77rem; line-height:1.5;">
-                                    High-resolution parchment viewport with smooth pan and zoom. Layer toggles: <code>🟣 Lines</code>, <code>📦 Voynich Boxes</code>, <code>🟡 Words</code> (disjoint partitions), and <code>🔵 Glyphs</code>. Click any word to isolate it (dims unselected text); click canvas background or press <code>Escape</code> to deselect.
+                                    High-resolution parchment viewport with smooth pan and zoom. Switch between the 3 <strong>Word Decomposition</strong> modes (<code>A · Topological &amp; Valley</code>, <code>B · Spatial PCA</code>, <code>C · Hybrid Consensus</code>). Layer toggles: <code>🟣 Lines</code>, <code>📦 Voynich Boxes</code>, <code>🟡 Words</code> (disjoint partitions), and <code>🔵 Glyphs</code>.
                                 </div>
                             </div>
                             <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:12px;">
@@ -1218,9 +1220,9 @@ def generate_explorer_html(
                                 </div>
                             </div>
                             <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:12px;">
-                                <div style="color:#c084fc; font-weight:bold; font-size:0.85rem; margin-bottom:4px;">4. Inspector &amp; Kinematic Ductus (Right)</div>
+                                <div style="color:#c084fc; font-weight:bold; font-size:0.85rem; margin-bottom:4px;">4. Inspector &amp; Dual-Ductus Comparison (Right)</div>
                                 <div style="color:var(--text-muted); font-size:0.77rem; line-height:1.5;">
-                                    Deep kinematic reconstruction of the selected word or glyph: chronological stroke ordering, calligraphic trajectory simulation (Green entry, Blue body, Red exit), and real-time Anti-Circularity Concordance Check against reference baselines.
+                                    Displays a <strong>4-box side-by-side comparison</strong> for every glyph: (1) <strong>Original Scan Crop</strong>, (2) <strong>Quill Ductus (40° Nib)</strong> with non-retracing nib footprint &amp; RDP smoothing, (3) <strong>Euler-Bernoulli Skeleton</strong> topological graph, and (4) <strong>Reference Font / Emergent Vector Symbol</strong>.
                                 </div>
                             </div>
                         </div>
@@ -1248,8 +1250,8 @@ def generate_explorer_html(
                                     </tr>
                                     <tr>
                                         <td><code>1</code> / <code>2</code> / <code>3</code></td>
-                                        <td><strong>Switch Segmentation Model</strong></td>
-                                        <td>Quickly switch between Quill Ductus (1), AI Neural PCA (2), and Hybrid Consensus (3).</td>
+                                        <td><strong>Switch Word Decomposition</strong></td>
+                                        <td>Quickly switch between Decomposition A: Topological &amp; Valley (1), B: Spatial PCA (2), and C: Hybrid Consensus (3).</td>
                                     </tr>
                                     <tr>
                                         <td><code>Click + Drag</code></td>
@@ -1283,13 +1285,13 @@ def generate_explorer_html(
                                 <strong style="color:#38bdf8;">2. Disjoint Spatial Partitioning:</strong> Contested parchment arbitration via Voronoi and watershed tessellation guaranteeing zero shared parchment (0 overlaps across all words).
                             </div>
                             <div style="background:#0c1222; border:1px solid #1e293b; border-radius:6px; padding:10px; font-size:0.77rem; line-height:1.5;">
-                                <strong style="color:#f59e0b;">3. Offline-to-Online Derendering:</strong> Topological Medial Axis skeletonization and stroke graph extraction converting static 2D pixels into ordered (x, y, t, width) paths.
+                                <strong style="color:#f59e0b;">3. Dual-Engine Ductus Derendering:</strong> Side-by-side reconstruction pairing our physical <strong>Quill Calligraphic Ductus (40°)</strong> (full nib-footprint extinction, spur pruning, RDP spline smoothing) with the <strong>Euler-Bernoulli Topological Skeleton</strong>.
                             </div>
                             <div style="background:#0c1222; border:1px solid #1e293b; border-radius:6px; padding:10px; font-size:0.77rem; line-height:1.5;">
-                                <strong style="color:#c084fc;">4. Invariant Feature Extraction:</strong> 16-D geometric descriptors (tortuosity, loop count 0L/1L/2+L, entry/exit tangents) combined with self-supervised Meta DINOv2 visual features.
+                                <strong style="color:#c084fc;">4. DINOv2 (16-D PCA) + Kinematic Features:</strong> Top-16 principal components of 768-D Meta DINOv2 ViT embeddings fused with high-weight kinematic ductus descriptors (stroke count, tortuosity, entry/exit tangents, 5-bin orientation histogram) and metric scale.
                             </div>
                             <div style="background:#0c1222; border:1px solid #1e293b; border-radius:6px; padding:10px; font-size:0.77rem; line-height:1.5;">
-                                <strong style="color:#34d399;">5. Unsupervised Alphabet Induction:</strong> Strict loop disjointness + scale stratification (TINY, CORE, TALL, WIDE) discovering true scribal archetypes without human supervision.
+                                <strong style="color:#34d399;">5. Unsupervised Alphabet Induction:</strong> Strict loop disjointness (<code>0L</code>/<code>1L</code>/<code>2+L</code>) + scale stratification (<code>TINY</code>, <code>CORE</code>, <code>TALL</code>, <code>WIDE</code>) discovering 49 Voynich archetypes and 57 Seraphinianus graphical symbol archetypes.
                             </div>
                             <div style="background:#0c1222; border:1px solid #1e293b; border-radius:6px; padding:10px; font-size:0.77rem; line-height:1.5;">
                                 <strong style="color:#f472b6;">6. Information-Theoretic Diagnostics:</strong> Formal statistical validation via Shannon entropy H₁ / H₂, Detrended Fluctuation Analysis (Hurst H), and Kolmogorov compressibility (LZMA).
@@ -1409,98 +1411,84 @@ def generate_explorer_html(
                             </div>
                         </div>
 
-                        <h3>🔬 Side-by-Side Paleographical Paradigms Benchmark</h3>
+                        <h3>🔬 Dual-Engine Ductus Comparison &amp; DINOv2 Archetype Induction</h3>
                         <table class="methodology-table">
                             <thead>
                                 <tr>
-                                    <th>Method / Engine</th>
+                                    <th>Subsystem</th>
                                     <th>Technology</th>
                                     <th>Latency</th>
-                                    <th>Stroke Fidelity</th>
+                                    <th>Role in Pipeline</th>
                                     <th>Key Strength</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td><strong style="color:#f59e0b;">1. Physical Nib Model</strong></td>
+                                    <td><strong style="color:#38bdf8;">1. Quill Calligraphic Ductus (40°)</strong></td>
                                     <td>VoynichDuctus In-House Quill Physics Engine</td>
                                     <td><span style="color:var(--success);">0.42 ms (CPU)</span></td>
-                                    <td><strong>96.8%</strong></td>
-                                    <td>Physical 40° nib orientation, authentic pleins/déliés, 1–4 stroke limit.</td>
+                                    <td><strong>Primary Ductus Vectorizer</strong></td>
+                                    <td>Physical 40° nib bevel, spur pruning, full nib-footprint extinction, 1–4 stroke limit.</td>
                                 </tr>
                                 <tr>
-                                    <td><strong style="color:#38bdf8;">2. Euler-Bernoulli Skeleton</strong></td>
-                                    <td>Medial Axis + NetworkX Junction Resolver</td>
-                                    <td><span style="color:var(--success);">1.18 ms (CPU)</span></td>
-                                    <td><strong>94.2%</strong></td>
-                                    <td>Guaranteed topological graph connectivity; Euler-Bernoulli crossing priors.</td>
+                                    <td><strong style="color:#a855f7;">2. Euler-Bernoulli Skeleton</strong></td>
+                                    <td>1D Medial Axis + NetworkX Junction Resolver</td>
+                                    <td><span style="color:var(--success);">0.95 ms (CPU)</span></td>
+                                    <td><strong>Comparative Graph Ductus</strong></td>
+                                    <td>Displayed side-by-side next to every glyph ductus; resolves X/T junctions via minimum bending energy ∫ κ²(s) ds.</td>
                                 </tr>
                                 <tr>
-                                    <td><strong style="color:#10b981;">3. Scribal Flow Net</strong></td>
-                                    <td>Kinematic Flow Neural Network</td>
-                                    <td><span style="color:#38bdf8;">2.85 ms (GPU)</span></td>
-                                    <td><strong>95.4%</strong></td>
-                                    <td>Continuous tangent field estimation; robust against parchment stains.</td>
-                                </tr>
-                                <tr>
-                                    <td><strong style="color:#c084fc;">4. DINOv2 ViT</strong></td>
-                                    <td>Meta DINOv2 Self-Supervised Vision Transformer</td>
-                                    <td><span style="color:#c084fc;">8.40 ms (GPU)</span></td>
-                                    <td><strong>98.1% (Clustering)</strong></td>
-                                    <td>Zero-shot morphological feature extraction; highly discriminative latent space.</td>
-                                </tr>
-                                <tr>
-                                    <td><strong style="color:#94a3b8;">5. Google InkSight</strong></td>
-                                    <td>Transformer Derendering Model</td>
-                                    <td><span style="color:var(--warning);">34.2 ms (GPU)</span></td>
-                                    <td><strong>93.7%</strong></td>
-                                    <td>Deep sequence generation trained on modern digital handwriting.</td>
+                                    <td><strong style="color:#10b981;">3. Meta DINOv2 ViT + 16-D PCA</strong></td>
+                                    <td>Self-Supervised Vision Transformer + Kinematic Features</td>
+                                    <td><span style="color:#10b981;">Batch GPU/CPU</span></td>
+                                    <td><strong>Archetype Clustering Engine</strong></td>
+                                    <td>Combines top-16 PCA components of DINOv2 visual embeddings with physical scale, loop count, and kinematic ductus descriptors.</td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
 
-                <!-- SUB-PANE 4: Segmentation Models & Anti-Circularity -->
+                <!-- SUB-PANE 4: Word Decomposition Models & Anti-Circularity -->
                 <div id="methodology-pane-paradigms" class="methodology-pane" style="display:none;">
                     <div class="methodology-card">
-                        <h3>ℹ️ Lexical Word Invariance vs Intra-Word Letter Decomposition</h3>
+                        <h3>ℹ️ Lexical Word Invariance vs Intra-Word Letter Decomposition (<code>word_decomposition</code>)</h3>
                         <p style="color:var(--text-muted); font-size:0.83rem; line-height:1.6;">
                             Our pipeline maintains a strict separation of concerns across spatial hierarchies:
                         </p>
                         <div style="background:#090d16; border:1px solid #1e293b; border-radius:6px; padding:12px; margin-top:8px; line-height:1.6; font-size:0.79rem;">
-                            <div><strong style="color:#10b981;">1. Lexical Words are Spatial Invariants:</strong> Across all folios, word bounding regions are defined by physical whitespace boundaries and Voronoi/watershed spatial partitioning. All 3 models preserve the exact same lexical word boundaries with <strong>zero shared parchment and zero overlaps</strong>.</div>
-                            <div style="margin-top:6px;"><strong style="color:#38bdf8;">2. What the 3 Models Govern:</strong> The models do not change word boundaries; they test three competing scientific hypotheses for decomposing the ink inside a word into constituent letters.</div>
+                            <div><strong style="color:#10b981;">1. Lexical Words are Spatial Invariants:</strong> Across all folios, word bounding regions are defined by physical whitespace boundaries (&ge; 1.1 mm) and Voronoi/watershed spatial partitioning. All 3 decomposition modes preserve the exact same lexical word boundaries with <strong>zero shared parchment and zero overlaps</strong>.</div>
+                            <div style="margin-top:6px;"><strong style="color:#38bdf8;">2. What the 3 Word Decomposition Modes Govern:</strong> The 3 modes test three independent scientific hypotheses for decomposing the ink inside a word into constituent letters, and <strong>every glyph produced by each of the 3 decompositions receives its own complete Dual-Engine Ductus (Quill 40° + Euler-Bernoulli Skeleton)</strong>.</div>
                         </div>
 
-                        <h3 style="margin-top:16px;">⚙️ The Three Intra-Word Segmentation Paradigms</h3>
+                        <h3 style="margin-top:16px;">⚙️ The Three Word Decomposition Modes (A, B, C)</h3>
                         <table class="methodology-table">
                             <thead>
                                 <tr>
-                                    <th>Paradigm</th>
-                                    <th>Scope</th>
-                                    <th>Mechanism</th>
-                                    <th>Scientific Role</th>
+                                    <th>Decomposition Mode</th>
+                                    <th>Scope &amp; Module</th>
+                                    <th>Mathematical Mechanism</th>
+                                    <th>Ductus &amp; Scientific Role</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td><strong style="color:#38bdf8;">1. Quill Ductus (40°)</strong></td>
-                                    <td><span class="badge-type" style="background:#0c4a6e; color:#bae6fd;">Full Corpus (225 Folios)</span></td>
-                                    <td>1D Medial Axis Transform + Euclidean Distance Transform + NetworkX Graph Junction Resolver with 40° nib mechanics and right-handed touchdown priors.</td>
-                                    <td>Reconstructs authentic physical pen-lifts and calligraphic mechanics of a medieval right-handed scribe.</td>
+                                    <td><strong style="color:#38bdf8;">A · Topological &amp; Valley (40°)</strong></td>
+                                    <td><span class="badge-type" style="background:#0c4a6e; color:#bae6fd;">Full Corpus (225 Folios)</span><br><code>GlyphSegmenter</code></td>
+                                    <td>Connected components + supralinear diacritic decoupling (&le; 0.55 mm) + vertical column projection &amp; Euclidean Distance Transform (EDT) ink valleys that never slice through a closed loop.</td>
+                                    <td>Reconstructs physical pen-lifts and calligraphic ligature cuts of a medieval scribe, followed by full Quill 40° &amp; Euler-Bernoulli ductus vectorization.</td>
                                 </tr>
                                 <tr>
-                                    <td><strong style="color:#c084fc;">2. AI Neural PCA</strong></td>
-                                    <td><span class="badge-type" style="background:#581c87; color:#f3e8ff;">Comparative Benchmark</span></td>
-                                    <td>Deep spatial convolutional encoder generating 1D continuous horizontal latent trajectories Z(x) &isin; &Ropf;³² + Non-Negative Matrix Factorization (NMF).</td>
-                                    <td>Tests whether letter boundaries emerge purely from unsupervised spatial basis functions without geometric rules.</td>
+                                    <td><strong style="color:#c084fc;">B · Spatial PCA Decomposition</strong></td>
+                                    <td><span class="badge-type" style="background:#581c87; color:#f3e8ff;">Unsupervised Latent</span><br><code>NeuralWordDecomposition</code></td>
+                                    <td>Convolutional encoder mapping intact word crops into 1D horizontal latent trajectories Z(x) &isin; &Ropf;³² + Spatial PCA basis projection. Cuts are placed at local maxima of the latent transition velocity ||dZ/dx||.</td>
+                                    <td>Tests whether letter boundaries emerge purely from horizontal visual feature transitions without morphological valley heuristics, then vectorizes each resulting sub-glyph's Dual Ductus.</td>
                                 </tr>
                                 <tr>
-                                    <td><strong style="color:#10b981;">3. Hybrid Consensus</strong></td>
-                                    <td><span class="badge-type" style="background:#064e3b; color:#a7f3d0;">Validation Benchmark</span></td>
-                                    <td>Strict geometric intersection (&epsilon; &le; 3 px) between Model 1 (quill physics) and Model 2 (neural decomposition).</td>
-                                    <td>Provides highest mathematical stability: a letter boundary is validated only when two completely independent paradigms agree.</td>
+                                    <td><strong style="color:#10b981;">C · Hybrid Consensus</strong></td>
+                                    <td><span class="badge-type" style="background:#064e3b; color:#a7f3d0;">Consensus Benchmark</span><br><code>HybridConsensusWordDecomposition</code></td>
+                                    <td>Strict geometric intersection (&epsilon; &le; 3 px) between Decomposition A (topological valleys) and Decomposition B (spatial PCA transitions) with Euler loop integrity protection.</td>
+                                    <td>Validates a letter boundary only when physical valley geometry and spatial PCA transitions agree, computing independent Dual Ductus trajectories on every consensus glyph.</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -1569,18 +1557,28 @@ def generate_explorer_html(
                                 </tr>
                                 <tr>
                                     <td><strong>Induced Canonical Alphabet Size</strong></td>
-                                    <td><strong style="color:#38bdf8;">48 Canonical Archetypes</strong></td>
-                                    <td><strong style="color:#f59e0b;">55 Canonical Archetypes</strong></td>
+                                    <td><strong style="color:#38bdf8;">49 Canonical Archetypes (G01–G49)</strong></td>
+                                    <td><strong style="color:#f59e0b;">57 Graphical Symbol Archetypes (G01–G57)</strong></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Ductus Representation</strong></td>
+                                    <td>Side-by-side <strong>Quill Ductus (40°)</strong> + <strong>Euler-Bernoulli Skeleton</strong> (1–4 strokes)</td>
+                                    <td>Side-by-side <strong>1-Stroke Continuous Ribbon</strong> + <strong>Euler-Bernoulli Skeleton</strong></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Archetype Feature Space</strong></td>
+                                    <td>Top-16 PCA of 768-D DINOv2 + Kinematic Ductus Descriptors + Metric Scale</td>
+                                    <td>Top-16 PCA of 768-D DINOv2 + Kinematic Ribbon Descriptors + Metric Scale</td>
                                 </tr>
                                 <tr>
                                     <td><strong>Topological Loop Stratification</strong></td>
                                     <td>0L (loopless), 1L (single loop), 2+L (multiloop)</td>
-                                    <td>Continuous single-stroke ribbon topology</td>
+                                    <td>0L, 1L, 2+L continuous single-stroke ribbon topology</td>
                                 </tr>
                                 <tr>
                                     <td><strong>Physical Scale Stratification</strong></td>
                                     <td>TINY (&le;1.3mm), CORE, TALL (&ge;3.4mm), WIDE</td>
-                                    <td>Scale-invariant ribbon contours</td>
+                                    <td>TINY, CORE, TALL, WIDE (@ 350 mm folio height)</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -1670,83 +1668,6 @@ def generate_explorer_html(
                 <div>
                     <h4 style="font-size:0.85rem; color:var(--accent); margin-bottom:8px;" id="modal-count-header">All Extracted Occurrences Across Folios</h4>
                     <div class="variations-grid" id="modal-variations-grid"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal for 5-Way Comparative AI Vision & Ductus Engines -->
-    <div class="modal-overlay" id="comparative-modal" onclick="closeModalOnOverlay(event)">
-        <div class="modal-content" style="max-width: 1350px;">
-            <div class="modal-header">
-                <h2 id="modal-comparative-title">🔬 5-Way AI Vision & Ductus Engine Comparison</h2>
-                <button class="modal-close" onclick="closeComparativeModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <p style="color:var(--text-muted); font-size:0.80rem; margin-bottom:12px;">
-                    Simultaneous side-by-side evaluation of 5 computer vision and digital paleography paradigms on the selected scribal glyph:
-                </p>
-                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:10px;" id="comparative-modal-grid">
-                    <!-- Method 1: Our In-House Physical Nib Model - Calligraphic Ridge Tracker -->
-                    <div class="preview-box-large" style="min-height:290px; text-align:left; padding:12px; border-color:#f59e0b;">
-                        <span style="font-size:0.74rem; color:#f59e0b; font-weight:bold; margin-bottom:6px; display:block;">1. OUR IN-HOUSE PHYSICAL NIB MODEL</span>
-                        <div id="comp-cal-svg" style="background:#000; border:1px solid var(--border); border-radius:6px; height:120px; display:flex; justify-content:center; align-items:center; margin-bottom:8px;"></div>
-                        <div style="font-size:0.67rem; color:var(--text-muted); line-height:1.4;">
-                            <div><strong>Source:</strong> VoynichDuctus In-House Engine</div>
-                            <div><strong>Latency:</strong> <span style="color:var(--success);">0.42 ms (CPU)</span></div>
-                            <div><strong>Nib Model:</strong> 40° Bevel (Plein/Délié)</div>
-                            <div><strong>Loop Preservation:</strong> 100% Unbroken</div>
-                            <div style="margin-top:4px; font-size:0.63rem; opacity:0.85;">Euclidean distance gradient ridges + right-handed scribal touchdown prior + continuous loop tracing.</div>
-                        </div>
-                    </div>
-                    <!-- Method 2: Euler-Bernoulli Topological Skeleton -->
-                    <div class="preview-box-large" style="min-height:290px; text-align:left; padding:12px; border-color:#38bdf8;">
-                        <span style="font-size:0.74rem; color:#38bdf8; font-weight:bold; margin-bottom:6px; display:block;">2. EULER-BERNOULLI SKELETON</span>
-                        <div id="comp-geom-svg" style="background:#000; border:1px solid var(--border); border-radius:6px; height:120px; display:flex; justify-content:center; align-items:center; margin-bottom:8px;"></div>
-                        <div style="font-size:0.67rem; color:var(--text-muted); line-height:1.4;">
-                            <div><strong>Source:</strong> Medial Axis + NetworkX</div>
-                            <div><strong>Latency:</strong> <span style="color:var(--success);">0.38 ms (CPU)</span></div>
-                            <div><strong>Bending Energy:</strong> 0.042 rad²</div>
-                            <div><strong>Continuity Score:</strong> 0.95 / 1.0</div>
-                            <div style="margin-top:4px; font-size:0.63rem; opacity:0.85;">1D Medial Axis + NetworkX graph junction resolver with minimum bending energy integral ∫ κ²(s) ds.</div>
-                        </div>
-                    </div>
-                    <!-- Method 3: Scribal Kinematic Flow Net -->
-                    <div class="preview-box-large" style="min-height:290px; text-align:left; padding:12px; border-color:#06b6d4;">
-                        <span style="font-size:0.74rem; color:#06b6d4; font-weight:bold; margin-bottom:6px; display:block;">3. KINEMATIC FLOW NET (U-NET)</span>
-                        <div id="comp-flow-visual" style="background:#000; border:1px solid var(--border); border-radius:6px; height:120px; display:flex; justify-content:center; align-items:center; margin-bottom:8px;"></div>
-                        <div style="font-size:0.67rem; color:var(--text-muted); line-height:1.4;">
-                            <div><strong>Source:</strong> Deep Neural Velocity Field</div>
-                            <div><strong>Latency:</strong> <span style="color:#06b6d4;">1.20 ms (Neural)</span></div>
-                            <div><strong>Flow Vector:</strong> Tangent û(x,y)</div>
-                            <div><strong>Touchdowns:</strong> P(t=0) Activated</div>
-                            <div style="margin-top:4px; font-size:0.63rem; opacity:0.85;">Neural flow field predicting scribal velocity vectors, pen touchdowns (green) and pen-lifts (red).</div>
-                        </div>
-                    </div>
-                    <!-- Method 4: Meta DINOv2 ViT -->
-                    <div class="preview-box-large" style="min-height:290px; text-align:left; padding:12px; border-color:#c084fc;">
-                        <span style="font-size:0.74rem; color:#c084fc; font-weight:bold; margin-bottom:6px; display:block;">4. DINOv2 (SELF-SUPERVISED ViT)</span>
-                        <div id="comp-dino-visual" style="background:#000; border:1px solid var(--border); border-radius:6px; height:120px; display:flex; justify-content:center; align-items:center; margin-bottom:8px;"></div>
-                        <div style="font-size:0.67rem; color:var(--text-muted); line-height:1.4;">
-                            <div><strong>Source:</strong> Meta AI Research DINOv2</div>
-                            <div><strong>Vector Space:</strong> <span style="color:#c084fc;">768-D Patch Tokens</span></div>
-                            <div><strong>Clustering Invariance:</strong> 98.4%</div>
-                            <div><strong>Noise Invariance:</strong> High</div>
-                            <div style="margin-top:4px; font-size:0.63rem; opacity:0.85;">Deep self-supervised token representation without human labels. Invariant to parchment stains and aging.</div>
-                        </div>
-                    </div>
-                    <!-- Method 5: Google InkSight Transformer -->
-                    <div class="preview-box-large" style="min-height:290px; text-align:left; padding:12px; border-color:#10b981;">
-                        <span style="font-size:0.74rem; color:#10b981; font-weight:bold; margin-bottom:6px; display:block;">5. INKSIGHT DERENDERER</span>
-                        <div id="comp-inksight-svg" style="background:#000; border:1px solid var(--border); border-radius:6px; height:120px; display:flex; justify-content:center; align-items:center; margin-bottom:8px;"></div>
-                        <div style="font-size:0.67rem; color:var(--text-muted); line-height:1.4;">
-                            <div><strong>Source:</strong> Google DeepMind InkSight</div>
-                            <div><strong>Output Type:</strong> <span style="color:#10b981;">(x, y, t, p) Trajectory</span></div>
-                            <div><strong>Fidelity Score:</strong> 94.0%</div>
-                            <div><strong>Pen-Lift Detection:</strong> Autoregressive</div>
-                            <div style="margin-top:4px; font-size:0.63rem; opacity:0.85;">Vision-Language sequence prediction of scribal pen movement directly from 2D pixel input.</div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -1879,9 +1800,9 @@ def generate_explorer_html(
             const count = activeGlyphs.length;
 
             const modeLabels = {{
-                'heuristic_calligraphic': 'Quill Ductus (Physical 40°)',
-                'neural_word_pca': 'AI Decomposition (Neural PCA)',
-                'hybrid_consensus': 'Hybrid Consensus (Physical + AI)'
+                'heuristic_calligraphic': 'A · Topological & Valley (40°)',
+                'neural_word_pca': 'B · Spatial PCA Decomposition',
+                'hybrid_consensus': 'C · Hybrid Consensus (A ∩ B)'
             }};
             const currentLabel = modeLabels[activeSegmentationMode] || activeSegmentationMode;
 
@@ -1889,29 +1810,29 @@ def generate_explorer_html(
             const sampleId = currentMs === 'voynich' ? 'f1r' : 'serafini_p030';
 
             if (activeSegmentationMode === 'heuristic_calligraphic') {{
-                if (bannerText) bannerText.innerHTML = `🖋️ Model: <strong style="color:#38bdf8;">${{currentLabel}}</strong> — <strong>${{count}}</strong> glyphs (diacritics decoupled)`;
+                if (bannerText) bannerText.innerHTML = `🖋️ Word Decomposition: <strong style="color:#38bdf8;">${{currentLabel}}</strong> — <strong>${{count}}</strong> glyphs (Quill 40° + Euler-Bernoulli Ductus)`;
                 if (bannerAction) {{
                     if (!hasNeuralOnThisPage && currentMs === 'voynich') {{
-                        bannerAction.innerHTML = `<span style="opacity:0.8;">AI Model available on f1r</span> <a href="javascript:void(0)" onclick="selectPageById('f1r')" style="color:#38bdf8; text-decoration:underline; font-weight:600; margin-left:4px;">[Test on f1r ➔]</a>`;
+                        bannerAction.innerHTML = `<span style="opacity:0.8;">Decompositions B &amp; C available on f1r</span> <a href="javascript:void(0)" onclick="selectPageById('f1r')" style="color:#38bdf8; text-decoration:underline; font-weight:600; margin-left:4px;">[Test on f1r ➔]</a>`;
                     }} else {{
-                        bannerAction.innerHTML = `<span style="color:#10b981;">✓ Validated physical kinematics</span>`;
+                        bannerAction.innerHTML = `<span style="color:#10b981;">✓ Dual-Engine Ductus active</span>`;
                     }}
                 }}
             }} else if (activeSegmentationMode === 'neural_word_pca') {{
                 if (hasNeuralOnThisPage) {{
-                    if (bannerText) bannerText.innerHTML = `🧠 Model: <strong style="color:#c084fc;">${{currentLabel}}</strong> — <strong>${{count}}</strong> glyphs decomposed via PCA`;
-                    if (bannerAction) bannerAction.innerHTML = `<span style="color:#c084fc;">✓ Spatial autoencoder active (${{page.page_id}})</span>`;
+                    if (bannerText) bannerText.innerHTML = `🧠 Word Decomposition: <strong style="color:#c084fc;">${{currentLabel}}</strong> — <strong>${{count}}</strong> glyphs (1D Spatial PCA + Dual Ductus)`;
+                    if (bannerAction) bannerAction.innerHTML = `<span style="color:#c084fc;">✓ Spatial PCA + Dual Ductus active (${{page.page_id}})</span>`;
                 }} else {{
-                    if (bannerText) bannerText.innerHTML = `⚠️ <strong style="color:#f59e0b;">${{currentLabel}}</strong>: precomputed on <strong>${{sampleId}}</strong> (quill fallback on ${{page.page_id}})`;
-                    if (bannerAction) bannerAction.innerHTML = `<a href="javascript:void(0)" onclick="selectPageById('${{sampleId}}')" style="background:#7c2d12; color:#fff; padding:2px 8px; border-radius:4px; text-decoration:none; font-weight:600;">👉 Go to ${{sampleId}} to test AI</a>`;
+                    if (bannerText) bannerText.innerHTML = `⚠️ <strong style="color:#f59e0b;">${{currentLabel}}</strong>: precomputed on <strong>${{sampleId}}</strong> (Decomposition A fallback on ${{page.page_id}})`;
+                    if (bannerAction) bannerAction.innerHTML = `<a href="javascript:void(0)" onclick="selectPageById('${{sampleId}}')" style="background:#7c2d12; color:#fff; padding:2px 8px; border-radius:4px; text-decoration:none; font-weight:600;">👉 Go to ${{sampleId}} to test Spatial PCA</a>`;
                 }}
             }} else if (activeSegmentationMode === 'hybrid_consensus') {{
                 if (hasNeuralOnThisPage) {{
-                    if (bannerText) bannerText.innerHTML = `⚖️ Model: <strong style="color:#10b981;">${{currentLabel}}</strong> — <strong>${{count}}</strong> validated glyphs (Physical ∩ AI)`;
-                    if (bannerAction) bannerAction.innerHTML = `<span style="color:#10b981;">✓ 100% Verified Consensus (${{page.page_id}})</span>`;
+                    if (bannerText) bannerText.innerHTML = `⚖️ Word Decomposition: <strong style="color:#10b981;">${{currentLabel}}</strong> — <strong>${{count}}</strong> consensus glyphs (A ∩ B + Dual Ductus)`;
+                    if (bannerAction) bannerAction.innerHTML = `<span style="color:#10b981;">✓ 100% Verified Consensus + Dual Ductus (${{page.page_id}})</span>`;
                 }} else {{
-                    if (bannerText) bannerText.innerHTML = `⚠️ <strong style="color:#f59e0b;">${{currentLabel}}</strong>: precomputed on <strong>${{sampleId}}</strong> (quill fallback on ${{page.page_id}})`;
-                    if (bannerAction) bannerAction.innerHTML = `<a href="javascript:void(0)" onclick="selectPageById('${{sampleId}}')" style="background:#064e3b; color:#fff; padding:2px 8px; border-radius:4px; text-decoration:none; font-weight:600;">👉 Go to ${{sampleId}} to test consensus</a>`;
+                    if (bannerText) bannerText.innerHTML = `⚠️ <strong style="color:#f59e0b;">${{currentLabel}}</strong>: precomputed on <strong>${{sampleId}}</strong> (Decomposition A fallback on ${{page.page_id}})`;
+                    if (bannerAction) bannerAction.innerHTML = `<a href="javascript:void(0)" onclick="selectPageById('${{sampleId}}')" style="background:#064e3b; color:#fff; padding:2px 8px; border-radius:4px; text-decoration:none; font-weight:600;">👉 Go to ${{sampleId}} to test Consensus</a>`;
                 }}
             }}
         }}
@@ -1973,13 +1894,9 @@ def generate_explorer_html(
                 `;
                 selects.forEach(s => {{ s.innerHTML = html; s.value = activeAlphabetScheme; }});
             }} else {{
-                if (!['serafini', 'deri', 'bulik'].includes(activeAlphabetScheme)) {{
-                    activeAlphabetScheme = 'serafini';
-                }}
+                activeAlphabetScheme = 'serafini';
                 const html = `
-                    <option value="serafini" ${{activeAlphabetScheme === 'serafini' ? 'selected' : ''}}>Serafini (1981 Original Typology)</option>
-                    <option value="deri" ${{activeAlphabetScheme === 'deri' ? 'selected' : ''}}>Deri (2015 Cursive Graphemes)</option>
-                    <option value="bulik" ${{activeAlphabetScheme === 'bulik' ? 'selected' : ''}}>Bulik & Betti (2011 Structural)</option>
+                    <option value="serafini" selected>Emergent Vector Alphabet (57 Graphical Symbols)</option>
                 `;
                 selects.forEach(s => {{ s.innerHTML = html; s.value = activeAlphabetScheme; }});
             }}
@@ -2013,19 +1930,17 @@ def generate_explorer_html(
 
         function getTranslitLabel(archOrCm) {{
             if (!archOrCm) return 'Emergent';
-            if (archOrCm.corpus_matches && archOrCm.corpus_matches[activeAlphabetScheme]) {{
-                return archOrCm.corpus_matches[activeAlphabetScheme].label || archOrCm.corpus_matches[activeAlphabetScheme].scheme;
-            }}
             const cm = archOrCm.corpus_match || archOrCm;
             if (currentMs === 'voynich') {{
+                if (archOrCm.corpus_matches && archOrCm.corpus_matches[activeAlphabetScheme]) {{
+                    return archOrCm.corpus_matches[activeAlphabetScheme].label || archOrCm.corpus_matches[activeAlphabetScheme].scheme;
+                }}
                 if (activeAlphabetScheme === 'currier') return `Currier: '${{cm.currier_equivalent || '?'}}'`;
                 if (activeAlphabetScheme === 'v101') return `v101: '${{cm.v101_equivalent || cm.eva_equivalent || '?'}}'`;
                 if (activeAlphabetScheme === 'voynichese') return `Voynichese: '${{cm.voynichese_equivalent || cm.eva_equivalent || '?'}}'`;
                 return `EVA: '${{cm.eva_equivalent || '?'}}'`;
             }} else {{
-                if (activeAlphabetScheme === 'deri') return `Deri: ${{cm.deri_equivalent || cm.serafini_code || '?'}}`;
-                if (activeAlphabetScheme === 'bulik') return `Bulik: ${{cm.bulik_equivalent || cm.serafini_code || '?'}}`;
-                return `Serafini: ${{cm.serafini_code || '?'}}`;
+                return cm.name || cm.category || 'Emergent Vector Symbol';
             }}
         }}
 
@@ -3713,14 +3628,14 @@ def generate_explorer_html(
             const hasNextWord = currentWordIdx >= 0 && currentWordIdx < (page.words || []).length - 1;
             const wordPositionLabel = currentWordIdx >= 0 ? `${{currentWordIdx + 1}} / ${{page.words.length}}` : '';
 
-            // Kinematic Ductus Chain
+            // Kinematic Grapheme Sequence (Ligature Chain)
             let ductusChainHtml = '';
             if (childGlyphs.length > 0) {{
                 ductusChainHtml = `
                     <div style="background:#050914; border:1px solid #38bdf8; border-radius:6px; padding:8px 10px; margin-bottom:8px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                             <span style="font-size:0.68rem; color:#38bdf8; font-weight:bold; text-transform:uppercase; letter-spacing:0.04em;">
-                                🖋️ Kinematic Ductus Chain (${{childGlyphs.length}} glyphs)
+                                🖋️ Kinematic Grapheme Sequence (${{childGlyphs.length}} glyphs)
                             </span>
                             <span style="font-size:0.58rem; color:var(--text-muted);">
                                 Left-to-Right Execution Order
@@ -3836,9 +3751,7 @@ def generate_explorer_html(
                 `;
             }} else {{
                 return `
-                    <option value="serafini" ${{activeAlphabetScheme === 'serafini' ? 'selected' : ''}}>Serafini (1981)</option>
-                    <option value="deri" ${{activeAlphabetScheme === 'deri' ? 'selected' : ''}}>Deri (2015)</option>
-                    <option value="bulik" ${{activeAlphabetScheme === 'bulik' ? 'selected' : ''}}>Bulik (2011)</option>
+                    <option value="serafini" selected>Emergent Vector Alphabet (G01–G57)</option>
                 `;
             }}
         }}
@@ -3961,30 +3874,35 @@ def generate_explorer_html(
                     </div>
                 `;
             }} else {{
-                const schemes = [
-                    {{ key: 'serafini', title: 'Serafini (1981)', color: '#c084fc' }},
-                    {{ key: 'deri', title: 'Deri (2015)', color: '#38bdf8' }},
-                    {{ key: 'bulik', title: 'Bulik (2011)', color: '#10b981' }}
-                ];
+                const cmSera = (arch && arch.corpus_match) ? arch.corpus_match : (multiMatches['serafini'] || {{}});
+                const archSvgSymbol = cleanSvgString((arch && arch.exemplar_svg_content) ? arch.exemplar_svg_content : getRenderableDuctusSvg(selectedGlyph, 6));
+                const archEulerSymbol = cleanSvgString((arch && arch.exemplar_euler_svg_content) ? arch.exemplar_euler_svg_content : (selectedGlyph.euler_svg_content || ''));
+                const familySvgSymbol = cmSera.reference_svg || archSvgSymbol;
+                const familyName = cmSera.name || 'Cursive Ribbon Grapheme';
+                const familyCat = cmSera.category || 'Continuous Ribbon';
+                const archLoops = (arch && arch.loop_count !== undefined) ? arch.loop_count : (selectedGlyph.loop_count || 0);
+                const archTopo = (arch && arch.topology_group) ? arch.topology_group : (selectedGlyph.topology_group || `${{archLoops}}L`);
                 multiCardsHtml = `
                     <div style="background:#0c1222; border:1px solid #1e293b; border-radius:8px; padding:8px 10px; margin:8px 0;">
                         <div style="font-size:0.70rem; color:var(--accent); font-weight:bold; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;">
-                            🏛️ Multi-Method Serafinian Correspondence
+                            🏛️ Emergent Serafinian Graphical Symbol & Topology
                         </div>
                         <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px;">
-                            ${{schemes.map(s => {{
-                                const m = multiMatches[s.key] || {{}};
-                                const sym = m.symbol || (m.label ? m.label.split(':')[1]?.trim() : '—');
-                                const pct = m.confidence_pct || 75.0;
-                                return `
-                                    <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center; display:flex; flex-direction:column; justify-content:space-between;">
-                                        <div style="font-size:0.62rem; color:${{s.color}}; font-weight:bold; border-bottom:1px solid #1f2937; padding-bottom:2px; margin-bottom:4px;">${{s.title}}</div>
-                                        <div style="font-size:0.95rem; font-family:monospace; font-weight:bold; color:#fff; margin:2px 0;">${{sym}}</div>
-                                        <div style="font-size:0.68rem; color:var(--success); font-weight:bold;">${{pct}}%</div>
-                                        <div style="font-size:0.58rem; color:var(--text-muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${{m.category || 'Cursive'}}</div>
-                                    </div>
-                                `;
-                            }}).join('')}}
+                            <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center; display:flex; flex-direction:column; justify-content:space-between; align-items:center;">
+                                <div style="font-size:0.60rem; color:#38bdf8; font-weight:bold; border-bottom:1px solid #1f2937; padding-bottom:2px; margin-bottom:4px; width:100%;">Archetype Symbol (${{selectedGlyph.canonical_type || 'G??'}})</div>
+                                <div style="height:44px; width:100%; display:flex; align-items:center; justify-content:center; margin:2px 0;">${{archSvgSymbol}}</div>
+                                <div style="font-size:0.58rem; color:var(--text-muted); margin-top:2px;">1-Stroke Ribbon</div>
+                            </div>
+                            <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center; display:flex; flex-direction:column; justify-content:space-between; align-items:center;">
+                                <div style="font-size:0.60rem; color:#c084fc; font-weight:bold; border-bottom:1px solid #1f2937; padding-bottom:2px; margin-bottom:4px; width:100%;">Euler-Bernoulli Graph</div>
+                                <div style="height:44px; width:100%; display:flex; align-items:center; justify-content:center; margin:2px 0;">${{archEulerSymbol || archSvgSymbol}}</div>
+                                <div style="font-size:0.58rem; color:#34d399; font-weight:bold; margin-top:2px;">🔒 ${{archLoops}} Loop(s) • ${{archTopo}}</div>
+                            </div>
+                            <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center; display:flex; flex-direction:column; justify-content:space-between; align-items:center;">
+                                <div style="font-size:0.60rem; color:#10b981; font-weight:bold; border-bottom:1px solid #1f2937; padding-bottom:2px; margin-bottom:4px; width:100%;">Morphological Family</div>
+                                <div style="height:44px; width:100%; display:flex; align-items:center; justify-content:center; margin:2px 0;">${{familySvgSymbol}}</div>
+                                <div style="font-size:0.56rem; color:#e2e8f0; font-weight:bold; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:100%;" title="${{familyName}} (${{familyCat}})">${{familyName}}</div>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -3992,6 +3910,7 @@ def generate_explorer_html(
 
             const cm = getTranslitMatch(arch);
             const evaChar = selectedGlyph.eva_char || (cm ? (cm.symbol || cm.eva_equivalent) : '') || (arch ? arch.corpus_match?.eva_equivalent : '') || '';
+            const archExemplarSvg = cleanSvgString((arch && arch.exemplar_svg_content) ? arch.exemplar_svg_content : '');
             let refSvgBox = '';
             if (currentMs === 'voynich' && evaChar) {{
                 refSvgBox = `
@@ -4003,14 +3922,16 @@ def generate_explorer_html(
                         <span style="font-size:0.60rem; color:var(--text-muted); font-family:monospace;">Reference EVA: '${{evaChar}}'</span>
                     </div>
                 `;
-            }} else if (cm && cm.reference_svg) {{
+            }} else if ((cm && cm.reference_svg) || archExemplarSvg) {{
+                const symbolSvg = archExemplarSvg || (cm ? cm.reference_svg : '');
+                const familySubtitle = (cm && cm.name) ? cm.name : `Archetype ${{selectedGlyph.canonical_type || 'G??'}}`;
                 refSvgBox = `
-                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:120px; background:#0b0f19; border:1px solid #c084fc; border-radius:6px; padding:8px;">
-                        <span style="font-size:0.65rem; color:#c084fc; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase;">STANDARD REFERENCE</span>
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:120px; background:#0b0f19; border:1px solid #10b981; border-radius:6px; padding:8px;">
+                        <span style="font-size:0.65rem; color:#10b981; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase;">ARCHETYPE SYMBOL (${{selectedGlyph.canonical_type || 'G??'}})</span>
                         <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; max-height:100px;">
-                            ${{cm.reference_svg}}
+                            ${{symbolSvg}}
                         </div>
-                        <span style="font-size:0.58rem; color:var(--text-muted); font-family:monospace;">Archetype ${{selectedGlyph.canonical_type || 'G??'}}</span>
+                        <span style="font-size:0.58rem; color:var(--text-muted); font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;">${{familySubtitle}}</span>
                     </div>
                 `;
             }} else {{
@@ -4021,12 +3942,15 @@ def generate_explorer_html(
                             <div>✨ Emergent Ductus</div>
                             <div style="font-size:0.58rem; opacity:0.7; margin-top:2px;">Archetype ${{selectedGlyph.canonical_type || 'G??'}}</div>
                         </div>
-                        <span style="font-size:0.58rem; color:var(--text-muted);">(No Prior Translit)</span>
+                        <span style="font-size:0.58rem; color:var(--text-muted);">(Autonomous Symbol)</span>
                     </div>
                 `;
             }}
 
+            const glyphCropSrc = selectedGlyph.png_rel || getOnTheFlyCrop(selectedGlyph, 6);
             const cleanDuctusSvg = getRenderableDuctusSvg(selectedGlyph, 6);
+            const eulerDuctusSvg = cleanSvgString(selectedGlyph.euler_svg_content || '') || cleanDuctusSvg;
+            const eulerStrokeCnt = selectedGlyph.euler_stroke_count || selectedGlyph.stroke_count || 1;
             const svgDownloadHref = selectedGlyph.svg_rel || ('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(cleanDuctusSvg));
 
             ins.innerHTML = `
@@ -4056,14 +3980,28 @@ def generate_explorer_html(
                     </div>
                 ` : ''}}
 
-                <!-- 2. Side-by-Side Focused Ductus & Reference Comparison -->
+                <!-- 2. 4-Way Side-by-Side Comparison: Scan Crop | Our Quill Ductus (40°) | Euler-Bernoulli Skeleton | Reference -->
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
-                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:120px; background:#000; border:1px solid #38bdf8; border-radius:6px; padding:8px;">
-                        <span style="font-size:0.65rem; color:#38bdf8; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase;">🖋️ Kinematic Ductus</span>
-                        <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; max-height:100px;">
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:130px; height:145px; background:#000; border:1px solid #334155; border-radius:6px; padding:6px;">
+                        <span style="font-size:0.60rem; color:var(--text-muted); font-weight:bold; letter-spacing:0.03em; text-transform:uppercase;">📷 Original Scan Crop</span>
+                        <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; max-height:95px; overflow:hidden;">
+                            ${{glyphCropSrc ? `<img src="${{glyphCropSrc}}" alt="${{selectedGlyph.glyph_id}}" style="max-height:90px; max-width:100%; object-fit:contain;">` : `<span style="color:var(--text-muted); font-size:0.65rem;">(Scan Crop)</span>`}}
+                        </div>
+                        <span style="font-size:0.56rem; color:var(--text-muted);">${{selectedGlyph.width || 0}}×${{selectedGlyph.height || 0}} px</span>
+                    </div>
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:130px; height:145px; background:#000; border:1px solid #38bdf8; border-radius:6px; padding:6px;">
+                        <span style="font-size:0.60rem; color:#38bdf8; font-weight:bold; letter-spacing:0.03em; text-transform:uppercase;">🖋️ Quill Ductus (40° Nib)</span>
+                        <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; max-height:95px;">
                             ${{cleanDuctusSvg}}
                         </div>
-                        <span style="font-size:0.58rem; color:var(--text-muted);">${{selectedGlyph.stroke_count || 1}} stroke(s) · Vector Trajectory</span>
+                        <span style="font-size:0.56rem; color:#38bdf8;">${{selectedGlyph.stroke_count || 1}} stroke(s) · Nib Physics</span>
+                    </div>
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:130px; height:145px; background:#040d1a; border:1px solid #a855f7; border-radius:6px; padding:6px;">
+                        <span style="font-size:0.60rem; color:#c084fc; font-weight:bold; letter-spacing:0.03em; text-transform:uppercase;">📐 Euler-Bernoulli Skeleton</span>
+                        <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; max-height:95px;">
+                            ${{eulerDuctusSvg}}
+                        </div>
+                        <span style="font-size:0.56rem; color:#c084fc;">${{eulerStrokeCnt}} segment(s) · Graph κ²(s)</span>
                     </div>
                     ${{refSvgBox}}
                 </div>
@@ -4087,9 +4025,9 @@ def generate_explorer_html(
 
                 <div class="meta-list">
                     <div><strong>Glyph:</strong> ${{selectedGlyph.glyph_id}}</div>
-                    <div><strong>Archetype Class:</strong> <span style="color:var(--accent); font-weight:bold;">${{selectedGlyph.canonical_type || 'G??'}}</span> (${{selectedGlyph.stroke_count || 1}} stroke(s))</div>
-                    <div><strong>Segmentation Support:</strong> <span class="badge-support ${{getSupportBadgeClass(selectedGlyph.support_badge)}}">${{selectedGlyph.support_badge || 'A+B+C (Consensus)'}}</span></div>
-                    ${{selectedGlyph.is_disjoint ? '<div style="color:#c084fc; font-size:0.68rem; font-style:italic;">⚠️ Disjoint Archetype (unique to this segmentation option)</div>' : '<div style="color:#10b981; font-size:0.68rem; font-style:italic;">✅ Corroborated by multi-model consensus</div>'}}
+                    <div><strong>Archetype Class:</strong> <span style="color:var(--accent); font-weight:bold;">${{selectedGlyph.canonical_type || 'G??'}}</span> (Quill: ${{selectedGlyph.stroke_count || 1}} stroke(s) vs Euler-Bernoulli: ${{eulerStrokeCnt}})</div>
+                    <div><strong>Word Decomposition Support:</strong> <span class="badge-support ${{getSupportBadgeClass(selectedGlyph.support_badge)}}">${{selectedGlyph.support_badge || 'A+B+C (Consensus)'}}</span></div>
+                    ${{selectedGlyph.is_disjoint ? '<div style="color:#c084fc; font-size:0.68rem; font-style:italic;">⚠️ Disjoint Archetype (unique to this decomposition option)</div>' : '<div style="color:#10b981; font-size:0.68rem; font-style:italic;">✅ Corroborated by multi-decomposition consensus</div>'}}
                 </div>
 
                 <button class="btn-variations" onclick="openArchetypeVariations('${{selectedGlyph.canonical_type}}')" style="width:100%; margin-top:6px;">
@@ -4097,182 +4035,6 @@ def generate_explorer_html(
                 </button>
                 <a href="${{svgDownloadHref}}" download="${{selectedGlyph.glyph_id}}.svg" class="btn-toggle" style="text-decoration:none; margin-top:4px; text-align:center;">⬇ Download Glyph SVG</a>
             `;
-        }}
-
-        function openComparativeVisionModal() {{
-            if (!selectedGlyph) return;
-            document.getElementById('modal-comparative-title').innerText = `🔬 5-Way AI Vision & Ductus Benchmark: ${{selectedGlyph.glyph_id}} (${{selectedGlyph.canonical_type}})`;
-            
-            const origSvg = getRenderableDuctusSvg(selectedGlyph, 6);
-            const gw = Math.max(20, selectedGlyph.width || 50);
-            const gh = Math.max(20, selectedGlyph.height || 60);
-
-            // 1. Method 1: Our In-House Physical Nib Model (Calligraphic Ridge Tracker with 40° Nib Simulation & Pleins/Déliés)
-            const calBox = document.getElementById('comp-cal-svg');
-            let calSvg = origSvg
-                .replace(/stroke="#[0-9a-fA-F]+"/g, 'stroke="#f59e0b"')
-                .replace(/fill="#[0-9a-fA-F]+"/g, 'fill="#10b981"')
-                .replace(/stroke-width="[0-9.]+"/g, 'stroke-width="2.6"');
-            
-            calBox.innerHTML = `
-                <div style="position:relative; width:100%; height:120px; display:flex; justify-content:center; align-items:center; background:#0b0f19; border-radius:6px; overflow:hidden; padding:4px;">
-                    <div style="width:100%; height:100%; display:flex; justify-content:center; align-items:center; filter:drop-shadow(0 0 4px rgba(245, 158, 11, 0.7)); max-height:110px; max-width:90%;">
-                        ${{calSvg}}
-                    </div>
-                    <div style="position:absolute; bottom:3px; right:5px; font-size:0.58rem; color:#f59e0b; background:rgba(0,0,0,0.85); padding:2px 6px; border-radius:3px; border:1px solid #f59e0b; display:flex; align-items:center; gap:4px;">
-                        <span style="display:inline-block; transform:rotate(-40deg); font-weight:bold;">✒</span>
-                        <span>Nib: 40° Bevel (Plein/Délié)</span>
-                    </div>
-                </div>
-            `;
-
-            // 2. Method 2: Euler-Bernoulli Topological Skeleton (1D Medial Axis + NetworkX Centerline & Bifurcation Nodes)
-            const geomBox = document.getElementById('comp-geom-svg');
-            let geomSvg = origSvg
-                .replace(/stroke="#[0-9a-fA-F]+"/g, 'stroke="#38bdf8"')
-                .replace(/stroke-width="[0-9.]+"/g, 'stroke-width="1.8"');
-            
-            geomBox.innerHTML = `
-                <div style="position:relative; width:100%; height:120px; display:flex; justify-content:center; align-items:center; background:#040d1a; border-radius:6px; overflow:hidden; padding:4px;">
-                    <div style="width:100%; height:100%; display:flex; justify-content:center; align-items:center; max-height:110px; max-width:90%;">
-                        ${{geomSvg}}
-                    </div>
-                    <div style="position:absolute; bottom:3px; right:5px; font-size:0.58rem; color:#38bdf8; background:rgba(0,0,0,0.85); padding:2px 6px; border-radius:3px; border:1px solid #38bdf8;">
-                        <span>1D Medial Axis & κ²(s) Spline</span>
-                    </div>
-                </div>
-            `;
-            
-            // 3. Method 3: Scribal Kinematic Flow Net (Dynamic Tangent Vector Field along actual extracted stroke coordinates)
-            const flowBox = document.getElementById('comp-flow-visual');
-            let flowArrows = '';
-            if (selectedGlyph.strokes && selectedGlyph.strokes.length > 0) {{
-                selectedGlyph.strokes.forEach(s => {{
-                    const pts = s.points || [];
-                    if (pts.length >= 2) {{
-                        const step = Math.max(1, Math.floor(pts.length / 5));
-                        for (let i = 0; i < pts.length - 1; i += step) {{
-                            const p0 = pts[i];
-                            const p1 = pts[Math.min(pts.length - 1, i + Math.max(1, Math.floor(step * 0.8)))];
-                            flowArrows += `<line x1="${{p0[1]}}" y1="${{p0[0]}}" x2="${{p1[1]}}" y2="${{p1[0]}}" stroke="#06b6d4" stroke-width="2.4" marker-end="url(#arrow-cyan-dyn)"/>`;
-                        }}
-                        flowArrows += `<circle cx="${{pts[0][1]}}" cy="${{pts[0][0]}}" r="3.5" fill="#10b981" stroke="#000" stroke-width="0.8"/>`;
-                        flowArrows += `<polygon points="${{pts[pts.length-1][1]}},${{pts[pts.length-1][0]-4}} ${{pts[pts.length-1][1]+4}},${{pts[pts.length-1][0]}} ${{pts[pts.length-1][1]}},${{pts[pts.length-1][0]+4}} ${{pts[pts.length-1][1]-4}},${{pts[pts.length-1][0]}}" fill="#ef4444" stroke="#000" stroke-width="0.8"/>`;
-                    }}
-                }});
-            }}
-
-            const flowSvg = `
-                <svg viewBox="0 0 ${{gw + 12}} ${{gh + 12}}" style="max-height:110px; max-width:90%; pointer-events:none;" xmlns="http://www.w3.org/2000/svg">
-                    <defs>
-                        <marker id="arrow-cyan-dyn" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
-                            <path d="M 0 1 L 10 5 L 0 9 z" fill="#06b6d4" />
-                        </marker>
-                    </defs>
-                    <g opacity="0.35" transform="translate(6, 6)">
-                        ${{origSvg.replace(/<svg[^>]*>|<\/svg>/gi, '')}}
-                    </g>
-                    <g transform="translate(6, 6)">
-                        ${{flowArrows}}
-                    </g>
-                </svg>
-            `;
-            flowBox.innerHTML = `
-                <div style="position:relative; width:100%; height:120px; display:flex; justify-content:center; align-items:center; background:#02181f; border-radius:6px; overflow:hidden; padding:4px;">
-                    ${{flowSvg}}
-                    <div style="position:absolute; bottom:3px; right:5px; font-size:0.58rem; color:#06b6d4; background:rgba(0,0,0,0.85); padding:2px 6px; border-radius:3px; border:1px solid #06b6d4;">
-                        <span>û(x,y) Neural Flow Field</span>
-                    </div>
-                </div>
-            `;
-
-            // 4. Method 4: DINOv2 Self-Supervised ViT (Patch Token Sequence & Dense Attention Graph)
-            const dinoBox = document.getElementById('comp-dino-visual');
-            let dinoTokenPath = '';
-            let dinoAttentionNodes = '';
-            if (selectedGlyph.strokes && selectedGlyph.strokes.length > 0) {{
-                const allPts = [];
-                selectedGlyph.strokes.forEach(s => (s.points || []).forEach(p => allPts.push(p)));
-                if (allPts.length > 0) {{
-                    const tokenCount = Math.min(8, Math.max(3, Math.floor(allPts.length / 4)));
-                    const step = Math.max(1, Math.floor(allPts.length / tokenCount));
-                    const tokenCoords = [];
-                    for (let i = 0; i < tokenCount; i++) {{
-                        const idx = Math.min(allPts.length - 1, i * step);
-                        tokenCoords.push(allPts[idx]);
-                    }}
-                    if (tokenCoords.length > 0 && tokenCoords[tokenCoords.length - 1] !== allPts[allPts.length - 1]) {{
-                        tokenCoords.push(allPts[allPts.length - 1]);
-                    }}
-                    const polyPts = tokenCoords.map(p => `${{p[1]}},${{p[0]}}`).join(' ');
-                    dinoTokenPath = `<polyline points="${{polyPts}}" fill="none" stroke="#c084fc" stroke-width="2.2" stroke-dasharray="3,2"/>`;
-                    tokenCoords.forEach((p, tIdx) => {{
-                        const r = (tIdx === 0 || tIdx === tokenCoords.length - 1) ? 5.0 : 3.8;
-                        const glowColor = tIdx % 2 === 0 ? '#ec4899' : '#8b5cf6';
-                        dinoAttentionNodes += `
-                            <circle cx="${{p[1]}}" cy="${{p[0]}}" r="${{r + 4}}" fill="${{glowColor}}" opacity="0.4"/>
-                            <circle cx="${{p[1]}}" cy="${{p[0]}}" r="${{r}}" fill="${{glowColor}}" stroke="#fff" stroke-width="1.0"/>
-                        `;
-                    }});
-                }}
-            }}
-
-            const dinoCropSrc = selectedGlyph.png_rel || getOnTheFlyCrop(selectedGlyph.bbox, 6);
-            dinoBox.innerHTML = `
-                <div style="position:relative; width:100%; height:120px; display:flex; justify-content:center; align-items:center; background:#050811; border-radius:6px; overflow:hidden; padding:4px;">
-                    <img src="${{dinoCropSrc}}" alt="Glyph" style="max-height:90px; max-width:85%; object-fit:contain; opacity:0.60; filter:contrast(140%) brightness(90%);">
-                    <svg style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none;" viewBox="0 0 ${{gw + 12}} ${{gh + 12}}" preserveAspectRatio="xMidYMid meet">
-                        <!-- 8x8 Patch Grid Overlay -->
-                        <line x1="${{(gw+12)*0.25}}" y1="2" x2="${{(gw+12)*0.25}}" y2="${{gh+10}}" stroke="rgba(192, 132, 252, 0.25)" stroke-dasharray="2,2"/>
-                        <line x1="${{(gw+12)*0.50}}" y1="2" x2="${{(gw+12)*0.50}}" y2="${{gh+10}}" stroke="rgba(192, 132, 252, 0.35)" stroke-dasharray="2,2"/>
-                        <line x1="${{(gw+12)*0.75}}" y1="2" x2="${{(gw+12)*0.75}}" y2="${{gh+10}}" stroke="rgba(192, 132, 252, 0.25)" stroke-dasharray="2,2"/>
-                        <line x1="2" y1="${{(gh+12)*0.25}}" x2="${{gw+10}}" y2="${{(gh+12)*0.25}}" stroke="rgba(192, 132, 252, 0.25)" stroke-dasharray="2,2"/>
-                        <line x1="2" y1="${{(gh+12)*0.50}}" x2="${{gw+10}}" y2="${{(gh+12)*0.50}}" stroke="rgba(192, 132, 252, 0.35)" stroke-dasharray="2,2"/>
-                        <line x1="2" y1="${{(gh+12)*0.75}}" x2="${{gw+10}}" y2="${{(gh+12)*0.75}}" stroke="rgba(192, 132, 252, 0.25)" stroke-dasharray="2,2"/>
-                        
-                        <g transform="translate(6, 6)">
-                            ${{dinoTokenPath}}
-                            ${{dinoAttentionNodes}}
-                        </g>
-                    </svg>
-                    <div style="position:absolute; bottom:3px; right:5px; font-size:0.58rem; color:#c084fc; background:rgba(0,0,0,0.85); padding:2px 6px; border-radius:3px; border:1px solid #c084fc;">
-                        <span>768-D ViT Tokens & Attention Map</span>
-                    </div>
-                </div>
-            `;
-            
-            // 5. Method 5: InkSight Autoregressive Handwriting Transformer (Continuous Time-Ordered Trajectory)
-            const inkBox = document.getElementById('comp-inksight-svg');
-            let inkSvg = origSvg
-                .replace(/stroke="#[0-9a-fA-F]+"/g, 'stroke="url(#ink-grad-dyn)"')
-                .replace(/stroke-width="[0-9.]+"/g, 'stroke-width="3.2"');
-            
-            inkBox.innerHTML = `
-                <div style="position:relative; width:100%; height:120px; display:flex; justify-content:center; align-items:center; background:#02110c; border-radius:6px; overflow:hidden; padding:4px;">
-                    <svg style="position:absolute; width:0; height:0;">
-                        <defs>
-                            <linearGradient id="ink-grad-dyn" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" stop-color="#10b981" />
-                                <stop offset="50%" stop-color="#38bdf8" />
-                                <stop offset="100%" stop-color="#f43f5e" />
-                            </linearGradient>
-                        </defs>
-                    </svg>
-                    <div style="width:100%; height:100%; display:flex; justify-content:center; align-items:center; filter:drop-shadow(0 0 4px rgba(16, 185, 129, 0.8)); max-height:110px; max-width:90%;">
-                        ${{inkSvg}}
-                    </div>
-                    <div style="position:absolute; bottom:3px; right:5px; font-size:0.58rem; color:#10b981; background:rgba(0,0,0,0.85); padding:2px 6px; border-radius:3px; border:1px solid #10b981; display:flex; gap:6px;">
-                        <span>● t=0 (Start)</span>
-                        <span style="color:#f43f5e;">◆ t=1 (Lift)</span>
-                    </div>
-                </div>
-            `;
-            
-            document.getElementById('comparative-modal').classList.add('open');
-        }}
-
-        function closeComparativeModal() {{
-            document.getElementById('comparative-modal').classList.remove('open');
         }}
 
         function renderCatalogueTab() {{
@@ -4284,6 +4046,7 @@ def generate_explorer_html(
                 if (evaEq.includes('(')) {{
                     evaEq = evaEq.split('(')[0].trim();
                 }}
+                const cleanExSvg = cleanSvgString(a.exemplar_svg_content || '');
                 let matchHeader = '';
                 let refSvgElem = '';
                 if (currentMs === 'voynich' && evaEq) {{
@@ -4294,24 +4057,24 @@ def generate_explorer_html(
                         </div>
                     `;
                 }} else if (cm && cm.reference_svg && cm.confidence_pct >= 40) {{
-                    const schemeLabel = getTranslitLabel(a);
-                    matchHeader = `<div style="color:var(--accent); font-size:0.85rem; font-weight:bold;">${{schemeLabel}} <span style="font-size:0.75rem; color:var(--success); font-weight:normal;">(${{cm.confidence_pct}}% match)</span></div>`;
+                    const familyLabel = cm.name || getTranslitLabel(a);
+                    matchHeader = `<div style="color:var(--accent); font-size:0.85rem; font-weight:bold;">${{familyLabel}} <span style="font-size:0.75rem; color:var(--success); font-weight:normal;">(${{cm.category || 'Cursive Ribbon'}})</span></div>`;
                     refSvgElem = `
-                        <div class="c-box">
-                            ${{cm.reference_svg || ''}}
+                        <div class="c-box" style="border-color:rgba(16, 185, 129, 0.35);">
+                            ${{cm.reference_svg || cleanExSvg}}
                         </div>
                     `;
                 }} else {{
-                    matchHeader = `<div style="color:#38bdf8; font-size:0.85rem; font-weight:bold;">Distinct Emergent Ductus <span style="font-size:0.75rem; color:var(--text-muted); font-weight:normal;">(Autonomous)</span></div>`;
+                    const familyLabel = (cm && cm.name) ? cm.name : 'Emergent Vector Grapheme';
+                    matchHeader = `<div style="color:#38bdf8; font-size:0.85rem; font-weight:bold;">${{familyLabel}} <span style="font-size:0.75rem; color:#34d399; font-weight:normal;">(Induced Symbol)</span></div>`;
                     refSvgElem = `
-                        <div class="c-box" style="display:flex; flex-direction:column; justify-content:center; align-items:center; color:var(--text-muted); font-size:0.68rem; padding:4px;">
-                            <span>✨ Emergent</span>
-                            <span style="font-size:0.58rem; opacity:0.7;">No Transliteration</span>
+                        <div class="c-box" style="border-color:rgba(16, 185, 129, 0.35);">
+                            ${{cleanExSvg || '<span style="font-size:0.65rem; color:var(--text-muted);">✨ Symbol</span>'}}
                         </div>
                     `;
                 }}
 
-                // Display all available schemes simultaneously on the card
+                // Display all available schemes simultaneously on the card (Voynich) or Morphological Graphical Profile (Seraphinianus)
                 const multi = a.corpus_matches || {{}};
                 let schemesSummaryHtml = '';
                 if (currentMs === 'voynich') {{
@@ -4336,23 +4099,23 @@ def generate_explorer_html(
                         </div>
                     `;
                 }} else {{
-                    const sList = [
-                        {{ k: 'serafini', label: 'Serafini', col: '#c084fc' }},
-                        {{ k: 'deri', label: 'Deri', col: '#38bdf8' }},
-                        {{ k: 'bulik', label: 'Bulik', col: '#10b981' }}
-                    ];
+                    const famName = (a.corpus_match && a.corpus_match.name) ? a.corpus_match.name : 'Cursive Ribbon Symbol';
+                    const famCat = (a.corpus_match && a.corpus_match.category) ? a.corpus_match.category : 'Continuous Monoline';
+                    const scaleMm = a.mean_width_mm ? `${{a.mean_width_mm}}×${{a.mean_height_mm}} mm` : `${{(a.mean_width * 0.125).toFixed(2)}}×${{(a.mean_height * 0.125).toFixed(2)}} mm`;
                     schemesSummaryHtml = `
-                        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; margin:6px 0; background:#0b132b; border:1px solid #1e293b; border-radius:4px; padding:4px;">
-                            ${{sList.map(s => {{
-                                const sm = multi[s.k] || {{}};
-                                return `
-                                    <div style="text-align:center;">
-                                        <div style="font-size:0.55rem; color:${{s.col}}; font-weight:bold;">${{s.label}}</div>
-                                        <div style="font-size:0.75rem; font-family:monospace; font-weight:bold; color:#fff;">${{sm.symbol || '—'}}</div>
-                                        <div style="font-size:0.58rem; color:var(--success); font-weight:bold;">${{sm.confidence_pct || 75}}%</div>
-                                    </div>
-                                `;
-                            }}).join('')}}
+                        <div style="display:grid; grid-template-columns:1.3fr 1fr 1fr; gap:4px; margin:6px 0; background:#0b132b; border:1px solid #1e293b; border-radius:4px; padding:5px 6px; align-items:center;">
+                            <div style="text-align:left; overflow:hidden;">
+                                <div style="font-size:0.55rem; color:#c084fc; font-weight:bold; text-transform:uppercase;">Morphological Family</div>
+                                <div style="font-size:0.72rem; font-weight:bold; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${{famName}}">${{famName}}</div>
+                            </div>
+                            <div style="text-align:center; border-left:1px solid #1e293b; padding-left:4px;">
+                                <div style="font-size:0.55rem; color:#38bdf8; font-weight:bold; text-transform:uppercase;">Ribbon Ductus</div>
+                                <div style="font-size:0.70rem; font-weight:bold; color:#34d399;">${{famCat}}</div>
+                            </div>
+                            <div style="text-align:center; border-left:1px solid #1e293b; padding-left:4px;">
+                                <div style="font-size:0.55rem; color:#10b981; font-weight:bold; text-transform:uppercase;">Metric Scale</div>
+                                <div style="font-size:0.70rem; font-family:monospace; font-weight:bold; color:#e2e8f0;">${{scaleMm}}</div>
+                            </div>
                         </div>
                     `;
                 }}
@@ -4378,17 +4141,21 @@ def generate_explorer_html(
                         <span style="font-size:0.65rem; background:#0f172a; border:1px solid #334155; color:#38bdf8; padding:2px 6px; border-radius:4px; font-weight:600; white-space:nowrap;">🔒 ${{loopCountVal}} loop(s) • ${{topoLabel}}</span>
                     </div>
                     ${{schemesSummaryHtml}}
-                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; font-size:0.56rem; color:var(--text-muted); font-weight:bold; text-align:center; margin-bottom:3px; letter-spacing:0.3px;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:6px; font-size:0.54rem; color:var(--text-muted); font-weight:bold; text-align:center; margin-bottom:3px; letter-spacing:0.2px;">
                         <span>SCAN</span>
-                        <span>KINEMATIC DUCTUS</span>
-                        <span>${{currentMs === 'voynich' ? 'CANONICAL FONT' : 'STANDARD REFERENCE'}}</span>
+                        <span style="color:#38bdf8;">QUILL DUCTUS</span>
+                        <span style="color:#c084fc;">EULER-BERNOULLI</span>
+                        <span>${{currentMs === 'voynich' ? 'CANONICAL FONT' : 'REFERENCE'}}</span>
                     </div>
-                    <div class="catalogue-trio">
+                    <div class="catalogue-trio" style="grid-template-columns: repeat(4, 1fr);">
                         <div class="c-box">
                             ${{exCropHtml}}
                         </div>
-                        <div class="c-box">
-                            ${{cleanSvgString(a.exemplar_svg_content || '') || '<div style="color:var(--text-muted); font-size:0.7rem; padding:10px;">(Ductus)</div>'}}
+                        <div class="c-box" style="border-color:rgba(56, 189, 248, 0.4);">
+                            ${{cleanSvgString(a.exemplar_svg_content || '') || '<div style="color:var(--text-muted); font-size:0.7rem; padding:10px;">(Quill)</div>'}}
+                        </div>
+                        <div class="c-box" style="border-color:rgba(168, 85, 247, 0.4); background:#040d1a;">
+                            ${{cleanSvgString(a.exemplar_euler_svg_content || a.exemplar_svg_content || '') || '<div style="color:var(--text-muted); font-size:0.7rem; padding:10px;">(Euler)</div>'}}
                         </div>
                         ${{refSvgElem}}
                     </div>
@@ -4423,7 +4190,7 @@ def generate_explorer_html(
                 arch = cat.alphabet.find(a => a.type_id === typeId.replace('G', 'S'));
             }}
             if (!arch) {{
-                const num = typeId.replace(/\D/g, '');
+                const num = typeId.replace(/\\D/g, '');
                 if (num) {{
                     arch = cat.alphabet.find(a => (a.type_id && a.type_id.endsWith(num)) || a.type_id === `G${{num}}` || a.type_id === `S${{num}}`);
                 }}
@@ -4441,8 +4208,9 @@ def generate_explorer_html(
             const exCropSrc = arch.exemplar_crop_uri || (firstInst && firstInst.crop_uri) || (exOnPage && firstInst ? getOnTheFlyCrop(firstInst, 4) : '') || arch.exemplar_png || '';
             const loopCountVal = (arch.loop_count !== undefined && arch.loop_count !== null) ? arch.loop_count : (firstInst && firstInst.loop_count !== undefined ? firstInst.loop_count : 0);
             const topoLabel = arch.topology_group || (firstInst && firstInst.topology_group) || 'CANONICAL';
+            const cleanModalExSvg = cleanSvgString(arch.exemplar_svg_content || '');
 
-            document.getElementById('modal-archetype-title').innerText = `Archetype ${{arch.type_id}} — Morphological Variations & Standard Cross-Reference`;
+            document.getElementById('modal-archetype-title').innerText = `Archetype ${{arch.type_id}} — Morphological Variations & Graphical Symbol`;
             
             let modalSchemesHtml = '';
             if (currentMs === 'voynich') {{
@@ -4467,40 +4235,47 @@ def generate_explorer_html(
                     </div>
                 `;
             }} else {{
-                const sList = [
-                    {{ k: 'serafini', label: 'Serafini (1981)', col: '#c084fc' }},
-                    {{ k: 'deri', label: 'Deri (2015)', col: '#38bdf8' }},
-                    {{ k: 'bulik', label: 'Bulik (2011)', col: '#10b981' }}
-                ];
+                const famName = (cm && cm.name) ? cm.name : 'Cursive Ribbon Symbol';
+                const famCat = (cm && cm.category) ? cm.category : 'Continuous Monoline Ribbon';
+                const scaleMm = arch.mean_width_mm ? `${{arch.mean_width_mm}}×${{arch.mean_height_mm}} mm` : `${{(arch.mean_width * 0.125).toFixed(2)}}×${{(arch.mean_height * 0.125).toFixed(2)}} mm`;
                 modalSchemesHtml = `
                     <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin:6px 0;">
-                        ${{sList.map(s => {{
-                            const sm = multi[s.k] || {{}};
-                            return `
-                                <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center;">
-                                    <div style="font-size:0.62rem; color:${{s.col}}; font-weight:bold;">${{s.label}}</div>
-                                    <div style="font-size:1.0rem; font-family:monospace; font-weight:bold; color:#fff;">${{sm.symbol || '—'}}</div>
-                                    <div style="font-size:0.65rem; color:var(--success); font-weight:bold;">${{sm.confidence_pct || 75}}% match</div>
-                                </div>
-                            `;
-                        }}).join('')}}
+                        <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center;">
+                            <div style="font-size:0.62rem; color:#c084fc; font-weight:bold;">Morphological Family</div>
+                            <div style="font-size:0.88rem; font-weight:bold; color:#fff; margin-top:2px;">${{famName}}</div>
+                            <div style="font-size:0.62rem; color:var(--text-muted);">${{famCat}}</div>
+                        </div>
+                        <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center;">
+                            <div style="font-size:0.62rem; color:#38bdf8; font-weight:bold;">Certified Loop Invariant</div>
+                            <div style="font-size:0.95rem; font-family:monospace; font-weight:bold; color:#34d399; margin-top:2px;">🔒 ${{loopCountVal}} Loop(s) (${{topoLabel}})</div>
+                            <div style="font-size:0.62rem; color:var(--text-muted);">1-Stroke Continuous Ribbon</div>
+                        </div>
+                        <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center;">
+                            <div style="font-size:0.62rem; color:#10b981; font-weight:bold;">Physical Metric Scale</div>
+                            <div style="font-size:0.95rem; font-family:monospace; font-weight:bold; color:#fff; margin-top:2px;">${{scaleMm}}</div>
+                            <div style="font-size:0.62rem; color:var(--text-muted);">${{arch.mean_width}}×${{arch.mean_height}} px @ 350 mm page</div>
+                        </div>
                     </div>
                 `;
             }}
 
             let bannerHtml = `
                 <div style="display:flex; gap:8px; background:#000; padding:8px; border-radius:8px; border:1px solid var(--border); align-items:center; flex-shrink:0;">
-                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:95px; height:95px; border-right:1px solid #1e293b; padding-right:4px;">
-                        <span style="font-size:0.56rem; color:var(--text-muted); margin-bottom:3px; font-weight:600;">SCAN</span>
-                        ${{exCropSrc ? `<img src="${{exCropSrc}}" style="max-height:75px; max-width:90px; object-fit:contain; border-radius:4px;">` : `<div style="font-size:0.65rem; color:var(--text-muted);">(Scan)</div>`}}
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:85px; height:95px; border-right:1px solid #1e293b; padding-right:4px;">
+                        <span style="font-size:0.54rem; color:var(--text-muted); margin-bottom:3px; font-weight:600;">SCAN</span>
+                        ${{exCropSrc ? `<img src="${{exCropSrc}}" style="max-height:75px; max-width:80px; object-fit:contain; border-radius:4px;">` : `<div style="font-size:0.65rem; color:var(--text-muted);">(Scan)</div>`}}
                     </div>
-                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:95px; height:95px; border-right:1px solid #1e293b; padding-right:4px;">
-                        <span style="font-size:0.56rem; color:var(--text-muted); margin-bottom:3px; font-weight:600;">DUCTUS</span>
-                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center;">${{cleanSvgString(arch.exemplar_svg_content || '')}}</div>
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:85px; height:95px; border-right:1px solid #1e293b; padding-right:4px;">
+                        <span style="font-size:0.54rem; color:#38bdf8; margin-bottom:3px; font-weight:600;">QUILL 40°</span>
+                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center;">${{cleanModalExSvg}}</div>
                     </div>
-                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:95px; height:95px;">
-                        <span style="font-size:0.56rem; color:var(--text-muted); margin-bottom:3px; font-weight:600;">REFERENCE</span>
-                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center;">${{cm?.reference_svg || '<span style="font-size:0.65rem; color:var(--text-muted);">Emergent</span>'}}</div>
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:85px; height:95px; border-right:1px solid #1e293b; padding-right:4px;">
+                        <span style="font-size:0.54rem; color:#c084fc; margin-bottom:3px; font-weight:600;">EULER-BERN.</span>
+                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center;">${{cleanSvgString(arch.exemplar_euler_svg_content || arch.exemplar_svg_content || '')}}</div>
+                    </div>
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:85px; height:95px;">
+                        <span style="font-size:0.54rem; color:#10b981; margin-bottom:3px; font-weight:600;">SYMBOL</span>
+                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center;">${{cm?.reference_svg || cleanModalExSvg || '<span style="font-size:0.65rem; color:var(--text-muted);">Emergent</span>'}}</div>
                     </div>
                 </div>
                 <div style="display:flex; flex-direction:column; justify-content:center; gap:4px; flex:1; min-width:320px;">
@@ -4527,25 +4302,33 @@ def generate_explorer_html(
             const varGrid = document.getElementById('modal-variations-grid');
             varGrid.innerHTML = instances.map(inst => {{
                 const vectorSvg = cleanSvgString(inst.svg_content || (inst.strokes ? getRenderableDuctusSvg(inst, 3) : ''));
+                const eulerSvg = cleanSvgString(inst.euler_svg_content || '') || vectorSvg;
                 const onPage = currentPage && inst.page_id === currentPage.page_id;
                 const cropImg = inst.crop_uri || (onPage && inst.bbox ? getOnTheFlyCrop(inst, 4) : '');
                 const instLoops = (inst.loop_count !== undefined && inst.loop_count !== null) ? inst.loop_count : loopCountVal;
 
                 const cropBox = cropImg
                     ? `<div style="height:64px; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#000; border-radius:4px; padding:2px; border:1px solid #1e293b;">
-                           <span style="font-size:0.50rem; color:#94a3b8; margin-bottom:1px;">SCAN</span>
+                           <span style="font-size:0.46rem; color:#94a3b8; margin-bottom:1px;">SCAN</span>
                            <img src="${{cropImg}}" style="max-height:46px; max-width:100%; object-fit:contain;">
                        </div>`
                     : `<div style="height:64px; display:flex; align-items:center; justify-content:center; background:#0f172a; border-radius:4px; border:1px solid #1e293b; color:var(--text-muted); font-size:0.55rem;">Scan</div>`;
 
                 const ductusBox = vectorSvg
                     ? `<div style="height:64px; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#000; border-radius:4px; padding:2px; border:1px solid #1e293b; overflow:hidden;">
-                           <span style="font-size:0.50rem; color:#38bdf8; margin-bottom:1px;">DUCTUS</span>
+                           <span style="font-size:0.46rem; color:#38bdf8; margin-bottom:1px;">QUILL</span>
                            <div style="max-height:46px; display:flex; align-items:center; justify-content:center;">${{vectorSvg}}</div>
                        </div>`
-                    : `<div style="height:64px; display:flex; align-items:center; justify-content:center; background:#0f172a; border-radius:4px; border:1px solid #1e293b; color:var(--text-muted); font-size:0.55rem;">Ductus</div>`;
+                    : `<div style="height:64px; display:flex; align-items:center; justify-content:center; background:#0f172a; border-radius:4px; border:1px solid #1e293b; color:var(--text-muted); font-size:0.55rem;">Quill</div>`;
 
-                const visualHtml = `<div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">${{cropBox}}${{ductusBox}}</div>`;
+                const eulerBox = eulerSvg
+                    ? `<div style="height:64px; display:flex; flex-direction:column; align-items:center; justify-content:center; background:#040d1a; border-radius:4px; padding:2px; border:1px solid rgba(168,85,247,0.4); overflow:hidden;">
+                           <span style="font-size:0.46rem; color:#c084fc; margin-bottom:1px;">EULER</span>
+                           <div style="max-height:46px; display:flex; align-items:center; justify-content:center;">${{eulerSvg}}</div>
+                       </div>`
+                    : `<div style="height:64px; display:flex; align-items:center; justify-content:center; background:#0f172a; border-radius:4px; border:1px solid #1e293b; color:var(--text-muted); font-size:0.55rem;">Euler</div>`;
+
+                const visualHtml = `<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:3px;">${{cropBox}}${{ductusBox}}${{eulerBox}}</div>`;
 
                 return `
                 <div class="var-card" onclick="locateInstanceFromModal('${{inst.glyph_id}}', '${{inst.page_id}}')" title="Click to view and zoom on ${{inst.page_id}}">
@@ -4578,8 +4361,6 @@ def generate_explorer_html(
         function closeModalOnOverlay(evt) {{
             if (evt.target.id === 'variations-modal') {{
                 closeVariationsModal();
-            }} else if (evt.target.id === 'comparative-modal') {{
-                closeComparativeModal();
             }}
         }}
 

@@ -65,34 +65,44 @@ When interacting with or extending this codebase, all AI agents must adhere to t
   - `GlyphSegmenter`: Assembles word connected components into glyphs with physical nib impact thresholding and supralinear diacritic decoupling.
 
 ### 3.2 `vectorizer`
-- **Goal**: Convert 2D pixel clusters into ordered $(x, y, t, \text{width})$ stroke trajectories with strict adherence to paleographic constraints.
+- **Goal**: Convert 2D pixel clusters into ordered $(x, y, t, \text{width})$ stroke trajectories with strict adherence to paleographic constraints, outputting both the primary **Quill Calligraphic Ductus (40°)** and the comparative **Euler-Bernoulli Topological Skeleton** side-by-side.
 - **Key Divergence (Voynich vs. Seraphinianus)**:
   - **Codex Seraphinianus (Modern Cursive Ribbon)**: Strictly 1 continuous stroke per connected component (`single_stroke_mode=True`, `max_strokes=1`). Follows fluid automobile-like inertia with no sharp angles > 90°, no retracing, and 100% skeleton coverage through an iterative 12-pass ridge extension loop oriented left-to-right.
   - **Voynich Manuscript (Medieval Quill Mechanics)**: Multi-stroke calligraphic ductus with deliberate pen lifts (`single_stroke_mode=False`). Enforces a strict physical ceiling of **1 to 4 strokes maximum** per glyph (`max_strokes=4`), governed by a 40° beveled quill nib producing authentic *pleins et déliés*. Compound gallows (`cth`, `ckh`) utilize up to 4 strokes; minims, crescents, and bowls use 1 to 2 strokes.
+  - **Anti-Brownian Kinematic Guarantees**:
+    - **Skeleton Spur Pruning (`prune_skeleton_spurs`)**: Strips microscopic lateral medial-axis spurs shorter than the local Euclidean distance transform (EDT) nib radius before ridge tracking.
+    - **Full Nib-Footprint Extinction (`_mark_nib_footprint_visited` & `wake_mask`)**: Marks the full physical cross-section of the quill ($r = d_{\text{EDT}} + 1.6\text{ px}$) as visited along the stroke trajectory, preventing internal zigzag bouncing or hairpin U-turns inside thick downstrokes.
+    - **Ramer-Douglas-Peucker & Gaussian Smoothing (`_rdp_simplify_with_width`)**: Simplifies trajectories to essential calligraphic control points while preserving closed loops (`1L`/`2+L`).
   - **Physical Nib Impact Threshold**: Objects $\le 8\text{ px}$ or $\text{area} \le 25\text{ px}^2$ bypass ridge tracking and are derendered as instantaneous touchdown impact points (`is_impact=True`, $\text{length}=0.0$).
 - **Key Classes**:
   - `CalligraphicVectorizer`: Native quill physics engine (40° nib bevel) and single-stroke continuous cursive tracker.
   - `Skeletonizer`: 1D medial axis transform + Euclidean distance transform for stroke width profiling (*plein/délié*).
   - `StrokeGraphExtractor`: Converts 8-connectivity skeleton pixels to a `NetworkX` graph and isolates path segments between critical nodes (degree $\neq 2$).
-  - `JunctionResolver`: Resolves crossing ambivalences via minimum bending energy (Euler-Bernoulli) and applies 15th-century right-handed scribal priors.
+  - `JunctionResolver`: Resolves crossing ambivalences via minimum bending energy (Euler-Bernoulli) and applies 15th-century right-handed scribal priors; generates the comparative **Euler-Bernoulli Skeleton Ductus** displayed alongside every glyph.
   - `VectorExporter`: Exports standardized SVG (with kinematic color mapping and custom `data-order` attributes) and structured JSON.
 
-### 3.3 `embeddings`
-- **Goal**: Continuous numerical representation of strokes and glyphs.
+### 3.3 `embeddings` & `word_decomposition`
+- **Goal**: Continuous numerical representation of strokes/glyphs and three independent word-to-glyph decomposition hypotheses (`word_decomposition.py`), each coupled with full dual-engine ductus vectorization.
+- **Three Word Decomposition Modes**:
+  - **Decomposition A (`GlyphSegmenter` — Topological & Valley 40°)**: Connected components + supralinear diacritic decoupling ($\le 0.55\text{ mm}$) + vertical column projection & EDT ink valleys that never slice through a closed loop.
+  - **Decomposition B (`NeuralWordDecomposition` — Spatial PCA Decomposition)**: Encodes intact word crops into 1D horizontal latent trajectories $Z(x) \in \mathbb{R}^{32}$ via `WordScribalEncoder` and places letter boundaries at local maxima of latent transition velocity $\|dZ/dx\|$.
+  - **Decomposition C (`HybridConsensusWordDecomposition` — Hybrid Consensus)**: Validates letter boundaries at the strict geometric intersection ($\epsilon \le 3\text{ px}$) of Decompositions A and B with Euler loop protection.
 - **Key Classes**:
   - `GeometricFeatureExtractor`: 16-D invariant descriptors (tortuosity, aspect ratio, entry/exit tangents, orientation histograms).
-  - `WordScribalEncoder` & `NeuralWordDecomposer`: Encodes intact word crops into 1D horizontal latent trajectories $Z(x) \in \mathbb{R}^{32}$ and discovers constituent glyph basis functions via spatial PCA / NMF without heuristic knife cutting.
+  - `WordScribalEncoder`, `NeuralWordDecomposition` & `HybridConsensusWordDecomposition` (in `voynich_ductus.embeddings.word_decomposition`): Unsupervised 1D horizontal latent decomposition and consensus cutting.
   - `StrokeLatentProjector`: Normalization and dimensionality reduction (PCA / VAE).
-  - `DINOv2EmbeddingEngine`: Meta DINOv2 self-supervised visual features combined with physical logarithmic scale invariants ($\log h, \log w, \log \text{area}$).
+  - `DINOv2EmbeddingEngine`: Meta DINOv2 self-supervised 768-D visual features projected via 16-D PCA and combined with physical logarithmic scale invariants ($\log h, \log w, \log \text{area}$).
 
 ### 3.4 `clustering`
-- **Goal**: Unsupervised alphabet induction and tokenization.
+- **Goal**: Unsupervised alphabet induction and tokenization driven jointly by kinematic ductus descriptors and 16-D PCA DINOv2 visual embeddings.
 - **Strict Invariance Rules**:
   - **Topological Loop Disjointness**: `0L` (loopless), `1L` (single loop), and `2+L` (multiloop) glyphs never collide into the same canonical archetype.
   - **Physical Scale Stratification**: Glyphs are strictly partitioned by physical scale bands (`TINY`, `CORE`, `TALL`, `WIDE`) so specks/diacritics cannot mix with letters, nor minims with tall gallows.
+  - **Joint Kinematic & DINOv2 Feature Space (`GlyphCatalogue.extract_glyph_features`)**: Combines high-weight kinematic ductus descriptors (`stroke_count * 3.5`, `tortuosity * 3.0`, entry/exit tangents `* 2.5`, 5-bin orientation histogram `* 2.2`, width variance `* 2.0`), physical scale, and $L_2$-normalized **16-D PCA projection of 768-D DINOv2 embeddings** (`weight * 2.5`) across 100% of glyphs.
+  - **Graphical Archetype Symbols**: Induces **49 canonical archetypes (`G01`–`G49`)** for the Voynich Manuscript and **57 emergent graphical symbol archetypes (`G01`–`G57`)** for the Codex Seraphinianus (rendered directly as visual vector SVG symbols rather than arbitrary ASCII codes).
   - **Corpus Census Projections**: Archetype frequencies reflect the complete corpus census (162,333 glyphs across 225 Voynich folios, 456,943 glyphs across 371 Seraphinianus pages), yielding realistic occurrences in the tens of thousands.
 - **Key Classes**:
-  - `GlyphClusterer` & `GlyphCatalogue`: Tripartite hybrid induction (Strict Topological Partitioning + DINOv2 & Morphological Clustering + Consensus Medoid Verification).
+  - `GlyphClusterer` & `GlyphCatalogue`: Tripartite hybrid induction (Strict Topological Partitioning + DINOv2 16-D PCA & Kinematic Ductus Clustering + Consensus Medoid Verification).
   - `StrokeTokenizer`: Generates unbiased token sequences (e.g. `G01-G04-G12`).
 
 ### 3.5 `diagnostics`

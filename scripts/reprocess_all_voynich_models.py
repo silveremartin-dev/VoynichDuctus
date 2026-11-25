@@ -21,17 +21,19 @@ sys.path.insert(0, str(root_dir / "src"))
 from voynich_ductus.ingestion.binarization import Binarizer
 from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
 from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
-from voynich_ductus.embeddings.word_neural_decomposer import (
-    NeuralWordDecomposer,
-    HybridNeuroKinematicDecomposer,
+from voynich_ductus.embeddings.word_decomposition import (
+    NeuralWordDecomposition,
+    HybridConsensusWordDecomposition,
     cross_evaluate_options_consensus
 )
+from voynich_ductus.vectorizer.calligraphic_tracker import CalligraphicVectorizer
 from voynich_ductus.vectorizer.export_format import VectorExporter
 from voynich_ductus.clustering.glyph_catalogue import GlyphCatalogue
 from voynich_ductus.ingestion.codicology import natural_folio_sort_key
 
 
 def reprocess_page(json_path: Path, img_path: Path, binarizer, segmenter, scale_calib, neural_decomposer, hybrid_decomposer):
+    tracker = CalligraphicVectorizer(nib_angle_deg=40.0)
     with open(json_path, "r", encoding="utf-8") as f:
         page_data = json.load(f)
 
@@ -124,18 +126,22 @@ def reprocess_page(json_path: Path, img_path: Path, binarizer, segmenter, scale_
                     matched_g = qa["quill_glyph"]
                     break
 
-            if matched_g and "strokes" in matched_g:
-                n_strokes = matched_g["strokes"]
-                svg = matched_g.get("ductus_svg", "")
-                c_type = matched_g.get("canonical_type", "G01")
-            else:
+            c_type = matched_g.get("canonical_type", "G01") if matched_g else "G01"
+            n_strokes = tracker.extract_calligraphic_ductus(ng_mask, single_stroke_mode=False, max_strokes=4, scale_calib=scale_calib)[:4]
+            if not n_strokes:
                 n_strokes = [{
-                    "stroke_id": "S0",
-                    "points": [[float(gy0 + gh * 0.2), float(gx0 + gw * 0.5), 3.0], [float(gy1 - gh * 0.2), float(gx0 + gw * 0.5), 3.0]],
-                    "order_index": 0
+                    "stroke_id": "cal_s00",
+                    "order_index": 0,
+                    "points": [(float(gh * 0.2), float(gw * 0.5), 2.5), (float(gh * 0.8), float(gw * 0.5), 2.5)],
+                    "length": 2.0,
+                    "start": (float(gh * 0.2), float(gw * 0.5)),
+                    "end": (float(gh * 0.8), float(gw * 0.5)),
+                    "nib_angle_deg": 40.0,
+                    "mean_width": 2.5
                 }]
-                svg = VectorExporter.to_svg(n_strokes, max(10, gw), max(10, gh))
-                c_type = "G01"
+            for s in n_strokes:
+                s["page_points"] = [[float(p[0] + gy0), float(p[1] + gx0), float(p[2])] for p in s.get("points", [])]
+            svg = VectorExporter.to_svg(n_strokes, max(10, gw), max(10, gh))
 
             poly = [[gx0, gy0], [gx1, gy0], [gx1, gy1], [gx0, gy1]]
             if gh >= 4 and gw >= 4:
@@ -200,18 +206,22 @@ def reprocess_page(json_path: Path, img_path: Path, binarizer, segmenter, scale_
                     matched_g = qa["quill_glyph"]
                     break
 
-            if matched_g and "strokes" in matched_g:
-                h_strokes = matched_g["strokes"]
-                svg = matched_g.get("ductus_svg", "")
-                c_type = matched_g.get("canonical_type", "G01")
-            else:
+            c_type = matched_g.get("canonical_type", "G01") if matched_g else "G01"
+            h_strokes = tracker.extract_calligraphic_ductus(hg_mask, single_stroke_mode=False, max_strokes=4, scale_calib=scale_calib)[:4]
+            if not h_strokes:
                 h_strokes = [{
-                    "stroke_id": "S0",
-                    "points": [[float(gy0 + gh * 0.2), float(gx0 + gw * 0.5), 3.0], [float(gy1 - gh * 0.2), float(gx0 + gw * 0.5), 3.0]],
-                    "order_index": 0
+                    "stroke_id": "cal_s00",
+                    "order_index": 0,
+                    "points": [(float(gh * 0.2), float(gw * 0.5), 2.5), (float(gh * 0.8), float(gw * 0.5), 2.5)],
+                    "length": 2.0,
+                    "start": (float(gh * 0.2), float(gw * 0.5)),
+                    "end": (float(gh * 0.8), float(gw * 0.5)),
+                    "nib_angle_deg": 40.0,
+                    "mean_width": 2.5
                 }]
-                svg = VectorExporter.to_svg(h_strokes, max(10, gw), max(10, gh))
-                c_type = "G01"
+            for s in h_strokes:
+                s["page_points"] = [[float(p[0] + gy0), float(p[1] + gx0), float(p[2])] for p in s.get("points", [])]
+            svg = VectorExporter.to_svg(h_strokes, max(10, gw), max(10, gh))
 
             poly = [[gx0, gy0], [gx1, gy0], [gx1, gy1], [gx0, gy1]]
             if gh >= 4 and gw >= 4:
@@ -272,8 +282,8 @@ def main():
     scale_calib = MetricScaleCalibration(manuscript_type="voynich")
     binarizer = Binarizer(method="sauvola")
     segmenter = GlyphSegmenter(scale_calib=scale_calib)
-    neural_decomposer = NeuralWordDecomposer()
-    hybrid_decomposer = HybridNeuroKinematicDecomposer()
+    neural_decomposer = NeuralWordDecomposition()
+    hybrid_decomposer = HybridConsensusWordDecomposition()
 
     limit = int(sys.argv[1]) if len(sys.argv) > 1 else len(json_files)
     print(f"[*] Reprocessing multi-model glyph sets for {min(limit, len(json_files))} Voynich folios...", flush=True)

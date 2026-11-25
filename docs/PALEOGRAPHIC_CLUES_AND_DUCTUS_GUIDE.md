@@ -103,10 +103,12 @@ Rather than segmenting raw connected components across the whole page (which ris
    - **Downstroke Prior**: Ascenders, descenders, and vertical minims are pulled downwards (high pen pressure $P(t)$, movement $\Delta y > 0$).
    - **Crossbar / Ligature Prior**: Gallows horizontal crossbars and cursive baseline ligatures are pushed left-to-right ($\Delta x > 0$).
    - **Touchdown Point**: Every independent pen stroke begins with a touch-down point (marked with a green dot `●`).
-2. **Pruning Skeleton Spurs & Branch Artifacts**:
-   - Medial axis transform generates tiny spurious orthogonal branches at thick stroke junctions. Any branch $< 5\text{ px}$ is pruned before graph decomposition, preventing artificial "Parkinsonian jitter".
-3. **Collinear Stroke Chaining**:
-   - Sub-strokes meeting at simple junctions or corners are chained along their tangent continuity vectors (Euler-Bernoulli minimum bending energy), yielding natural stroke counts (typically 1 to 3 continuous strokes per character).
+2. **Pruning Skeleton Spurs & Full Nib-Footprint Extinction (Anti-Brownian Tracking)**:
+   - Medial axis transform generates microscopic lateral spurs along uneven parchment edges. `prune_skeleton_spurs()` strips any branch shorter than the local Euclidean distance transform (EDT) nib radius before graph decomposition, preventing artificial "Brownian jitter".
+   - During ridge tracking (`_trace_continuous_ridge`), `_mark_nib_footprint_visited()` extinguishes the entire physical cross-section of the quill ($r = d_{\text{EDT}} + 1.6\text{ px}$) in the unvisited mask and maintains a full-width `wake_mask`, preventing the tracker from bouncing back-and-forth or executing hairpin U-turns inside the thickness of a single stem.
+   - `_rdp_simplify_with_width()` applies Ramer-Douglas-Peucker simplification with loop preservation (`1L`/`2+L`) and Gaussian smoothing to yield natural, fluid calligraphic trajectories.
+3. **Side-by-Side Dual Ductus (Quill 40° vs. Euler-Bernoulli Topological Skeleton)**:
+   - Alongside our primary physical **Quill Calligraphic Ductus (40°)**, the pipeline computes and displays the **Euler-Bernoulli Topological Skeleton** (`StrokeGraphExtractor` + `JunctionResolver` minimizing bending energy $\int \kappa^2(s)\,ds$) side-by-side for every glyph and archetype across all 3 word decompositions.
 4. **Cubic Bézier / Spline Curves**:
    - Raw skeleton points step orthogonally or diagonally pixel-by-pixel. The vectorizer converts these points into smooth Catmull-Rom cubic Bézier curves (`C cp1x cp1y cp2x cp2y x y` in SVG), eliminating discrete pixel staircase effects and rendering silky-smooth calligraphy.
 
@@ -186,8 +188,9 @@ To eliminate heterogeneous mixing inside the canonical catalogue:
    - `CORE`: Standard x-height letter body ($1.30\text{ mm} < H < 3.40\text{ mm}$ / $14 \le H \le 38\text{ px}$).
    - `TALL`: Ascending stem or gallows ($H \ge 3.40\text{ mm}$ / $H > 38\text{ px}$ or $H \ge 1.40 W$).
    - `WIDE`: Horizontal bench or wide ligature ($W \ge 3.40\text{ mm}$ / $W \ge 30\text{ px}$ or $W \ge 1.35 H$).
-   Logarithmic physical descriptors $\log(h) \times 4.5$, $\log(w) \times 4.0$, and $\log(\text{area}) \times 3.0$ are concatenated directly into the DINOv2 embedding space.
+   Logarithmic physical descriptors $\log(h) \times 4.5$, $\log(w) \times 4.0$, and $\log(\text{area}) \times 3.0$ are concatenated directly with high-weight kinematic ductus descriptors (`stroke_count * 3.5`, `tortuosity * 3.0`, entry/exit tangents `* 2.5`, 5-bin orientation histogram `* 2.2`) and the $L_2$-normalized **top-16 PCA projection of 768-D Meta DINOv2 embeddings** (`weight * 2.5`).
 3. **Variation Quarantine**: Any occurrence exhibiting a loop-count discrepancy or deviating by more than $\pm 35\%$ from the medoid dimensions is quarantined from canonical archetype variations.
+4. **Emergent Graphical Symbols for Codex Seraphinianus**: Because no standardized ASCII alphabet exists for *Codex Seraphinianus*, all 57 induced Seraphinianus archetypes (`G01`–`G57`) are represented directly by their **graphical vector SVG symbols**, paired with their Euler-Bernoulli topological graph and morphological family SVG.
 
 ---
 
@@ -289,19 +292,17 @@ The system computes and displays both metrics simultaneously:
 
 ---
 
-### U. Word-Level Neural Decomposition & 1D Spatial PCA (Option B)
-1. **Intact Word Crop Encoding**:
-   - Every lexical word is extracted as an intact patch without destructive knife slicing.
+### U. Three Independent Word Decomposition Modes (`word_decomposition`: A, B, C) & Dual Ductus
+1. **Intact Word Crop Encoding (`word_decomposition.py`)**:
+   - Every lexical word is extracted as an intact patch within its disjoint Voronoi partition.
    - Passed through `WordScribalEncoder`: a convolutional feature network that collapses vertical height while preserving horizontal resolution, producing a 1D latent trajectory $Z(x) \in \mathbb{R}^{32}$.
-2. **Unsupervised Basis Discovery (PCA / NMF)**:
-   - Trajectory segments are decomposed into archetypal basis functions $\Phi_k$:
-     $$\text{Patch}(x) \approx \sum_{k=1}^K a_k(x) \cdot \Phi_k$$
-   - Natural glyph transitions occur at latent inflection points / velocity minima $\|dZ/dx\|$.
-3. **Interactive Multi-Mode Explorer Selector**:
-   - The Grand Glyph Explorer UI features a drop-down menu allowing real-time switching between:
-     - **Option A (`Quill Ductus 40°`)**: Physical quill mechanics & decoupled supralinear diacritics
-     - **Option B (`AI Neural PCA`)**: Unsupervised neural word decomposition (1D Spatial PCA / NMF)
-     - **Option C (`Hybrid Consensus`)**: Strict neuro-kinematic mathematical consensus
+2. **Unsupervised Basis Discovery (`NeuralWordDecomposition` & `HybridConsensusWordDecomposition`)**:
+   - Trajectory segments are projected via Spatial PCA into horizontal latent profiles. Natural glyph transitions occur at local peaks of the latent transition velocity $\|dZ/dx\|$.
+3. **Interactive Word Decomposition Selector with Full Dual Ductus**:
+   - The Grand Glyph Explorer UI features a **`Word Decomposition`** selector allowing real-time switching between three independent decompositions, each equipped with its own freshly vectorized **Quill Calligraphic Ductus (40°)** and **Euler-Bernoulli Topological Skeleton**:
+     - **`A · Topological & Valley (40°)` (`GlyphSegmenter`)**: Physical connected components, decoupled supralinear diacritics ($\le 0.55\text{ mm}$), and EDT ink valleys respecting closed loops.
+     - **`B · Spatial PCA Decomposition` (`NeuralWordDecomposition`)**: Unsupervised 1D horizontal spatial PCA latent transition boundaries $\|dZ/dx\|$.
+     - **`C · Hybrid Consensus` (`HybridConsensusWordDecomposition`)**: Strict geometric intersection ($\epsilon \le 3\text{ px}$) between A and B with Euler loop protection.
 
 ---
 

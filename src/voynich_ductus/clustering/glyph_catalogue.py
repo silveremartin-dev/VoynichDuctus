@@ -223,7 +223,7 @@ class GlyphCatalogue:
             holes_p = filled_p & (~(patch_norm > 0.5))
             hole_ratio = float(np.sum(holes_p)) / float(max(1, np.sum(filled_p)))
 
-            # 4. Moderate kinematic features
+            # 4. First-class Kinematic Ductus features (stroke count, entry/exit tangents, tortuosity, orientation histogram, plein/délié width variance)
             if strokes:
                 entry_s = strokes[0].get("points", [])
                 exit_s = strokes[-1].get("points", [])
@@ -250,14 +250,20 @@ class GlyphCatalogue:
                 hole_ratio * 4.0,          # Interior hole ratio invariant
                 aspect * 3.5,              # Log aspect ratio (tall vs core vs wide)
                 fill_factor * 2.0,         # Ink density
-                stroke_count * 1.5,
-                np.sin(entry_angle) * 0.5,
-                np.cos(entry_angle) * 0.5,
-                np.sin(exit_angle) * 0.5,
-                np.cos(exit_angle) * 0.5,
-                float(mean_f[0]) * 0.5,    # arc_length
-                float(mean_f[2]) * 0.5,    # tortuosity
-                float(mean_f[7]) * 0.5,    # mean_width
+                stroke_count * 3.5,        # Kinematic pen-lift count (1 vs 2 vs 3-4 strokes)
+                np.sin(entry_angle) * 2.5, # Pen touchdown entry tangent sin
+                np.cos(entry_angle) * 2.5, # Pen touchdown entry tangent cos
+                np.sin(exit_angle) * 2.5,  # Pen-lift exit tangent sin
+                np.cos(exit_angle) * 2.5,  # Pen-lift exit tangent cos
+                float(mean_f[0]) * 2.5,    # Log kinematic arc length
+                float(mean_f[2]) * 3.0,    # Stroke tortuosity / bending curvature (straight minim vs crescent)
+                float(mean_f[7]) * 2.0,    # Mean nib thickness (plein/délié)
+                float(mean_f[8]) * 2.0,    # Nib thickness variance (bevel contrast)
+                float(mean_f[11]) * 2.2,   # Orientation histogram bin 1
+                float(mean_f[12]) * 2.2,   # Orientation histogram bin 2
+                float(mean_f[13]) * 2.2,   # Orientation histogram bin 3
+                float(mean_f[14]) * 2.2,   # Orientation histogram bin 4
+                float(mean_f[15]) * 2.2,   # Orientation histogram bin 5
             ]
             partial_vec.extend((grid_8x8 * 2.5).tolist())
             partial_vec.extend((h_proj * 2.0).tolist())
@@ -265,18 +271,35 @@ class GlyphCatalogue:
             precomputed_partials.append(partial_vec)
 
         # Full DINOv2 batch inference for 100% of glyphs (no 500-glyph truncation)
+        # Project the 384/768-D DINOv2 ViT embeddings down to their top 16 principal components (PCA)
+        # rather than slicing the arbitrary first 16 raw neurons!
         dino_batch_embs = self.dinov2_engine.extract_batch_embeddings(mini_patches, batch_size=64)
+        if len(dino_batch_embs) > 0 and dino_batch_embs.shape[1] > 16:
+            from sklearn.decomposition import PCA
+            n_comp = min(16, dino_batch_embs.shape[0], dino_batch_embs.shape[1])
+            if n_comp >= 2:
+                pca_dino = PCA(n_components=n_comp, random_state=42)
+                dino_proj = pca_dino.fit_transform(dino_batch_embs)
+                if n_comp < 16:
+                    dino_proj = np.pad(dino_proj, ((0, 0), (0, 16 - n_comp)))
+            else:
+                dino_proj = dino_batch_embs[:, :16]
+        else:
+            dino_proj = dino_batch_embs
 
-        n_partial_dim = 15 + 64 + 16
+        n_partial_dim = 21 + 64 + 16
         glyph_feature_vectors = []
         for idx, partial in enumerate(precomputed_partials):
             if partial is None:
                 glyph_feature_vectors.append(np.zeros(n_partial_dim + 16, dtype=np.float32))
                 continue
-            dino_emb = dino_batch_embs[idx] if idx < len(dino_batch_embs) else np.zeros(16, dtype=np.float32)
+            dino_emb = dino_proj[idx] if idx < len(dino_proj) else np.zeros(16, dtype=np.float32)
             dino_top = dino_emb[:16] if len(dino_emb) >= 16 else np.pad(dino_emb, (0, 16 - len(dino_emb)))
+            norm_d = float(np.linalg.norm(dino_top))
+            if norm_d > 1e-5:
+                dino_top = dino_top / norm_d
             vec = list(partial)
-            vec.extend((dino_top * 1.5).tolist())
+            vec.extend((dino_top * 2.5).tolist())
             glyph_feature_vectors.append(np.array(vec, dtype=np.float32))
 
         X_raw = np.array(glyph_feature_vectors, dtype=np.float32)
@@ -690,6 +713,8 @@ class GlyphCatalogue:
                     "eva_char": g.get("eva_char", ""),
                     "crop_uri": g.get("crop_uri", ""),
                     "svg_content": g.get("svg_content", g.get("ductus_svg", "")),
+                    "euler_svg_content": g.get("euler_svg_content", ""),
+                    "euler_stroke_count": int(g.get("euler_stroke_count", len(g.get("euler_strokes", [])))),
                     "png_rel": g.get("png_rel", ""),
                     "svg_rel": g.get("svg_rel", ""),
                     "is_outlier": False,
@@ -722,6 +747,8 @@ class GlyphCatalogue:
                     "eva_char": eg.get("eva_char", ""),
                     "crop_uri": eg.get("crop_uri", ""),
                     "svg_content": eg.get("svg_content", eg.get("ductus_svg", "")),
+                    "euler_svg_content": eg.get("euler_svg_content", ""),
+                    "euler_stroke_count": int(eg.get("euler_stroke_count", len(eg.get("euler_strokes", [])))),
                     "png_rel": eg.get("png_rel", ""),
                     "svg_rel": eg.get("svg_rel", ""),
                     "is_outlier": False,
@@ -780,6 +807,7 @@ class GlyphCatalogue:
                 "exemplar_png": exemplar_glyph.get("png_rel", ""),
                 "exemplar_svg": exemplar_glyph.get("svg_rel", ""),
                 "exemplar_svg_content": exemplar_glyph.get("svg_content", exemplar_glyph.get("ductus_svg", "")),
+                "exemplar_euler_svg_content": exemplar_glyph.get("euler_svg_content", ""),
                 "mean_strokes": mean_strokes,
                 "mean_height": mean_height,
                 "mean_width": mean_width,
