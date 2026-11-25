@@ -23,10 +23,16 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
+from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
 from voynich_ductus.ingestion.pdf_loader import PDFScanLoader
+from voynich_ductus.ingestion.codicology import natural_folio_sort_key, build_folio_codicology_registry
 from voynich_ductus.clustering.glyph_catalogue import GlyphCatalogue
 from voynich_ductus.ingestion.transcription_reference import PaleographyYieldValidator
 from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader
+from voynich_ductus.embeddings.multimodel_pipeline import (
+    configure_gentle_worker_environment,
+    enrich_page_multimodel,
+)
 
 
 def process_single_voynich_folio(
@@ -46,22 +52,37 @@ def process_single_voynich_folio(
         try:
             with open(p_json, "r", encoding="utf-8") as f:
                 d = json.load(f)
-            return {
-                "page_id": folio_id,
-                "line_count": d.get("line_count", len(d.get("lines", []))),
-                "word_count": d.get("word_count", len(d.get("words", []))),
-                "glyph_count": d.get("glyph_count", len(d.get("glyphs", []))),
-                "sample_glyphs": d.get("glyphs", [])[:15],
-                "cached": True
-            }
+            if d.get("glyphs") and d.get("glyphs_neural_pca") and d.get("glyphs_hybrid_consensus"):
+                is_preload = (folio_id.lower() in ["f001r", "f1r"])
+                return {
+                    "page_id": d.get("page_id", folio_id),
+                    "page_img_rel": d.get("page_img_rel", f"voynich/pages/{folio_id}.jpg"),
+                    "json_rel": f"voynich/pages/{folio_id}.json",
+                    "image_width": d.get("image_width", 1272),
+                    "image_height": d.get("image_height", 1800),
+                    "line_count": d.get("line_count", len(d.get("lines", []))),
+                    "word_count": d.get("word_count", len(d.get("words", []))),
+                    "glyph_count": d.get("glyph_count", len(d.get("glyphs", []))),
+                    "glyph_count_neural_pca": d.get("glyph_count_neural_pca", len(d.get("glyphs_neural_pca", []))),
+                    "glyph_count_hybrid_consensus": d.get("glyph_count_hybrid_consensus", len(d.get("glyphs_hybrid_consensus", []))),
+                    "yield_report": d.get("yield_report", {}),
+                    "sample_glyphs": d.get("glyphs", [])[:30],
+                    "lines": d.get("lines", []) if is_preload else [],
+                    "words": d.get("words", []) if is_preload else [],
+                    "glyphs": d.get("glyphs", []) if is_preload else [],
+                    "glyphs_neural_pca": d.get("glyphs_neural_pca", []) if is_preload else [],
+                    "glyphs_hybrid_consensus": d.get("glyphs_hybrid_consensus", []) if is_preload else [],
+                    "cached": True
+                }
         except Exception:
             pass
 
-    segmenter = GlyphSegmenter()
-    
+    configure_gentle_worker_environment(low_priority=False)
     raw_img = Image.open(scan_path)
     # 2x Lanczos upscale for crisp pen stroke resolution (1272x1800)
     img = raw_img.resize((raw_img.width * 2, raw_img.height * 2), Image.Resampling.LANCZOS)
+    scale_calib = MetricScaleCalibration(manuscript_type="voynich", image_height_px=img.height, image_width_px=img.width)
+    segmenter = GlyphSegmenter(scale_calib=scale_calib)
     
     # Check for authentic Yale HD Master plate
     yale_img = None
@@ -158,6 +179,18 @@ def process_single_voynich_folio(
                 subfolder="voynich"
             )
 
+    # Enrich with all 3 decomposition models (A, B, C), MetricScaleCalibration, and line-aware disjoint word partitioning
+    import cv2 as _cv2
+    active_pil_img = yale_img if (yale_img is not None and r_words and res.get("image_width", 0) == getattr(yale_img, "width", 0)) else img
+    img_bgr = _cv2.cvtColor(np.array(active_pil_img.convert("RGB")), _cv2.COLOR_RGB2BGR)
+    enrich_page_multimodel(
+        page_data=res,
+        img_bgr=img_bgr,
+        manuscript_type="voynich",
+        restore_rosetta_boxes=False,
+        recompute_option_a=True,
+    )
+
     # Census yield evaluation
     yr = PaleographyYieldValidator.evaluate_yield(
         folio_id=folio_id,
@@ -165,6 +198,10 @@ def process_single_voynich_folio(
         detected_glyphs=res.get("glyph_count", 0),
         extracted_strokes=sum(len(g.get("strokes", [])) for g in res.get("glyphs", []))
     )
+    res["yield_report"] = yr
+
+    with open(p_json, "w", encoding="utf-8") as f_out:
+        json.dump(res, f_out, ensure_ascii=False)
 
     # Return lightweight summary with representative sample across IPC boundary
     is_preload = (folio_id.lower() in ["f001r", "f1r"])
@@ -172,16 +209,20 @@ def process_single_voynich_folio(
         "page_id": folio_id,
         "page_img_rel": res.get("page_img_rel", f"voynich/pages/{folio_id}.jpg"),
         "json_rel": f"voynich/pages/{folio_id}.json",
-        "image_width": res.get("image_width", 1500),
-        "image_height": res.get("image_height", 2000),
+        "image_width": res.get("image_width", 1272),
+        "image_height": res.get("image_height", 1800),
         "line_count": res.get("line_count", 0),
         "word_count": res.get("word_count", 0),
         "glyph_count": res.get("glyph_count", 0),
+        "glyph_count_neural_pca": res.get("glyph_count_neural_pca", 0),
+        "glyph_count_hybrid_consensus": res.get("glyph_count_hybrid_consensus", 0),
         "yield_report": yr,
         "sample_glyphs": res.get("glyphs", [])[:30],
         "lines": res.get("lines", []) if is_preload else [],
         "words": res.get("words", []) if is_preload else [],
         "glyphs": res.get("glyphs", []) if is_preload else [],
+        "glyphs_neural_pca": res.get("glyphs_neural_pca", []) if is_preload else [],
+        "glyphs_hybrid_consensus": res.get("glyphs_hybrid_consensus", []) if is_preload else [],
     }
 
 
@@ -190,30 +231,43 @@ def process_single_serafini_page(
     pdf_path_str: str,
     base_out_str: str
 ) -> Dict[str, Any]:
-    """Worker function: executes topological loop-preserving extraction on a single Seraphinianus page."""
+    """Worker function: executes topological loop-preserving 3-model extraction on a single Seraphinianus page."""
     base_out = Path(base_out_str)
     page_id = f"serafini_p{page_idx:03d}"
     pages_dir = base_out / "seraphinianus" / "pages"
     p_json = pages_dir / f"{page_id}.json"
     p_jpg = pages_dir / f"{page_id}.jpg"
     
-    # Check if page was already extracted to avoid re-work
+    # Check if page was already extracted with all 3 models to avoid re-work
     if p_json.exists() and p_jpg.exists():
         try:
             with open(p_json, "r", encoding="utf-8") as f:
                 d = json.load(f)
-            return {
-                "page_id": page_id,
-                "line_count": d.get("line_count", 0),
-                "word_count": d.get("word_count", 0),
-                "glyph_count": d.get("glyph_count", 0),
-                "sample_glyphs": d.get("glyphs", [])[:15],
-                "cached": True
-            }
+            if d.get("glyphs") and d.get("glyphs_neural_pca") and d.get("glyphs_hybrid_consensus"):
+                is_preload = (page_id in ["serafini_p000", "serafini_p030"])
+                return {
+                    "page_id": page_id,
+                    "page_img_rel": d.get("page_img_rel", f"seraphinianus/pages/{page_id}.jpg"),
+                    "json_rel": f"seraphinianus/pages/{page_id}.json",
+                    "image_width": d.get("image_width", 1600),
+                    "image_height": d.get("image_height", 2206),
+                    "line_count": d.get("line_count", 0),
+                    "word_count": d.get("word_count", 0),
+                    "glyph_count": d.get("glyph_count", 0),
+                    "glyph_count_neural_pca": d.get("glyph_count_neural_pca", 0),
+                    "glyph_count_hybrid_consensus": d.get("glyph_count_hybrid_consensus", 0),
+                    "sample_glyphs": d.get("glyphs", [])[:15],
+                    "lines": d.get("lines", []) if is_preload else [],
+                    "words": d.get("words", []) if is_preload else [],
+                    "glyphs": d.get("glyphs", []) if is_preload else [],
+                    "glyphs_neural_pca": d.get("glyphs_neural_pca", []) if is_preload else [],
+                    "glyphs_hybrid_consensus": d.get("glyphs_hybrid_consensus", []) if is_preload else [],
+                    "cached": True
+                }
         except Exception:
             pass
 
-    segmenter = GlyphSegmenter()
+    configure_gentle_worker_environment(low_priority=False)
     loader_s = PDFScanLoader(Path(pdf_path_str))
     # 1600px is crystal clear for digital PDF cursive and avoids multi-gigabyte memory spikes
     p_img = loader_s.get_page_image(page_idx, target_min_dim=1600)
@@ -221,16 +275,42 @@ def process_single_serafini_page(
     # Auto-orient landscape plates if width exceeds height
     if p_img.width > p_img.height * 1.15:
         p_img = p_img.rotate(270, expand=True)
-        
+
+    scale_calib = MetricScaleCalibration(manuscript_type="seraphinianus", image_height_px=p_img.height, image_width_px=p_img.width)
+    segmenter = GlyphSegmenter(scale_calib=scale_calib)
     res_s = segmenter.extract_page_glyphs(page_id, p_img, output_dir=base_out, subfolder="seraphinianus")
-    
+
+    import cv2 as _cv2
+    img_bgr = _cv2.cvtColor(np.array(p_img.convert("RGB")), _cv2.COLOR_RGB2BGR)
+    enrich_page_multimodel(
+        page_data=res_s,
+        img_bgr=img_bgr,
+        manuscript_type="seraphinianus",
+        restore_rosetta_boxes=False,
+        recompute_option_a=True,
+    )
+    with open(p_json, "w", encoding="utf-8") as f_out:
+        json.dump(res_s, f_out, ensure_ascii=False)
+
+    is_preload = (page_id in ["serafini_p000", "serafini_p030"])
     # Return ONLY lightweight summary across IPC boundary to keep parent memory near zero
     return {
         "page_id": page_id,
+        "page_img_rel": res_s.get("page_img_rel", f"seraphinianus/pages/{page_id}.jpg"),
+        "json_rel": f"seraphinianus/pages/{page_id}.json",
+        "image_width": res_s.get("image_width", p_img.width),
+        "image_height": res_s.get("image_height", p_img.height),
         "line_count": res_s.get("line_count", 0),
         "word_count": res_s.get("word_count", 0),
         "glyph_count": res_s.get("glyph_count", 0),
+        "glyph_count_neural_pca": res_s.get("glyph_count_neural_pca", 0),
+        "glyph_count_hybrid_consensus": res_s.get("glyph_count_hybrid_consensus", 0),
         "sample_glyphs": res_s.get("glyphs", [])[:15],
+        "lines": res_s.get("lines", []) if is_preload else [],
+        "words": res_s.get("words", []) if is_preload else [],
+        "glyphs": res_s.get("glyphs", []) if is_preload else [],
+        "glyphs_neural_pca": res_s.get("glyphs_neural_pca", []) if is_preload else [],
+        "glyphs_hybrid_consensus": res_s.get("glyphs_hybrid_consensus", []) if is_preload else [],
         "cached": False
     }
 
@@ -340,27 +420,48 @@ def main():
         try:
             with open(voy_cat_file, "r", encoding="utf-8") as f:
                 voynich_catalogue = json.load(f)
-            for p_json in sorted((base_out / "voynich" / "pages").glob("*.json")):
+            v_files = sorted((base_out / "voynich" / "pages").glob("*.json"), key=lambda p: natural_folio_sort_key(p.stem))
+            cod_reg = build_folio_codicology_registry([jf.stem for jf in v_files])
+            all_have_multimodel = True
+            for p_json in v_files:
                 with open(p_json, "r", encoding="utf-8") as f:
                     d = json.load(f)
+                if not d.get("glyphs_neural_pca") or not d.get("glyphs_hybrid_consensus"):
+                    all_have_multimodel = False
                 p_id = d.get("page_id", p_json.stem)
+                c_info = cod_reg.get(p_id, {})
                 is_preload = (p_id.lower() in ["f001r", "f1r"])
                 voynich_pages_data.append({
                     "page_id": p_id,
                     "page_img_rel": d.get("page_img_rel", f"voynich/pages/{p_id}.jpg"),
                     "json_rel": f"voynich/pages/{p_id}.json",
-                    "image_width": d.get("image_width", 1500),
-                    "image_height": d.get("image_height", 2000),
+                    "image_width": d.get("image_width", 1272),
+                    "image_height": d.get("image_height", 1800),
                     "line_count": d.get("line_count", len(d.get("lines", []))),
                     "word_count": d.get("word_count", len(d.get("words", []))),
                     "glyph_count": d.get("glyph_count", len(d.get("glyphs", []))),
+                    "glyph_count_neural_pca": d.get("glyph_count_neural_pca", len(d.get("glyphs_neural_pca", []))),
+                    "glyph_count_hybrid_consensus": d.get("glyph_count_hybrid_consensus", len(d.get("glyphs_hybrid_consensus", []))),
                     "yield_report": d.get("yield_report", {}),
+                    "quire_id": c_info.get("quire", ""),
+                    "section": c_info.get("section", ""),
+                    "singulion_id": c_info.get("singulion_id", ""),
+                    "conjoint_leaf": c_info.get("conjoint_leaf"),
+                    "codex_index": c_info.get("codex_index", 0),
+                    "ld_index": c_info.get("ld_index", 0),
+                    "notes": c_info.get("notes", ""),
                     "lines": d.get("lines", []) if is_preload else [],
                     "words": d.get("words", []) if is_preload else [],
                     "glyphs": d.get("glyphs", []) if is_preload else [],
+                    "glyphs_neural_pca": d.get("glyphs_neural_pca", []) if is_preload else [],
+                    "glyphs_hybrid_consensus": d.get("glyphs_hybrid_consensus", []) if is_preload else [],
                 })
-            print(f"  [+] Loaded {len(voynich_pages_data)} Voynich folios from cache. Skipping Voynich extraction!")
-            do_voynich = False
+            if all_have_multimodel:
+                print(f"  [+] Loaded {len(voynich_pages_data)} Voynich folios (A+B+C) from cache. Skipping Voynich extraction!")
+                do_voynich = False
+            else:
+                voynich_pages_data = []
+                print("  [i] Cached Voynich folios missing B/C models; running 3-model enrichment...")
         except Exception as e:
             print(f"[-] Error loading cached Voynich data: {e}")
 
@@ -453,11 +554,23 @@ def main():
                 except Exception as e:
                     print(f"  [-] Error on {f_id}: {e}")
 
-        # Sort pages in canonical sequence
-        voynich_pages_data.sort(key=lambda p: p["page_id"])
+        # Sort pages in canonical codicological sequence and attach codicology metadata
+        voynich_pages_data.sort(key=lambda p: natural_folio_sort_key(p["page_id"]))
+        cod_reg = build_folio_codicology_registry([p["page_id"] for p in voynich_pages_data])
+        for idx_p, vp in enumerate(voynich_pages_data):
+            c_info = cod_reg.get(vp["page_id"], {})
+            vp["quire_id"] = c_info.get("quire", "")
+            vp["section"] = c_info.get("section", "")
+            vp["singulion_id"] = c_info.get("singulion_id", "")
+            vp["conjoint_leaf"] = c_info.get("conjoint_leaf")
+            vp["codex_index"] = c_info.get("codex_index", idx_p + 1)
+            vp["ld_index"] = c_info.get("ld_index", idx_p + 1)
+            vp["notes"] = c_info.get("notes", "")
+
         print(f"[*] Inducing Voynich Alphabet Catalogue across {len(all_voynich_glyphs)} extracted glyphs...")
-        builder_v = GlyphCatalogue(target_alphabet_size=28)
-        voynich_catalogue = builder_v.build_catalogue(all_voynich_glyphs, corpus_type="voynich")
+        v_scale = MetricScaleCalibration(manuscript_type="voynich", image_height_px=1800, image_width_px=1272)
+        builder_v = GlyphCatalogue(target_alphabet_size=35)
+        voynich_catalogue = builder_v.build_catalogue(all_voynich_glyphs, corpus_type="voynich", scale_calib=v_scale)
         builder_v.export_catalogue_json(voynich_catalogue, base_out / "voynich" / "voynich_alphabet_catalogue.json")
         print(f"  [+] Voynich Alphabet: {voynich_catalogue['canonical_alphabet_size']} canonical archetypes.")
 
@@ -530,8 +643,9 @@ def main():
                 sync_to_gcs(base_out / "seraphinianus" / "pages", args.gcs_bucket, f"{args.gcs_prefix}/seraphinianus/pages")
 
             print(f"[*] Inducing Seraphinianus Alphabet Catalogue across {len(all_serafini_glyphs)} sample glyphs...")
+            s_scale = MetricScaleCalibration(manuscript_type="seraphinianus", image_height_px=2206, image_width_px=1600)
             builder_s = GlyphCatalogue(target_alphabet_size=52)
-            serafini_catalogue = builder_s.build_catalogue(all_serafini_glyphs, corpus_type="seraphinianus")
+            serafini_catalogue = builder_s.build_catalogue(all_serafini_glyphs, corpus_type="seraphinianus", scale_calib=s_scale)
             builder_s.export_catalogue_json(serafini_catalogue, base_out / "seraphinianus" / "seraphinianus_alphabet_catalogue.json")
             print(f"  [+] Seraphinianus Alphabet: {serafini_catalogue['canonical_alphabet_size']} canonical archetypes.")
 
@@ -548,14 +662,18 @@ def main():
                         "page_img_rel": d.get("page_img_rel", f"seraphinianus/pages/{p_id}.jpg"),
                         "json_rel": f"seraphinianus/pages/{p_id}.json",
                         "image_width": d.get("image_width", 1600),
-                        "image_height": d.get("image_height", 2400),
+                        "image_height": d.get("image_height", 2206),
                         "line_count": d.get("line_count", len(d.get("lines", []))),
                         "word_count": d.get("word_count", len(d.get("words", []))),
                         "glyph_count": d.get("glyph_count", len(d.get("glyphs", []))),
+                        "glyph_count_neural_pca": d.get("glyph_count_neural_pca", len(d.get("glyphs_neural_pca", []))),
+                        "glyph_count_hybrid_consensus": d.get("glyph_count_hybrid_consensus", len(d.get("glyphs_hybrid_consensus", []))),
                         "yield_report": d.get("yield_report", {}),
                         "lines": d.get("lines", []) if is_preload else [],
                         "words": d.get("words", []) if is_preload else [],
                         "glyphs": d.get("glyphs", []) if is_preload else [],
+                        "glyphs_neural_pca": d.get("glyphs_neural_pca", []) if is_preload else [],
+                        "glyphs_hybrid_consensus": d.get("glyphs_hybrid_consensus", []) if is_preload else [],
                     })
                 except Exception:
                     pass
@@ -565,10 +683,18 @@ def main():
     # -------------------------------------------------------------
     try:
         from scripts.generate_full_glyph_corpus_and_explorer import generate_explorer_html
+        from scripts.build_dynamic_grand_explorer import clean_catalogue_for_embed
     except ImportError:
         from generate_full_glyph_corpus_and_explorer import generate_explorer_html
+        from build_dynamic_grand_explorer import clean_catalogue_for_embed
     explorer_path = base_out / "grand_glyph_explorer.html"
-    generate_explorer_html(voynich_pages_data, voynich_catalogue, serafini_pages_data, serafini_catalogue, explorer_path)
+    generate_explorer_html(
+        voynich_pages_data,
+        clean_catalogue_for_embed(voynich_catalogue),
+        serafini_pages_data,
+        clean_catalogue_for_embed(serafini_catalogue),
+        explorer_path,
+    )
 
     # -------------------------------------------------------------
     # 5. Optional GCS Synchronization

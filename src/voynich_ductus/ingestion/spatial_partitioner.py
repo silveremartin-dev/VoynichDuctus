@@ -62,6 +62,7 @@ class SpatialWordPartitioner:
 
             word_cores.append({
                 "idx": idx,
+                "line_id": w.get("line_id", ""),
                 "bbox": [y0, x0, y1, x1],
                 "core_sub": core_sub,
                 "cy": (y0 + y1) / 2.0,
@@ -85,8 +86,10 @@ class SpatialWordPartitioner:
         N = len(words)
         for i in range(N):
             b1 = word_cores[i]["bbox"]
+            l1 = word_cores[i]["line_id"]
             for j in range(i + 1, N):
                 b2 = word_cores[j]["bbox"]
+                l2 = word_cores[j]["line_id"]
                 # Overlap test: [y0, x0, y1, x1]
                 oy0 = max(b1[0], b2[0])
                 ox0 = max(b1[1], b2[1])
@@ -98,19 +101,18 @@ class SpatialWordPartitioner:
                     cy1, cx1 = word_cores[i]["cy"], word_cores[i]["cx"]
                     cy2, cx2 = word_cores[j]["cy"], word_cores[j]["cx"]
                     
-                    # Split contested region along perpendicular bisector / distance
-                    yy, xx = np.mgrid[oy0:oy1, ox0:ox1]
-                    d1 = (yy - cy1) ** 2 + (xx - cx1) ** 2
-                    d2 = (yy - cy2) ** 2 + (xx - cx2) ** 2
+                    # Determine whether words are on the same line or on different lines:
+                    # Words on different lines (l1 != l2 when line_id is known, or vertical offset >= 0.45 * min height)
+                    # must NEVER clip each other horizontally!
+                    h1 = max(1, b1[2] - b1[0])
+                    h2 = max(1, b2[2] - b2[0])
+                    if l1 and l2:
+                        same_line = (l1 == l2)
+                    else:
+                        same_line = (abs(cy1 - cy2) < 0.45 * min(h1, h2))
                     
-                    # Pixels closer to word i migrate to word i, closer to word j migrate to j
-                    zone_i = (d1 <= d2)
-                    zone_j = ~zone_i
-                    
-                    # Adjust bounding boxes horizontally or vertically depending on layout
-                    # If words are on the same line (primarily horizontal relationship):
-                    if abs(cy1 - cy2) < abs(cx1 - cx2):
-                        mid_x = int(round((cx1 + cx2) / 2.0))
+                    if same_line:
+                        mid_x = int(round((b1[3] + b2[1]) / 2.0)) if cx1 < cx2 else int(round((b2[3] + b1[1]) / 2.0))
                         if cx1 < cx2:
                             b1[3] = min(b1[3], mid_x)
                             b2[1] = max(b2[1], mid_x)
@@ -118,8 +120,8 @@ class SpatialWordPartitioner:
                             b2[3] = min(b2[3], mid_x)
                             b1[1] = max(b1[1], mid_x)
                     else:
-                        # Words on adjacent lines (primarily vertical relationship):
-                        mid_y = int(round((cy1 + cy2) / 2.0))
+                        # Words on adjacent lines (vertical relationship): split vertically along the shared horizontal seam
+                        mid_y = int(round((b1[2] + b2[0]) / 2.0)) if cy1 < cy2 else int(round((b2[2] + b1[0]) / 2.0))
                         if cy1 < cy2:
                             b1[2] = min(b1[2], mid_y)
                             b2[0] = max(b2[0], mid_y)

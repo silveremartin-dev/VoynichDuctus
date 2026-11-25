@@ -44,6 +44,17 @@ class MetricScaleCalibration:
     TALL_GALLOWS_MIN_HEIGHT_MM: float = 3.40 # 34 tenths of mm (hastes, ascenders, d, k, t, gallows)
     WIDE_BENCH_MIN_WIDTH_MM: float = 3.40   # 34 tenths of mm (horizontal compound gallows, ligatures)
 
+    # Quill nib & intra-word ligature decomposition physical thresholds:
+    QUILL_NIB_WIDTH_MM: float = 0.45        # 4.5 tenths of mm (standard 15th-century beveled quill stroke width)
+    SINGLE_GLYPH_MAX_WIDTH_MM: float = 3.50 # 35 tenths of mm (maximum width of an unsplit single character)
+    LIGATURE_VALLEY_MIN_PITCH_MM: float = 1.45 # 14.5 tenths of mm (minimum center-to-center pitch between cut letters)
+    LIGATURE_PEAK_WINDOW_MM: float = 1.80   # 18 tenths of mm (horizontal window for peak-to-valley ink dip ratio)
+    MIN_LOOP_HOLE_AREA_MM2: float = 0.18    # 0.18 mm^2 (~12 px^2 at 8 px/mm: minimum enclosed ink loop cavity)
+    MIN_LOOP_HOLE_HEIGHT_MM: float = 0.50   # 5 tenths of mm (minimum vertical opening of a genuine loop)
+    MIN_LOOP_HOLE_WIDTH_MM: float = 0.38    # 3.8 tenths of mm (minimum horizontal opening of a genuine loop)
+    INTRA_WORD_BRIDGE_MM: float = 2.10      # 21 tenths of mm (max inter-letter gap inside a single word hull)
+    INTRA_GLYPH_BRIDGE_MM: float = 1.10     # 11 tenths of mm (max multi-stroke gap inside a single glyph hull)
+
     # Document layout physical metric standards:
     LINE_PITCH_MEDIEVAL_MM: float = 6.50    # 65 tenths of mm (~6.5 mm typical medieval ruling pitch)
     WORD_SPACE_GAP_MM: float = 1.10         # 11 tenths of mm (inter-word physical whitespace)
@@ -165,6 +176,51 @@ class MetricScaleCalibration:
     def macro_drawing_area_px(self) -> float:
         """Area threshold (px^2) separating text lines/glyphs from macro drawings and miniatures."""
         return self.area_mm2_to_px2(self.MACRO_DRAWING_MIN_AREA_MM2)
+
+    @property
+    def quill_nib_width_px(self) -> float:
+        """Physical beveled quill nib stroke width in pixels."""
+        return max(2.0, self.mm_to_px(self.QUILL_NIB_WIDTH_MM))
+
+    @property
+    def single_glyph_max_width_px(self) -> int:
+        """Maximum width (px) of an intact single character before ligature valley analysis."""
+        return max(16, int(round(self.mm_to_px(self.SINGLE_GLYPH_MAX_WIDTH_MM))))
+
+    @property
+    def ligature_valley_min_pitch_px(self) -> int:
+        """Minimum horizontal pitch (px) between consecutive character cuts inside a word."""
+        return max(8, int(round(self.mm_to_px(self.LIGATURE_VALLEY_MIN_PITCH_MM))))
+
+    @property
+    def ligature_peak_window_px(self) -> int:
+        """Horizontal window (px) for measuring local ink height peaks around a ligature valley."""
+        return max(8, int(round(self.mm_to_px(self.LIGATURE_PEAK_WINDOW_MM))))
+
+    @property
+    def min_loop_hole_area_px(self) -> int:
+        """Minimum enclosed area (px^2) for a topological hole to be certified as a scribal loop rather than vellum grain noise."""
+        return max(6, int(round(self.area_mm2_to_px2(self.MIN_LOOP_HOLE_AREA_MM2))))
+
+    @property
+    def min_loop_hole_height_px(self) -> int:
+        """Minimum vertical opening (px) for a certified topological loop."""
+        return max(3, int(round(self.mm_to_px(self.MIN_LOOP_HOLE_HEIGHT_MM))))
+
+    @property
+    def min_loop_hole_width_px(self) -> int:
+        """Minimum horizontal opening (px) for a certified topological loop."""
+        return max(2, int(round(self.mm_to_px(self.MIN_LOOP_HOLE_WIDTH_MM))))
+
+    @property
+    def intra_word_bridge_px(self) -> int:
+        """Morphological horizontal closing span (px) bridging disconnected letters inside a single word polygon."""
+        return max(7, int(round(self.mm_to_px(self.INTRA_WORD_BRIDGE_MM)))) | 1
+
+    @property
+    def intra_glyph_bridge_px(self) -> int:
+        """Morphological horizontal closing span (px) bridging multi-stroke components inside a single glyph polygon."""
+        return max(5, int(round(self.mm_to_px(self.INTRA_GLYPH_BRIDGE_MM)))) | 1
 
     def get_summary_dict(self) -> Dict[str, Any]:
         """Returns structured metadata dictionary documenting calibration parameters."""

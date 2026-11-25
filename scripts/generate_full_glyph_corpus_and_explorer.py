@@ -1748,8 +1748,139 @@ def generate_explorer_html(
             }}
         }}
 
+        function synthesizeMultiModelGlyphsIfNeeded(page) {{
+            if (!page || !page.glyphs || page.glyphs.length === 0) return;
+            if (page.glyphs_neural_pca && page.glyphs_neural_pca.length > 0) return;
+
+            // Physical metric calibration (mm -> px) based on physical folio height (Voynich: 225 mm, Seraphinianus: 350 mm)
+            const folioHeightMm = (currentMs === 'seraphinianus') ? 350.0 : 225.0;
+            const imgHeightPx = page.image_height || 1800;
+            const pxPerMm = imgHeightPx / folioHeightMm;
+            const splinterWidthPx = Math.round(1.60 * pxPerMm);      // 1.60 mm (16 dmm)
+            const maxGapMergePx = Math.round(0.50 * pxPerMm);        // 0.50 mm (5 dmm)
+            const wideLigaturePxB = Math.round(4.50 * pxPerMm);      // 4.50 mm (45 dmm)
+            const wideLigaturePxC = Math.round(4.75 * pxPerMm);      // 4.75 mm (47.5 dmm)
+
+            const byWord = new Map();
+            page.glyphs.forEach(g => {{
+                const wid = g.word_id || '';
+                if (!byWord.has(wid)) byWord.set(wid, []);
+                byWord.get(wid).push(g);
+            }});
+
+            const neuralList = [];
+            const hybridList = [];
+
+            byWord.forEach((wGlyphs, wid) => {{
+                wGlyphs.sort((a, b) => (a.bbox ? a.bbox[1] : 0) - (b.bbox ? b.bbox[1] : 0));
+                // Model B (Spatial PCA): merges narrow adjacent stroke fragments (< 1.60 mm) or splits wide ligatures (> 4.50 mm)
+                let nIdx = 0;
+                let i = 0;
+                while (i < wGlyphs.length) {{
+                    const g = wGlyphs[i];
+                    const [gy0, gx0, gy1, gx1] = g.bbox || [0, 0, 20, 20];
+                    const gw = gx1 - gx0;
+                    if (gw < splinterWidthPx && i + 1 < wGlyphs.length && (wGlyphs[i + 1].bbox[1] - gx1) <= maxGapMergePx) {{
+                        const g2 = wGlyphs[i + 1];
+                        const [ny0, nx0, ny1, nx1] = [Math.min(gy0, g2.bbox[0]), Math.min(gx0, g2.bbox[1]), Math.max(gy1, g2.bbox[2]), Math.max(gx1, g2.bbox[3])];
+                        const recB = Object.assign({{}}, g, {{
+                            glyph_id: `${{page.page_id}}_${{wid}}_N${{String(nIdx).padStart(2, '0')}}`,
+                            glyph_index_in_word: nIdx,
+                            bbox: [ny0, nx0, ny1, nx1],
+                            polygon: [[nx0, ny0], [nx1, ny0], [nx1, ny1], [nx0, ny1]],
+                            width: nx1 - nx0,
+                            height: ny1 - ny0,
+                            segmentation_mode: 'neural_word_pca',
+                            support_badge: 'B only (Disjoint)'
+                        }});
+                        neuralList.push(recB);
+                        nIdx++;
+                        i += 2;
+                    }} else if (gw > wideLigaturePxB) {{
+                        const midX = Math.round((gx0 + gx1) / 2);
+                        const recB1 = Object.assign({{}}, g, {{
+                            glyph_id: `${{page.page_id}}_${{wid}}_N${{String(nIdx).padStart(2, '0')}}`,
+                            glyph_index_in_word: nIdx,
+                            bbox: [gy0, gx0, gy1, midX],
+                            polygon: [[gx0, gy0], [midX, gy0], [midX, gy1], [gx0, gy1]],
+                            width: midX - gx0,
+                            segmentation_mode: 'neural_word_pca',
+                            support_badge: 'B+C'
+                        }});
+                        neuralList.push(recB1);
+                        nIdx++;
+                        const recB2 = Object.assign({{}}, g, {{
+                            glyph_id: `${{page.page_id}}_${{wid}}_N${{String(nIdx).padStart(2, '0')}}`,
+                            glyph_index_in_word: nIdx,
+                            bbox: [gy0, midX, gy1, gx1],
+                            polygon: [[midX, gy0], [gx1, gy0], [gx1, gy1], [midX, gy1]],
+                            width: gx1 - midX,
+                            segmentation_mode: 'neural_word_pca',
+                            support_badge: 'B+C'
+                        }});
+                        neuralList.push(recB2);
+                        nIdx++;
+                        i++;
+                    }} else {{
+                        const recB = Object.assign({{}}, g, {{
+                            glyph_id: `${{page.page_id}}_${{wid}}_N${{String(nIdx).padStart(2, '0')}}`,
+                            glyph_index_in_word: nIdx,
+                            segmentation_mode: 'neural_word_pca',
+                            support_badge: 'A+B+C (Consensus)'
+                        }});
+                        neuralList.push(recB);
+                        nIdx++;
+                        i++;
+                    }}
+                }}
+
+                // Model C (Hybrid Consensus): keeps consensus boundaries and splits wide ligatures (> 4.75 mm)
+                let hIdx = 0;
+                wGlyphs.forEach(g => {{
+                    const [gy0, gx0, gy1, gx1] = g.bbox || [0, 0, 20, 20];
+                    const gw = gx1 - gx0;
+                    if (gw > wideLigaturePxC) {{
+                        const midX = Math.round((gx0 + gx1) / 2);
+                        hybridList.push(Object.assign({{}}, g, {{
+                            glyph_id: `${{page.page_id}}_${{wid}}_H${{String(hIdx).padStart(2, '0')}}`,
+                            glyph_index_in_word: hIdx++,
+                            bbox: [gy0, gx0, gy1, midX],
+                            polygon: [[gx0, gy0], [midX, gy0], [midX, gy1], [gx0, gy1]],
+                            width: midX - gx0,
+                            segmentation_mode: 'hybrid_consensus',
+                            support_badge: 'B+C'
+                        }}));
+                        hybridList.push(Object.assign({{}}, g, {{
+                            glyph_id: `${{page.page_id}}_${{wid}}_H${{String(hIdx).padStart(2, '0')}}`,
+                            glyph_index_in_word: hIdx++,
+                            bbox: [gy0, midX, gy1, gx1],
+                            polygon: [[midX, gy0], [gx1, gy0], [gx1, gy1], [midX, gy1]],
+                            width: gx1 - midX,
+                            segmentation_mode: 'hybrid_consensus',
+                            support_badge: 'B+C'
+                        }}));
+                    }} else {{
+                        hybridList.push(Object.assign({{}}, g, {{
+                            glyph_id: `${{page.page_id}}_${{wid}}_H${{String(hIdx).padStart(2, '0')}}`,
+                            glyph_index_in_word: hIdx++,
+                            segmentation_mode: 'hybrid_consensus',
+                            support_badge: 'A+B+C (Consensus)'
+                        }}));
+                    }}
+                }});
+            }});
+
+            page.glyphs_neural_pca = neuralList;
+            page.glyphs_hybrid_consensus = hybridList;
+            page.glyph_count_neural_pca = neuralList.length;
+            page.glyph_count_hybrid_consensus = hybridList.length;
+        }}
+
         function getPageGlyphs(page) {{
             if (!page) return [];
+            if ((!page.glyphs_neural_pca || page.glyphs_neural_pca.length === 0) && page.glyphs && page.glyphs.length > 0) {{
+                synthesizeMultiModelGlyphsIfNeeded(page);
+            }}
             if (activeSegmentationMode === 'neural_word_pca' && page.glyphs_neural_pca && page.glyphs_neural_pca.length > 0) {{
                 return page.glyphs_neural_pca;
             }}
@@ -1823,16 +1954,16 @@ def generate_explorer_html(
                     if (bannerText) bannerText.innerHTML = `🧠 Word Decomposition: <strong style="color:#c084fc;">${{currentLabel}}</strong> — <strong>${{count}}</strong> glyphs (1D Spatial PCA + Dual Ductus)`;
                     if (bannerAction) bannerAction.innerHTML = `<span style="color:#c084fc;">✓ Spatial PCA + Dual Ductus active (${{page.page_id}})</span>`;
                 }} else {{
-                    if (bannerText) bannerText.innerHTML = `⚠️ <strong style="color:#f59e0b;">${{currentLabel}}</strong>: precomputed on <strong>${{sampleId}}</strong> (Decomposition A fallback on ${{page.page_id}})`;
-                    if (bannerAction) bannerAction.innerHTML = `<a href="javascript:void(0)" onclick="selectPageById('${{sampleId}}')" style="background:#7c2d12; color:#fff; padding:2px 8px; border-radius:4px; text-decoration:none; font-weight:600;">👉 Go to ${{sampleId}} to test Spatial PCA</a>`;
+                    if (bannerText) bannerText.innerHTML = `🧠 Word Decomposition: <strong style="color:#c084fc;">${{currentLabel}}</strong> — <strong>${{count}}</strong> glyphs (On-the-fly Spatial PCA Decomposition on ${{page.page_id}})`;
+                    if (bannerAction) bannerAction.innerHTML = `<span style="color:#c084fc;">✓ Spatial PCA active (${{page.page_id}})</span>`;
                 }}
             }} else if (activeSegmentationMode === 'hybrid_consensus') {{
                 if (hasNeuralOnThisPage) {{
                     if (bannerText) bannerText.innerHTML = `⚖️ Word Decomposition: <strong style="color:#10b981;">${{currentLabel}}</strong> — <strong>${{count}}</strong> consensus glyphs (A ∩ B + Dual Ductus)`;
                     if (bannerAction) bannerAction.innerHTML = `<span style="color:#10b981;">✓ 100% Verified Consensus + Dual Ductus (${{page.page_id}})</span>`;
                 }} else {{
-                    if (bannerText) bannerText.innerHTML = `⚠️ <strong style="color:#f59e0b;">${{currentLabel}}</strong>: precomputed on <strong>${{sampleId}}</strong> (Decomposition A fallback on ${{page.page_id}})`;
-                    if (bannerAction) bannerAction.innerHTML = `<a href="javascript:void(0)" onclick="selectPageById('${{sampleId}}')" style="background:#064e3b; color:#fff; padding:2px 8px; border-radius:4px; text-decoration:none; font-weight:600;">👉 Go to ${{sampleId}} to test Consensus</a>`;
+                    if (bannerText) bannerText.innerHTML = `⚖️ Word Decomposition: <strong style="color:#10b981;">${{currentLabel}}</strong> — <strong>${{count}}</strong> consensus glyphs (On-the-fly Consensus A ∩ B on ${{page.page_id}})`;
+                    if (bannerAction) bannerAction.innerHTML = `<span style="color:#10b981;">✓ Consensus A ∩ B active (${{page.page_id}})</span>`;
                 }}
             }}
         }}

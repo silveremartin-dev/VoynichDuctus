@@ -152,14 +152,25 @@ class NeuralWordDecomposition:
     def decompose_word(
         self,
         word_mask: np.ndarray,
-        expected_glyph_count: Optional[int] = None
+        expected_glyph_count: Optional[int] = None,
+        scale_calib: Optional[Any] = None
     ) -> List[Dict[str, Any]]:
         """
         Segments word into constituent glyphs by finding latent state transition boundaries
-        along the horizontal trajectory.
+        along the horizontal trajectory, using physical metric scale calibration (mm / 0.1 mm).
         """
         H, W = word_mask.shape[:2]
-        if W <= 8:
+        if scale_calib is not None:
+            min_pitch_px = scale_calib.ligature_valley_min_pitch_px
+            min_margin_px = max(6, int(round(scale_calib.mm_to_px(1.20))))
+            min_splinter_px = max(5, int(round(scale_calib.mm_to_px(0.95))))
+        else:
+            est_px_per_mm = max(3.0, H / 4.2)
+            min_pitch_px = max(8, int(round(1.45 * est_px_per_mm)))
+            min_margin_px = max(6, int(round(1.20 * est_px_per_mm)))
+            min_splinter_px = max(5, int(round(0.95 * est_px_per_mm)))
+
+        if W <= min_margin_px:
             return [{
                 "mask": word_mask,
                 "bbox_local": (0, 0, H, W),
@@ -178,11 +189,11 @@ class NeuralWordDecomposition:
             diffs[t] = float(np.linalg.norm(traj[t + 1] - traj[t - 1]))
 
         from scipy.signal import find_peaks
-        min_dist_eff = max(4, int(10 / max(1e-4, scale_x)))
-        peaks, _ = find_peaks(diffs, distance=min_dist_eff, prominence=float(np.mean(diffs) * 0.45))
+        min_dist_eff = max(5, int(round(min_pitch_px / max(1e-4, scale_x))))
+        peaks, _ = find_peaks(diffs, distance=min_dist_eff, prominence=float(np.mean(diffs) * 0.48))
 
         boundary_cols = [int(round(p * scale_x)) for p in peaks]
-        boundary_cols = [c for c in boundary_cols if 6 <= c <= W - 6]
+        boundary_cols = [c for c in boundary_cols if min_margin_px <= c <= W - min_margin_px]
 
         if expected_glyph_count is not None and expected_glyph_count >= 1:
             target_splits = expected_glyph_count - 1
@@ -207,6 +218,17 @@ class NeuralWordDecomposition:
             rmin, cmin = ink_pts.min(axis=0)
             rmax, cmax = ink_pts.max(axis=0) + 1
             area = int(len(ink_pts))
+            if (cmax - cmin) < min_splinter_px and len(glyphs) > 0:
+                # Merge tiny tail splinter (< 0.95 mm) into previous glyph
+                prev = glyphs[-1]
+                pr0, pc0, pr1, pc1 = prev["bbox_local"]
+                nr0, nc0 = min(pr0, int(rmin)), min(pc0, int(cmin))
+                nr1, nc1 = max(pr1, int(rmax)), max(pc1, int(cmax))
+                comb_m = word_mask[nr0:nr1, nc0:nc1].copy()
+                prev["mask"] = comb_m
+                prev["bbox_local"] = (nr0, nc0, nr1, nc1)
+                prev["area"] = int(np.sum(comb_m))
+                continue
 
             glyphs.append({
                 "mask": sub_m[rmin:rmax, cmin:cmax],
@@ -234,21 +256,39 @@ class HybridConsensusWordDecomposition:
     with kinetic ink-profile minima and topological hole protection.
     """
 
-    def __init__(self, tolerance_px: int = 4):
+    def __init__(self, tolerance_px: int = 4, tolerance_mm: float = 0.50):
         self.tolerance_px = tolerance_px
+        self.tolerance_mm = tolerance_mm
 
     def decompose_word_hybrid(
         self,
         word_mask: np.ndarray,
         option_a_glyphs: List[Dict[str, Any]],
         option_b_glyphs: List[Dict[str, Any]],
-        expected_glyph_count: Optional[int] = None
+        expected_glyph_count: Optional[int] = None,
+        scale_calib: Optional[Any] = None
     ) -> List[Dict[str, Any]]:
         """
-        Fuses Decomposition A and Decomposition B into consensus boundaries.
+        Fuses Decomposition A and Decomposition B into consensus boundaries using physical metric units (mm).
         """
         H, W = word_mask.shape[:2]
-        if W <= 8:
+        if scale_calib is not None:
+            tol_px = max(2, int(round(scale_calib.mm_to_px(self.tolerance_mm))))
+            min_pitch_px = scale_calib.ligature_valley_min_pitch_px
+            min_margin_px = max(6, int(round(scale_calib.mm_to_px(1.20))))
+            min_hole_area = scale_calib.min_loop_hole_area_px
+            min_hole_h = scale_calib.min_loop_hole_height_px
+            min_hole_w = scale_calib.min_loop_hole_width_px
+        else:
+            est_px_per_mm = max(3.0, H / 4.2)
+            tol_px = self.tolerance_px
+            min_pitch_px = max(8, int(round(1.45 * est_px_per_mm)))
+            min_margin_px = max(6, int(round(1.20 * est_px_per_mm)))
+            min_hole_area = max(6, int(round(0.18 * (est_px_per_mm ** 2))))
+            min_hole_h = max(3, int(round(0.50 * est_px_per_mm)))
+            min_hole_w = max(2, int(round(0.38 * est_px_per_mm)))
+
+        if W <= min_margin_px:
             return [{
                 "mask": word_mask,
                 "bbox_local": (0, 0, H, W),
@@ -267,8 +307,12 @@ class HybridConsensusWordDecomposition:
         lbl_h, num_h = label(holes)
         forbidden_cols = set()
         for h_idx in range(1, num_h + 1):
-            h_cols = np.where(np.any(lbl_h == h_idx, axis=0))[0]
-            if len(h_cols) >= 2:
+            hm = (lbl_h == h_idx)
+            if np.sum(hm) < min_hole_area:
+                continue
+            h_cols = np.where(np.any(hm, axis=0))[0]
+            h_rows = np.where(np.any(hm, axis=1))[0]
+            if len(h_cols) >= min_hole_w and len(h_rows) >= min_hole_h and (h_cols.max() - h_cols.min() + 1) >= min_hole_w and (h_rows.max() - h_rows.min() + 1) >= min_hole_h:
                 for fc in range(max(0, int(h_cols.min()) - 1), min(W, int(h_cols.max()) + 2)):
                     forbidden_cols.add(fc)
 
@@ -281,26 +325,26 @@ class HybridConsensusWordDecomposition:
         for ca in cuts_a:
             if ca in forbidden_cols:
                 continue
-            matched_b = [cb for cb in cuts_b if abs(ca - cb) <= self.tolerance_px and cb not in used_b]
+            matched_b = [cb for cb in cuts_b if abs(ca - cb) <= tol_px and cb not in used_b]
             if matched_b:
                 cb_best = matched_b[0]
                 used_b.add(cb_best)
                 consensus_cuts.append(int(round((ca + cb_best) / 2.0)))
             else:
-                if col_proj[min(W - 1, ca)] <= 0.70 * max_proj:
+                if col_proj[min(W - 1, ca)] <= 0.65 * max_proj:
                     consensus_cuts.append(ca)
 
         for cb in cuts_b:
             if cb in used_b or cb in forbidden_cols:
                 continue
-            if col_proj[min(W - 1, cb)] <= 0.70 * max_proj:
+            if col_proj[min(W - 1, cb)] <= 0.65 * max_proj:
                 consensus_cuts.append(cb)
 
-        consensus_cuts = sorted(list(set(c for c in consensus_cuts if 6 <= c <= W - 6)))
+        consensus_cuts = sorted(list(set(c for c in consensus_cuts if min_margin_px <= c <= W - min_margin_px)))
 
         filtered_cuts = []
         for c in consensus_cuts:
-            if all(abs(c - fc) >= 8 for fc in filtered_cuts):
+            if all(abs(c - fc) >= min_pitch_px for fc in filtered_cuts):
                 filtered_cuts.append(c)
         filtered_cuts.sort()
 

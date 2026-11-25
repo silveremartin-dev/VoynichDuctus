@@ -306,7 +306,7 @@ def reprocess_seraphinianus(base_dir: Path):
             glyph_idx += 1
 
         # OPTION B: Décomposition Neuronale de Mots (PCA / NMF)
-        neural_comps = neural_decomposer.decompose_word(w_mask)
+        neural_comps = neural_decomposer.decompose_word(w_mask, scale_calib=scale_calib)
         n_idx = 0
         for comp in neural_comps:
             ng_mask = comp["mask"].astype(bool)
@@ -367,7 +367,7 @@ def reprocess_seraphinianus(base_dir: Path):
             n_idx += 1
 
         # OPTION C: Hybride Neuro-Cinématique & Consensus
-        hybrid_comps = hybrid_decomposer.decompose_word_hybrid(w_mask, assembled, neural_comps)
+        hybrid_comps = hybrid_decomposer.decompose_word_hybrid(w_mask, assembled, neural_comps, scale_calib=scale_calib)
         h_idx = 0
         for comp in hybrid_comps:
             hg_mask = comp["mask"].astype(bool)
@@ -480,7 +480,51 @@ def reprocess_voynich(base_dir: Path):
     page_data["image_width"] = int(W_img)
     page_data["image_height"] = int(H_img)
 
-    # 1. Enforce strict disjoint spatial partitioning on Voynich words (0 overlaps)
+    scale_calib = MetricScaleCalibration(manuscript_type="voynich", image_height_px=H_img, image_width_px=W_img)
+    binarizer = Binarizer()
+    segmenter = GlyphSegmenter(scale_calib=scale_calib)
+    tracker = CalligraphicVectorizer(nib_angle_deg=40.0)
+    skel_eng = Skeletonizer()
+    graph_ext = StrokeGraphExtractor()
+    resolver = JunctionResolver()
+
+    # 1. Restore canonical Voynichese Rosetta word bounding boxes so zero words are truncated horizontally
+    try:
+        from PIL import Image
+        from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader
+        rosetta_loader = VoynicheseRosettaLoader()
+        pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        r_words = rosetta_loader.extract_aligned_words("f1r", scan_image=pil_img, prefer_js=True)
+        valid_r_words = [rw for rw in r_words if rw.bbox_scan is not None]
+        if len(valid_r_words) == len(raw_words):
+            line_clusters = []
+            curr_cluster = []
+            for rw in valid_r_words:
+                if not curr_cluster:
+                    curr_cluster.append(rw)
+                else:
+                    prev_rw = curr_cluster[-1]
+                    if rw.x_xml < prev_rw.x_xml - 35 or (rw.y_xml - prev_rw.y_xml) > 25:
+                        line_clusters.append(curr_cluster)
+                        curr_cluster = [rw]
+                    else:
+                        curr_cluster.append(rw)
+            if curr_cluster:
+                line_clusters.append(curr_cluster)
+            for lc in line_clusters:
+                lc.sort(key=lambda w: w.bbox_scan[0])
+            sorted_rw = [rw for lc in line_clusters for rw in lc]
+            for w_dict, rw in zip(raw_words, sorted_rw):
+                rx0, ry0, rx1, ry1 = [int(v) for v in rw.bbox_scan]
+                rx0, ry0 = max(0, min(W_img - 1, rx0)), max(0, min(H_img - 1, ry0))
+                rx1, ry1 = max(rx0 + 1, min(W_img, rx1)), max(ry0 + 1, min(H_img, ry1))
+                w_dict["rosetta_bbox"] = [ry0, rx0, ry1, rx1]
+                w_dict["bbox"] = [ry0, rx0, ry1, rx1]
+            print(f"  [+] Restored {len(raw_words)} canonical Voynichese Rosetta bounding boxes on f1r.")
+    except Exception as e_ros:
+        print(f"  [!] Notice: could not reload Rosetta boxes: {e_ros}")
+
+    # Enforce strict disjoint spatial partitioning on Voynich words (0 overlaps, line-aware)
     words = SpatialWordPartitioner.resolve_disjoint_word_partitions(raw_words, (H_img, W_img))
     page_data["words"] = words
     print(f"  [+] Voynich f1r: Spatial disjoint partitioning enforced on {len(words)} words (0 overlaps).")
@@ -500,17 +544,6 @@ def reprocess_voynich(base_dir: Path):
 
     hybrid_decomposer = HybridNeuroKinematicDecomposer()
 
-    scale_calib = MetricScaleCalibration(manuscript_type="voynich", image_height_px=H_img, image_width_px=W_img)
-    binarizer = Binarizer()
-    segmenter = GlyphSegmenter(scale_calib=scale_calib)
-    tracker = CalligraphicVectorizer(nib_angle_deg=40.0)
-    skel_eng = Skeletonizer()
-    graph_ext = StrokeGraphExtractor()
-    resolver = JunctionResolver()
-    skel_eng = Skeletonizer()
-    graph_ext = StrokeGraphExtractor()
-    resolver = JunctionResolver()
-
     regenerated_glyphs: List[Dict[str, Any]] = []
     neural_glyphs: List[Dict[str, Any]] = []
     hybrid_glyphs: List[Dict[str, Any]] = []
@@ -527,11 +560,17 @@ def reprocess_voynich(base_dir: Path):
             continue
 
         w_patch = img[wy0:wy1, wx0:wx1]
-        gray_w = cv2.cvtColor(w_patch, cv2.COLOR_BGR2GRAY)
-        w_mask = binarizer.binarize_manuscript(gray_w, contrast_stretch=True).astype(bool)
-        if np.sum(w_mask) < 25 or np.sum(w_mask) > (w_mask.size * 0.85):
+        w_patch_rgb = cv2.cvtColor(w_patch, cv2.COLOR_BGR2RGB)
+        w_mask = segmenter.binarize_word_crop_hysteresis(w_patch_rgb).astype(bool)
+        if np.sum(w_mask) < 16 or np.sum(w_mask) > (w_mask.size * 0.85):
+            gray_w = cv2.cvtColor(w_patch, cv2.COLOR_BGR2GRAY)
             t_w = threshold_otsu(gray_w)
             w_mask = (gray_w < t_w).astype(bool)
+
+        # Recompute complete word ink polygon so Layer 3 (Lexical Ink Words) encloses 100% of letters
+        w_poly = segmenter.compute_ink_polygon(w_mask, offset=(wy0, wx0))
+        if w_poly:
+            w["polygon"] = w_poly
 
         eva_text = w.get("eva_text", "")
         eva_tokens = tokenize_eva_word(eva_text)
@@ -655,7 +694,7 @@ def reprocess_voynich(base_dir: Path):
             glyph_idx += 1
 
         # OPTION B: Décomposition Neuronale de Mots (PCA / NMF) (Purely data-driven)
-        neural_comps = neural_decomposer.decompose_word(w_mask, expected_glyph_count=None)
+        neural_comps = neural_decomposer.decompose_word(w_mask, expected_glyph_count=None, scale_calib=scale_calib)
         n_idx = 0
         for comp in neural_comps:
             ng_mask = comp["mask"].astype(bool)
@@ -716,7 +755,7 @@ def reprocess_voynich(base_dir: Path):
             n_idx += 1
 
         # OPTION C: Hybride Neuro-Cinématique & Consensus (Purely data-driven)
-        hybrid_comps = hybrid_decomposer.decompose_word_hybrid(w_mask, assembled, neural_comps, expected_glyph_count=None)
+        hybrid_comps = hybrid_decomposer.decompose_word_hybrid(w_mask, assembled, neural_comps, expected_glyph_count=None, scale_calib=scale_calib)
         h_idx = 0
         for comp in hybrid_comps:
             hg_mask = comp["mask"].astype(bool)
@@ -787,6 +826,20 @@ def reprocess_voynich(base_dir: Path):
     cat_builder = GlyphCatalogue(target_alphabet_size=35)
     cat_data = cat_builder.build_catalogue(regenerated_glyphs, corpus_type="voynich", scale_calib=scale_calib)
     cat_builder.export_catalogue_json(cat_data, cat_json_path)
+
+    # Propagate canonical_type from Option A to Option B and Option C glyphs by spatial overlap
+    a_by_word: Dict[str, List[Dict[str, Any]]] = {}
+    for g in regenerated_glyphs:
+        a_by_word.setdefault(g.get("word_id", ""), []).append(g)
+    for other_list in (neural_glyphs, hybrid_glyphs):
+        for og in other_list:
+            cands = a_by_word.get(og.get("word_id", ""), [])
+            if cands:
+                ocx = (og["bbox"][1] + og["bbox"][3]) / 2.0
+                best_a = min(cands, key=lambda ca: abs((ca["bbox"][1] + ca["bbox"][3]) / 2.0 - ocx))
+                og["canonical_type"] = best_a.get("canonical_type", "G01")
+            else:
+                og["canonical_type"] = "G01"
 
     for g in regenerated_glyphs:
         g.pop("mask", None)

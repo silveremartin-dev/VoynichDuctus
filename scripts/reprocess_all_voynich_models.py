@@ -1,314 +1,183 @@
 """
-Ultra-Fast Batch Multi-Model Glyph Reprocessor for VoynichDuctus.
-Computes all 3 segmentation models across Voynich folios:
-1. Quill Ductus (heuristic_calligraphic, 40° nib bevel)
-2. Neural Word PCA (neural_word_pca, horizontal spatial basis functions)
-3. Hybrid Consensus (hybrid_consensus, neuro-kinematic arbitration)
+Gentle Multi-Core Batch Multi-Model Glyph Reprocessor for VoynichDuctus.
+Computes all 3 segmentation models (A, B, C) with MetricScaleCalibration (mm/0.1 mm)
+and consensus ductus reuse across Voynich and/or Codex Seraphinianus pages.
+
+Designed to stay non-blocking on shared local workstations:
+- Defaults to half the available CPU cores (e.g. 2 workers on a 4-core CPU).
+- Sets BELOW_NORMAL OS priority and single-threaded BLAS/OpenCV per worker
+  so other concurrent workloads remain responsive.
 """
 
-import sys
-import os
+import argparse
 import json
+import os
+import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Tuple
+
 import cv2
-import numpy as np
 
 root_dir = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root_dir / "src"))
 
-from voynich_ductus.ingestion.binarization import Binarizer
-from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
-from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
-from voynich_ductus.embeddings.word_decomposition import (
-    NeuralWordDecomposition,
-    HybridConsensusWordDecomposition,
-    cross_evaluate_options_consensus
+from voynich_ductus.embeddings.multimodel_pipeline import (
+    configure_gentle_worker_environment,
+    enrich_page_multimodel,
 )
-from voynich_ductus.vectorizer.calligraphic_tracker import CalligraphicVectorizer
-from voynich_ductus.vectorizer.export_format import VectorExporter
-from voynich_ductus.clustering.glyph_catalogue import GlyphCatalogue
 from voynich_ductus.ingestion.codicology import natural_folio_sort_key
 
 
-def reprocess_page(json_path: Path, img_path: Path, binarizer, segmenter, scale_calib, neural_decomposer, hybrid_decomposer):
-    tracker = CalligraphicVectorizer(nib_angle_deg=40.0)
+def _worker_process_page(
+    json_path_str: str,
+    img_path_str: str,
+    manuscript_type: str,
+    low_priority: bool,
+    force: bool,
+) -> Tuple[str, int, int, int, float, bool]:
+    """ProcessPool worker processing a single page with gentle CPU priority."""
+    configure_gentle_worker_environment(low_priority=low_priority)
+    json_path = Path(json_path_str)
+    img_path = Path(img_path_str)
+    t0 = time.time()
+
     with open(json_path, "r", encoding="utf-8") as f:
         page_data = json.load(f)
 
-    page_id = page_data.get("page_id", json_path.stem)
-    words = page_data.get("words", [])
-    if not words:
-        return 0, 0, 0
+    if (
+        not force
+        and page_data.get("glyphs")
+        and page_data.get("glyphs_neural_pca")
+        and page_data.get("glyphs_hybrid_consensus")
+    ):
+        return (
+            json_path.stem,
+            len(page_data["glyphs"]),
+            len(page_data["glyphs_neural_pca"]),
+            len(page_data["glyphs_hybrid_consensus"]),
+            time.time() - t0,
+            True,
+        )
+
+    if not page_data.get("words"):
+        return json_path.stem, 0, 0, 0, time.time() - t0, True
 
     img = cv2.imread(str(img_path))
     if img is None:
-        return 0, 0, 0
-    H_img, W_img = img.shape[:2]
+        return json_path.stem, 0, 0, 0, time.time() - t0, True
 
-    existing_quill = page_data.get("glyphs", [])
-    quill_by_word = {}
-    for g in existing_quill:
-        wid = g.get("word_id")
-        if wid not in quill_by_word:
-            quill_by_word[wid] = []
-        quill_by_word[wid].append(g)
-
-    # Fast calibration on representative word patches
-    word_patches = []
-    for w in words[:35]:
-        wb = w.get("bbox", [])
-        if len(wb) == 4:
-            y0, x0, y1, x1 = [int(v) for v in wb]
-            if y1 > y0 + 4 and x1 > x0 + 4:
-                word_patches.append(img[y0:y1, x0:x1])
-
-    if word_patches:
-        neural_decomposer.fit_on_word_corpus(word_patches)
-
-    neural_glyphs: List[Dict[str, Any]] = []
-    hybrid_glyphs: List[Dict[str, Any]] = []
-
-    for w in words:
-        w_bbox = w.get("bbox")
-        if not w_bbox or len(w_bbox) != 4:
-            continue
-        wy0, wx0, wy1, wx1 = [int(v) for v in w_bbox]
-        wy0, wx0 = max(0, wy0), max(0, wx0)
-        wy1, wx1 = min(H_img, wy1), min(W_img, wx1)
-        if wy1 <= wy0 + 2 or wx1 <= wx0 + 2:
-            continue
-
-        w_patch = img[wy0:wy1, wx0:wx1]
-        gray_w = cv2.cvtColor(w_patch, cv2.COLOR_BGR2GRAY)
-        try:
-            w_mask = binarizer.binarize(gray_w).astype(bool)
-            if np.sum(w_mask) < 25:
-                w_mask = (gray_w < 128).astype(bool)
-        except Exception:
-            w_mask = (gray_w < 128).astype(bool)
-
-        line_id = w.get("line_id", "L00")
-        word_id = w.get("word_id", f"{line_id}_W00")
-        w_quill = quill_by_word.get(word_id, [])
-
-        opt_a_local = []
-        for g in w_quill:
-            gb = g.get("bbox", [wy0, wx0, wy1, wx1])
-            opt_a_local.append({
-                "bbox_local": (max(0, gb[0] - wy0), max(0, gb[1] - wx0), min(wy1 - wy0, gb[2] - wy0), min(wx1 - wx0, gb[3] - wx0)),
-                "quill_glyph": g
-            })
-
-        # Model 2: Neural Word PCA
-        neural_comps = neural_decomposer.decompose_word(w_mask)
-        n_idx = 0
-        for comp in neural_comps:
-            ng_mask = comp["mask"].astype(bool)
-            by0, bx0, by1, bx1 = comp["bbox_local"]
-            gy0, gx0 = wy0 + int(by0), wx0 + int(bx0)
-            gy1, gx1 = wy0 + int(by1), wx0 + int(bx1)
-            gh, gw = ng_mask.shape[:2]
-            area = int(np.sum(ng_mask))
-            h_mm = scale_calib.px_to_mm(gh)
-            w_mm = scale_calib.px_to_mm(gw)
-            area_mm2 = scale_calib.area_px2_to_mm2(area)
-            if area < scale_calib.min_glyph_area_px or (h_mm < 0.65 and w_mm < 0.65):
-                continue
-
-            matched_g = None
-            for qa in opt_a_local:
-                q_by0, q_bx0, q_by1, q_bx1 = qa["bbox_local"]
-                inter_x = max(0, min(bx1, q_bx1) - max(bx0, q_bx0))
-                min_w = max(1, min(bx1 - bx0, q_bx1 - q_bx0))
-                if inter_x / min_w > 0.50:
-                    matched_g = qa["quill_glyph"]
-                    break
-
-            c_type = matched_g.get("canonical_type", "G01") if matched_g else "G01"
-            n_strokes = tracker.extract_calligraphic_ductus(ng_mask, single_stroke_mode=False, max_strokes=4, scale_calib=scale_calib)[:4]
-            if not n_strokes:
-                n_strokes = [{
-                    "stroke_id": "cal_s00",
-                    "order_index": 0,
-                    "points": [(float(gh * 0.2), float(gw * 0.5), 2.5), (float(gh * 0.8), float(gw * 0.5), 2.5)],
-                    "length": 2.0,
-                    "start": (float(gh * 0.2), float(gw * 0.5)),
-                    "end": (float(gh * 0.8), float(gw * 0.5)),
-                    "nib_angle_deg": 40.0,
-                    "mean_width": 2.5
-                }]
-            for s in n_strokes:
-                s["page_points"] = [[float(p[0] + gy0), float(p[1] + gx0), float(p[2])] for p in s.get("points", [])]
-            svg = VectorExporter.to_svg(n_strokes, max(10, gw), max(10, gh))
-
-            poly = [[gx0, gy0], [gx1, gy0], [gx1, gy1], [gx0, gy1]]
-            if gh >= 4 and gw >= 4:
-                try:
-                    poly = segmenter.compute_ink_polygon(ng_mask, offset=(gy0, gx0))
-                except Exception:
-                    pass
-
-            ng_rec = {
-                "glyph_id": f"{page_id}_{line_id}_{word_id}_N{n_idx:02d}",
-                "page_id": page_id,
-                "line_id": line_id,
-                "word_id": word_id,
-                "word_bbox": [wy0, wx0, wy1, wx1],
-                "glyph_index_in_word": n_idx,
-                "bbox": [gy0, gx0, gy1, gx1],
-                "polygon": poly,
-                "height": int(gh),
-                "width": int(gw),
-                "height_mm": round(h_mm, 2),
-                "width_mm": round(w_mm, 2),
-                "height_dmm": round(h_mm * 10.0, 1),
-                "width_dmm": round(w_mm * 10.0, 1),
-                "area": area,
-                "area_mm2": round(area_mm2, 2),
-                "stroke_count": min(4, len(n_strokes)),
-                "strokes": n_strokes,
-                "ductus_svg": svg,
-                "svg_content": svg,
-                "png_rel": "",
-                "svg_rel": "",
-                "crop_uri": "",
-                "canonical_type": c_type,
-                "segmentation_mode": "neural_word_pca",
-                "neural_basis_id": comp.get("neural_basis_id", "PHI_00")
-            }
-            neural_glyphs.append(ng_rec)
-            n_idx += 1
-
-        # Model 3: Hybrid Neuro-Kinematic Consensus
-        hybrid_comps = hybrid_decomposer.decompose_word_hybrid(w_mask, opt_a_local, neural_comps)
-        h_idx = 0
-        for comp in hybrid_comps:
-            hg_mask = comp["mask"].astype(bool)
-            by0, bx0, by1, bx1 = comp["bbox_local"]
-            gy0, gx0 = wy0 + int(by0), wx0 + int(bx0)
-            gy1, gx1 = wy0 + int(by1), wx0 + int(bx1)
-            gh, gw = hg_mask.shape[:2]
-            area = int(np.sum(hg_mask))
-            h_mm = scale_calib.px_to_mm(gh)
-            w_mm = scale_calib.px_to_mm(gw)
-            area_mm2 = scale_calib.area_px2_to_mm2(area)
-            if area < scale_calib.min_glyph_area_px or (h_mm < 0.65 and w_mm < 0.65):
-                continue
-
-            matched_g = None
-            for qa in opt_a_local:
-                q_by0, q_bx0, q_by1, q_bx1 = qa["bbox_local"]
-                inter_x = max(0, min(bx1, q_bx1) - max(bx0, q_bx0))
-                min_w = max(1, min(bx1 - bx0, q_bx1 - q_bx0))
-                if inter_x / min_w > 0.50:
-                    matched_g = qa["quill_glyph"]
-                    break
-
-            c_type = matched_g.get("canonical_type", "G01") if matched_g else "G01"
-            h_strokes = tracker.extract_calligraphic_ductus(hg_mask, single_stroke_mode=False, max_strokes=4, scale_calib=scale_calib)[:4]
-            if not h_strokes:
-                h_strokes = [{
-                    "stroke_id": "cal_s00",
-                    "order_index": 0,
-                    "points": [(float(gh * 0.2), float(gw * 0.5), 2.5), (float(gh * 0.8), float(gw * 0.5), 2.5)],
-                    "length": 2.0,
-                    "start": (float(gh * 0.2), float(gw * 0.5)),
-                    "end": (float(gh * 0.8), float(gw * 0.5)),
-                    "nib_angle_deg": 40.0,
-                    "mean_width": 2.5
-                }]
-            for s in h_strokes:
-                s["page_points"] = [[float(p[0] + gy0), float(p[1] + gx0), float(p[2])] for p in s.get("points", [])]
-            svg = VectorExporter.to_svg(h_strokes, max(10, gw), max(10, gh))
-
-            poly = [[gx0, gy0], [gx1, gy0], [gx1, gy1], [gx0, gy1]]
-            if gh >= 4 and gw >= 4:
-                try:
-                    poly = segmenter.compute_ink_polygon(hg_mask, offset=(gy0, gx0))
-                except Exception:
-                    pass
-
-            hg_rec = {
-                "glyph_id": f"{page_id}_{line_id}_{word_id}_H{h_idx:02d}",
-                "page_id": page_id,
-                "line_id": line_id,
-                "word_id": word_id,
-                "word_bbox": [wy0, wx0, wy1, wx1],
-                "glyph_index_in_word": h_idx,
-                "bbox": [gy0, gx0, gy1, gx1],
-                "polygon": poly,
-                "height": int(gh),
-                "width": int(gw),
-                "height_mm": round(h_mm, 2),
-                "width_mm": round(w_mm, 2),
-                "height_dmm": round(h_mm * 10.0, 1),
-                "width_dmm": round(w_mm * 10.0, 1),
-                "area": area,
-                "area_mm2": round(area_mm2, 2),
-                "stroke_count": min(4, len(h_strokes)),
-                "strokes": h_strokes,
-                "ductus_svg": svg,
-                "svg_content": svg,
-                "png_rel": "",
-                "svg_rel": "",
-                "crop_uri": "",
-                "canonical_type": c_type,
-                "segmentation_mode": "hybrid_consensus",
-                "hybrid_basis_id": comp.get("hybrid_basis_id", "HYB_00")
-            }
-            hybrid_glyphs.append(hg_rec)
-            h_idx += 1
-
-    cross_evaluate_options_consensus(existing_quill, neural_glyphs, hybrid_glyphs)
-
-    page_data["glyphs_neural_pca"] = neural_glyphs
-    page_data["glyphs_hybrid_consensus"] = hybrid_glyphs
-    page_data["glyph_count_neural_pca"] = len(neural_glyphs)
-    page_data["glyph_count_hybrid_consensus"] = len(hybrid_glyphs)
-    page_data["segmentation_modes"] = ["heuristic_calligraphic", "neural_word_pca", "hybrid_consensus"]
+    a_cnt, b_cnt, c_cnt = enrich_page_multimodel(
+        page_data=page_data,
+        img_bgr=img,
+        manuscript_type=manuscript_type,
+        restore_rosetta_boxes=(manuscript_type == "voynich"),
+        recompute_option_a=True,
+    )
 
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(page_data, f, ensure_ascii=False, indent=2)
 
-    return len(existing_quill), len(neural_glyphs), len(hybrid_glyphs)
+    return json_path.stem, a_cnt, b_cnt, c_cnt, time.time() - t0, False
+
+
+def _run_manuscript_batch(
+    label: str,
+    pages_dir: Path,
+    json_files: list,
+    manuscript_type: str,
+    workers: int,
+    low_priority: bool,
+    force: bool,
+) -> None:
+    """Dispatches a manuscript batch across `workers` gentle background processes."""
+    tasks = []
+    for jf in json_files:
+        img_f = pages_dir / f"{jf.stem}.jpg"
+        if img_f.exists():
+            tasks.append((str(jf), str(img_f), manuscript_type))
+
+    if not tasks:
+        print(f"[!] No matching pages found for {label}.")
+        return
+
+    print(
+        f"[*] Reprocessing {len(tasks)} {label} pages across {workers} gentle worker(s) "
+        f"(low_priority={low_priority}, force={force})...",
+        flush=True,
+    )
+
+    completed = 0
+    if workers <= 1:
+        for jp, ip, ms in tasks:
+            stem, a_c, b_c, c_c, dt, skipped = _worker_process_page(jp, ip, ms, low_priority, force)
+            completed += 1
+            tag = "CACHED" if skipped else "Done"
+            print(f"[{label} {completed}/{len(tasks)}] {stem}: {tag} | A={a_c}, B={b_c}, C={c_c} in {dt:.2f}s", flush=True)
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(_worker_process_page, jp, ip, ms, low_priority, force): Path(jp).stem
+                for jp, ip, ms in tasks
+            }
+            for fut in as_completed(futures):
+                stem_hint = futures[fut]
+                completed += 1
+                try:
+                    stem, a_c, b_c, c_c, dt, skipped = fut.result()
+                    tag = "CACHED" if skipped else "Done"
+                    print(f"[{label} {completed}/{len(tasks)}] {stem}: {tag} | A={a_c}, B={b_c}, C={c_c} in {dt:.2f}s", flush=True)
+                except Exception as exc:
+                    print(f"[{label} {completed}/{len(tasks)}] {stem_hint}: Error: {exc}", flush=True)
 
 
 def main():
-    pages_dir = root_dir / "data" / "processed" / "atlas_dataset" / "voynich" / "pages"
-    json_files = sorted(pages_dir.glob("*.json"), key=lambda p: natural_folio_sort_key(p.stem))
+    cpu_cnt = os.cpu_count() or 4
+    default_workers = max(1, cpu_cnt // 2)  # e.g. 2 workers on 4-core PC -> leaves 50% CPU free
 
-    scale_calib = MetricScaleCalibration(manuscript_type="voynich")
-    binarizer = Binarizer(method="sauvola")
-    segmenter = GlyphSegmenter(scale_calib=scale_calib)
-    neural_decomposer = NeuralWordDecomposition()
-    hybrid_decomposer = HybridConsensusWordDecomposition()
+    parser = argparse.ArgumentParser(description="Gentle Multi-Core Multi-Model Glyph Reprocessor")
+    parser.add_argument("limit", nargs="?", type=int, default=0, help="Optional positional limit (Voynich folios)")
+    parser.add_argument("--manuscripts", type=str, default="voynich,seraphinianus", help="Comma-separated: voynich,seraphinianus")
+    parser.add_argument("--voynich-limit", type=int, default=0, help="Max Voynich folios (0 = all)")
+    parser.add_argument("--serafini-limit", type=int, default=0, help="Max Seraphinianus pages (0 = all)")
+    parser.add_argument("--workers", type=int, default=default_workers, help=f"Parallel workers (default: {default_workers} on {cpu_cnt}-core host)")
+    parser.add_argument("--no-low-priority", action="store_true", help="Disable BELOW_NORMAL/nice CPU throttling")
+    parser.add_argument("--force", action="store_true", help="Recompute even if A, B, C already exist on page")
+    parser.add_argument("--skip-explorer", action="store_true", help="Skip rebuilding grand_glyph_explorer.html")
+    args = parser.parse_args()
 
-    limit = int(sys.argv[1]) if len(sys.argv) > 1 else len(json_files)
-    print(f"[*] Reprocessing multi-model glyph sets for {min(limit, len(json_files))} Voynich folios...", flush=True)
+    low_priority = not args.no_low_priority
+    configure_gentle_worker_environment(low_priority=low_priority)
+
+    v_limit = args.voynich_limit or args.limit
+    s_limit = args.serafini_limit
+    ms_list = [m.strip().lower() for m in args.manuscripts.split(",") if m.strip()]
 
     total_start = time.time()
-    for i, jf in enumerate(json_files[:limit]):
-        if jf.stem == "f1r":
-            print(f"[{i+1}/{limit}] f1r already precomputed with Yale HD alignment. Skipping.", flush=True)
-            continue
 
-        img_f = pages_dir / f"{jf.stem}.jpg"
-        if not img_f.exists():
-            continue
+    if "voynich" in ms_list:
+        v_pages_dir = root_dir / "data" / "processed" / "atlas_dataset" / "voynich" / "pages"
+        v_files = sorted(v_pages_dir.glob("*.json"), key=lambda p: natural_folio_sort_key(p.stem))
+        if v_limit > 0:
+            v_files = v_files[:v_limit]
+        _run_manuscript_batch("Voynich", v_pages_dir, v_files, "voynich", max(1, args.workers), low_priority, args.force)
 
-        t0 = time.time()
-        q_cnt, n_cnt, h_cnt = reprocess_page(jf, img_f, binarizer, segmenter, scale_calib, neural_decomposer, hybrid_decomposer)
-        t_el = time.time() - t0
-        print(f"[{i+1}/{limit}] {jf.stem}: Quill={q_cnt}, Neural PCA={n_cnt}, Consensus={h_cnt} in {t_el:.2f}s", flush=True)
+    if "seraphinianus" in ms_list:
+        s_pages_dir = root_dir / "data" / "processed" / "atlas_dataset" / "seraphinianus" / "pages"
+        s_files = sorted(s_pages_dir.glob("*.json"))
+        if s_limit > 0:
+            s_files = s_files[:s_limit]
+        _run_manuscript_batch("Seraphinianus", s_pages_dir, s_files, "seraphinianus", max(1, args.workers), low_priority, args.force)
 
-    print(f"\n[✓] Completed multi-model reprocessing in {time.time() - total_start:.2f}s!", flush=True)
+    print(f"\n[✓] Completed multi-core reprocessing in {time.time() - total_start:.2f}s!", flush=True)
 
-    print("\n[*] Rebuilding Grand Glyph Explorer HTML...", flush=True)
-    import build_dynamic_grand_explorer
-    build_dynamic_grand_explorer.main()
-    print("[✓] Explorer rebuilt with all multi-model glyph sets!", flush=True)
+    if not args.skip_explorer:
+        print("\n[*] Rebuilding Grand Glyph Explorer HTML...", flush=True)
+        sys.path.insert(0, str(root_dir / "scripts"))
+        import build_dynamic_grand_explorer
+        build_dynamic_grand_explorer.main()
+        print("[✓] Explorer rebuilt with all multi-model glyph sets!", flush=True)
 
 
 if __name__ == "__main__":
