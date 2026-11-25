@@ -149,55 +149,56 @@ To prevent clustering open crescents (`C`) with closed loops (`O`):
 
 ---
 
-### K. Divergence Fondamentale des Ductus : Codex Seraphinianus vs. Manuscrit de Voynich
+### K. Fundamental Ductus Divergence: Codex Seraphinianus vs. Voynich Manuscript
 
-Le moteur de vectorisation de `VoynichDuctus` implémente une **bifurcation cinématique stricte** entre l'écriture cursive contemporaine du *Codex Seraphinianus* et l'écriture gothique/humanistique médiévale du *Manuscrit de Voynich* :
+The `VoynichDuctus` vectorization engine implements a **strict kinematic bifurcation** between the contemporary cursive script of the *Codex Seraphinianus* and the medieval Gothic/Humanistic hand of the *Voynich Manuscript*:
 
-| Dimension Paléographique | Codex Seraphinianus (Luigi Serafini, 1981) | Manuscrit de Voynich (Beinecke MS 408, ca. 1404–1438) |
+| Paleographic Dimension | Codex Seraphinianus (Luigi Serafini, 1981) | Voynich Manuscript (Beinecke MS 408, ca. 1404–1438) |
 | :--- | :--- | :--- |
-| **Période & Outil Scriptural** | XXᵉ siècle — Feutre fin / stylo technique tubulaire (encre uniforme sans biseau). | XVᵉ siècle — Plume d'oie ou calame taillé au biseau fixe de 40° (encre métallo-gallique). |
-| **Nombre de Traits par Glyphe** | **Strictement 1 seul trait continu** (`single_stroke_mode=True`, `max_strokes=1`). | **1 à 4 traits maximum** (`single_stroke_mode=False`, plafond dur `max_strokes=4`). |
-| **Dynamique & Inertie** | **Modèle du lacet / de la trajectoire automobile** : vitesse fluide, inertie, **aucun angle vif > 90°**. Tout changement de direction s'opère par des boucles douces. | **Modèle calligraphique discontinu** : levées de plume délibérées, cassures angulaires gothiques, attaques de hastes et empattements (*serifs*). |
-| **Recouvrement du Squelette** | **100 % des pixels du squelette sont couverts** : boucle d'extension à 12 passes qui raccorde branches et boucles orphelines sans retour en arrière. | Décomposition analytique aux nœuds critiques (degré $\neq 2$) par minimisation de l'énergie de flexion d'Euler-Bernoulli. |
-| **Gestion des Croisements** | La plume traverse le carrefour en conservant sa trajectoire sans jamais repasser sur un trait déjà tracé. | Résolution des bifurcations selon l'ordre chronologique des levées de plume (hampes avant traverses/ligatures). |
-| **Profil d'Épaisseur** | Épaisseur constante ou faiblement modulée par la pression de contact. | **Contraste marqué des *pleins et déliés*** : $w(\theta) = (W_{\text{nib}} - w_0)\cdot\|\sin(\theta - 40^\circ)\| + w_0$. |
-| **Orientation Préférentielle** | Déroulement cinématique de gauche à droite ($x$-poids = 3.2) et de haut en bas. | Attaque au sommet supérieur-gauche, descente verticale, ligature montante vers la droite. |
+| **Period & Writing Instrument** | 20th century — Fine technical felt-tip / tubular pen (uniform ink, unbeveled nib). | 15th century — Split goose quill or calame cut at a fixed 40° bevel (iron-gall ink). |
+| **Strokes per Glyph** | **Strictly 1 continuous stroke** (`single_stroke_mode=True`, `max_strokes=1`). | **1 to 4 strokes maximum** (`single_stroke_mode=False`, hard ceiling `max_strokes=4`). |
+| **Dynamics & Inertia** | **Automotive / winding-road trajectory model**: fluid velocity, inertia, **no sharp angles > 90°**. All directional changes occur via smooth loops. | **Discontinuous calligraphic model**: deliberate pen lifts, Gothic angular breaks, stem attacks, and serifs. |
+| **Skeleton Coverage** | **100% skeleton pixel coverage**: 12-pass ridge extension loop bridging branches and orphan loops without backtracking. | Analytical decomposition at critical nodes (degree $\neq 2$) via Euler-Bernoulli minimum bending energy. |
+| **Crossing Resolution** | The pen traverses intersections while maintaining forward momentum without retracing previously drawn strokes. | Bifurcation resolution governed by chronological pen-lift order (stems before crossbars/ligatures). |
+| **Thickness Profile** | Constant or lightly pressure-modulated monoline thickness. | **Marked *pleins et déliés* contrast**: $w(\theta) = (W_{\text{nib}} - w_0)\cdot|\sin(\theta - 40^\circ)| + w_0$. |
+| **Preferential Orientation** | Left-to-right kinematic progression ($x$-weight = 3.2) and top-to-bottom flow. | Upper-left crest attack, vertical downward pull, ascending rightward ligature. |
 
-#### 1. Règle des 1 à 4 Traits pour Voynich
-Dans l'écriture du Voynich, un glyphe individuel ne peut physiquement pas dépasser **4 traits de plume** :
-- **1 trait** : Minimes isolés (`i`), croissants ouverts (`c`), déliés simples.
-- **2 traits** : Boucles rondes (`o`, `a` composé d'un croissant `c` et d'une haste `i` accotée).
-- **3 traits** : Potences simples et hampes à banc (`k`, `t`, `d`), majuscules ornées.
-- **4 traits (plafond absolu)** : Potences composées complexes (`cth`, `ckh`, `cph`, `cfh`), constituées de deux montants verticaux, d'un banc de liaison horizontal et d'une boucle supérieure nouée. **Aucun glyphe ne contient plus de 4 traits.**
+#### 1. The 1-to-4 Stroke Rule for Voynich
+In the Voynich script, an individual glyph cannot physically exceed **4 quill strokes**:
+- **1 stroke**: Isolated minims (`i`), open crescents (`c`), simple hairlines.
+- **2 strokes**: Closed bowls (`o`, `a` composed of an open crescent `c` paired with an adjacent minim stem `i`).
+- **3 strokes**: Simple gallows and benched stems (`k`, `t`, `d`), ornate initials.
+- **4 strokes (absolute ceiling)**: Complex compound gallows (`cth`, `ckh`, `cph`, `cfh`), consisting of two vertical ascenders, a horizontal connecting bench, and a knotted upper loop. **No single glyph exceeds 4 strokes.**
 
-#### 2. Règle du Ruban Continu Cursif pour Seraphinianus
-Dans le *Codex Seraphinianus*, l'écriture est un ruban calligraphique ininterrompu :
-- La personne ne lève pas la plume à l'intérieur d'un caractère.
-- Le tracé s'effectue d'un seul jet continu, tel une voiture sur une route sinueuse : la trajectoire s'enroule en boucles sans à-coups ni hésitations.
-- Le demi-tour sur place ou le retour en arrière est proscrit.
-
----
-
-### L. Stratification Dimensionnelle & Pureté Topologique des Archétypes
-Pour éradiquer tout mélange hétérogène dans le catalogue canonique :
-1. **Partitionnement Topologique Étanche** : Les familles de boucles (`0L` sans boucle, `1L` une boucle, `2+L` multiboucles) ne peuvent **jamais** partager un même cluster.
-2. **Bandes d'Échelle Physique** : Chaque glyphe est classé selon son échelle physique réelle :
-   - `TINY` : Signe diacritique ou éclat isolé ($H < 14\text{ px}$ ou aire $< 30\text{ px}^2$).
-   - `CORE` : Corps de lettre standard ($14 \le H \le 38\text{ px}$).
-   - `TALL` : Hampe montante ou potence ($H > 38\text{ px}$ ou $H \ge 1.40 W$).
-   - `WIDE` : Banc horizontal ou ligature large ($W \ge 30\text{ px}$ ou $W \ge 1.35 H$).
-   Les descripteurs $\log(h) \times 4.5$, $\log(w) \times 4.0$ et $\log(\text{aire}) \times 3.0$ sont injectés dans l'espace DINOv2.
-3. **Quarantaine des Variations** : Toute occurrence présentant une divergence de boucle ou s'écartant de plus de $\pm 35\%$ des dimensions du médioïde est exclue des variations présentées.
+#### 2. The Continuous Cursive Ribbon Rule for Seraphinianus
+In the *Codex Seraphinianus*, writing forms an uninterrupted calligraphic ribbon:
+- The writer does not lift the pen within a character component.
+- The trajectory is executed in a single continuous flow, like a vehicle navigating a winding road: the path curls into smooth loops without sudden stops or sharp reversals.
+- In-place U-turns and stroke retracing are strictly prohibited.
 
 ---
 
-### M. Recensement Corpus Global vs. Occurrences Folio
-Le système distingue et affiche conjointement :
-- **La Fréquence Corpus Globale** : Évaluée sur les **162 333 glyphes** (37 886 mots) des 225 folios Voynich et les **456 943 glyphes** du Codex Seraphinianus. Les archétypes majeurs totalisent ainsi des dizaines de milliers d'occurrences (ex. $25\,468$ pour Voynich `G03`, $17\,655$ pour `G07`, $31\,732$ pour Seraphinianus `G01`).
-- **La Fréquence Locale Folio** : Le nombre d'occurrences repérées sur la page active visualisée.
+### L. Dimensional Stratification & Topological Purity of Archetypes
+To eliminate heterogeneous mixing inside the canonical catalogue:
+1. **Air-Tight Topological Partitioning**: Loop families (`0L` loopless, `1L` single-loop, `2+L` multi-loop) can **never** share the same cluster.
+2. **Physical Scale Bands**: Every glyph is stratified by its physical metric dimensions:
+   - `TINY`: Diacritic mark or isolated speck ($H \le 1.30\text{ mm}$ / $H < 14\text{ px}$ or area $< 30\text{ px}^2$).
+   - `CORE`: Standard x-height letter body ($1.30\text{ mm} < H < 3.40\text{ mm}$ / $14 \le H \le 38\text{ px}$).
+   - `TALL`: Ascending stem or gallows ($H \ge 3.40\text{ mm}$ / $H > 38\text{ px}$ or $H \ge 1.40 W$).
+   - `WIDE`: Horizontal bench or wide ligature ($W \ge 3.40\text{ mm}$ / $W \ge 30\text{ px}$ or $W \ge 1.35 H$).
+   Logarithmic physical descriptors $\log(h) \times 4.5$, $\log(w) \times 4.0$, and $\log(\text{area}) \times 3.0$ are concatenated directly into the DINOv2 embedding space.
+3. **Variation Quarantine**: Any occurrence exhibiting a loop-count discrepancy or deviating by more than $\pm 35\%$ from the medoid dimensions is quarantined from canonical archetype variations.
 
+---
 
-### K. Multimodal Paleographic Supervision (Gemini 2.5 Flash)
+### M. Global Corpus Census vs. Local Folio Occurrences
+The system computes and displays both metrics simultaneously:
+- **Global Corpus Frequency**: Evaluated across the **162,333 canonical glyphs** (37,212 disjoint words; >200,000 raw components prior to outlier quarantine) across all 225 Voynich folios and the **456,943 glyphs** (68,430 words) across all 371 Codex Seraphinianus pages. Major archetypes therefore accumulate tens of thousands of corpus occurrences (e.g., $25,468$ for Voynich `G01`, $17,655$ for `G02`, $31,732$ for Seraphinianus `G01`).
+- **Local Folio Frequency**: The exact number of physical instances located on the active manuscript page.
+
+---
+
+### N. Multimodal Paleographic Supervision (Gemini 2.5 Flash)
 1. **Automated Expert Paleography Validation (`GeminiPaleographyAdapter`)**:
    - Visual inspection of ambiguous ligatures and cursive joints directly through multimodal vision queries.
    - Comparative scribal hand authentication (analyzing slant consistency and nib angle).
@@ -205,7 +206,7 @@ Le système distingue et affiche conjointement :
 
 ---
 
-### L. Voynichese Rosetta Stone Ground Truth Integration (`VoynicheseRosettaLoader`)
+### O. Voynichese Rosetta Stone Ground Truth Integration (`VoynicheseRosettaLoader`)
 1. **Full-Corpus Ground Truth Integration**:
    - Ingestion of 225 curated XML annotation folios covering the complete Beinecke MS 408 corpus ($>35,000$ segmented word bounding boxes with verified EVA transliterations).
 2. **Atomic EVA Glyph Tokenization**:
@@ -215,7 +216,7 @@ Le système distingue et affiche conjointement :
 
 ---
 
-### M. Multimodal SIFT/RANSAC Subpixel Image Registration (`MultimodalFolioAligner`)
+### P. Multimodal SIFT/RANSAC Subpixel Image Registration (`MultimodalFolioAligner`)
 1. **Geometric Invariance Formulation**:
    - Resolves the translation, scale, and rotational discrepancies between low-resolution reference scans ($636 \times 900\text{ px}$) and Yale Beinecke HD master plates ($2400 \times 3300\text{ px}$).
    - Computes a subpixel affine transformation matrix $M \in \mathbb{R}^{2 \times 3}$:
@@ -227,7 +228,7 @@ Le système distingue et affiche conjointement :
 
 ---
 
-### N. 14th/15th-Century Scribal Motor Ductus & Primitive Grammar
+### Q. 14th/15th-Century Scribal Motor Ductus & Primitive Grammar
 1. **Scribal Kinematic Mechanics**:
    - Medieval European hands (Gothic Cursiva, Bastarda, Rotunda) were executed using a broad-edge quill cut at a fixed nib angle $\theta_{\text{nib}} \approx 35^\circ - 45^\circ$.
    - Letters are generated by assembling a closed set of 6 atomic motor primitives:
@@ -244,7 +245,7 @@ Le système distingue et affiche conjointement :
 
 ---
 
-### O. Strict Clustering & Zero-Tolerance Outlier Quarantine
+### R. Strict Clustering & Zero-Tolerance Outlier Quarantine
 1. **Hard Topological Gatekeepers**:
    - Invariant geometric partitioning guarantees that structurally distinct graphemic families are never combined:
      - `ASCENDER_TALL` (`b`, `d`, `k`, `t`, gallows) is strictly separated from `CLOSED_LOOP_BODY` (`o`, `a`). An `a` and a `b` can NEVER share a cluster.
@@ -259,11 +260,11 @@ Le système distingue et affiche conjointement :
      - `SEGMENTATION_FRAGMENT`: Clipped stroke ends or serifs ($A \le 0.28\bar{A}$).
      - `EXTREME_FLOURISH`: Decorative marginal loops ($W \ge 1.8\bar{w} \lor H \ge 1.8\bar{h}$).
      - `HAPAX_ATYPICAL`: Rare morphologically valid glyph variants occurring below statistical significance.
-   - Validated across **200,272 Voynich glyphs** and **5,258 Seraphinianus glyphs**, preserving the pristine purity of canonical alphabet clusters.
+   - Validated across the full Voynich corpus (**162,333 canonical glyphs** from >200,000 raw components) and the Codex Seraphinianus (**456,943 full-corpus glyphs** / 5,258 high-confidence benchmark medoid samples), preserving the pristine purity of canonical alphabet clusters.
 
 ---
 
-### P. Strict Spatial Disjoint Word Partitioning (Zero Double-Interpretation of Parchment)
+### S. Strict Spatial Disjoint Word Partitioning (Zero Double-Interpretation of Parchment)
 1. **The Disjoint Space Invariance Principle**:
    - No two words on a manuscript page can claim or re-interpret the same physical coordinates of parchment or ink.
    - For all words $w_i, w_j$ ($i \neq j$), their ink spatial domains must be mutually exclusive:
@@ -276,10 +277,10 @@ Le système distingue et affiche conjointement :
 
 ---
 
-### Q. Physical Nib Threshold & Supralinear Diacritic Decoupling
+### T. Physical Nib Threshold & Supralinear Diacritic Decoupling
 1. **Instantaneous Touchdown Impact vs. Stroke Trajectory**:
    - A quill or steel nib has a physical width $W_{\text{nib}} \approx 1.5-3\text{ px}$.
-   - Any ink object whose physical dimensions satisfy $\max(h, w) \le 8\text{ px}$ or $\text{area} \le 25\text{ px}^2$ is an **instantaneous touchdown impact** (posé-levé vertical : $v \approx 0, \text{length} = 0$).
+   - Any ink object whose physical dimensions satisfy $\max(h, w) \le 8\text{ px}$ or $\text{area} \le 25\text{ px}^2$ is an **instantaneous touchdown impact** (vertical touchdown-lift: $v \approx 0, \text{length} = 0$).
    - Complex medial axis tracking and curved ridge derendering are bypassed on dots; they are derendered as a single static impact point $(y_c, x_c, W_{\text{nib}})$.
 2. **Supralinear Diacritic Decoupling**:
    - Diacritics (dots, accents, acute, macrons) floating in the upper band above a letter body are decoupled as structured attributes:
@@ -288,7 +289,7 @@ Le système distingue et affiche conjointement :
 
 ---
 
-### R. Word-Level Neural Decomposition & 1D Spatial PCA (Option B)
+### U. Word-Level Neural Decomposition & 1D Spatial PCA (Option B)
 1. **Intact Word Crop Encoding**:
    - Every lexical word is extracted as an intact patch without destructive knife slicing.
    - Passed through `WordScribalEncoder`: a convolutional feature network that collapses vertical height while preserving horizontal resolution, producing a 1D latent trajectory $Z(x) \in \mathbb{R}^{32}$.
@@ -298,33 +299,33 @@ Le système distingue et affiche conjointement :
    - Natural glyph transitions occur at latent inflection points / velocity minima $\|dZ/dx\|$.
 3. **Interactive Multi-Mode Explorer Selector**:
    - The Grand Glyph Explorer UI features a drop-down menu allowing real-time switching between:
-     - **Option A** : Ductus Géométrique & Diacritiques Découplés
-     - **Option B** : Décomposition Neuronale de Mots (ACP/NMF)
-     - **Option C** : Consensus Hybride Neuro-Cinématique
+     - **Option A (`Quill Ductus 40°`)**: Physical quill mechanics & decoupled supralinear diacritics
+     - **Option B (`AI Neural PCA`)**: Unsupervised neural word decomposition (1D Spatial PCA / NMF)
+     - **Option C (`Hybrid Consensus`)**: Strict neuro-kinematic mathematical consensus
 
 ---
 
-### S. Étalonnage Métrique Physique & Seuils Invariants (mm et dixièmes de millimètre)
-1. **Motivation Codicologique & Indépendance de Résolution (DPI)**:
-   - Les scans numériques de manuscrits historiques présentent des résolutions et densités de pixels très disparates :
-     - **Scan HD Beinecke MS 408 (Yale)** : $3168 \times 2500\text{ px}$ pour un feuillet de $225.0\text{ mm}$ de haut $\implies \approx 14.08\text{ px/mm}$ ($1\text{ mm} \approx 14.1\text{ px}$, $0.1\text{ mm} = 1\text{ dmm} \approx 1.4\text{ px}$).
-     - **Scan standard Voynich** : $\approx 1800 \times 1280\text{ px}$ $\implies \approx 8.00\text{ px/mm}$ ($1\text{ mm} \approx 8.0\text{ px}$, $0.1\text{ mm} \approx 0.8\text{ px}$).
-     - **Codex Seraphinianus (Franco Maria Ricci 1981)** : $\approx 2200 \times 1500\text{ px}$ pour une page in-folio de $350.0\text{ mm}$ $\implies \approx 6.28\text{ px/mm}$ ($1\text{ mm} \approx 6.3\text{ px}$, $0.1\text{ mm} \approx 0.63\text{ px}$).
-   - Un seuil exprimé en pixels arbitraires (ex. `height >= 30 px`) biaise totalement les comparaisons : sur Yale HD, 30 px correspond à un petit corps de minim ($2.13\text{ mm}$), alors que sur Seraphinianus, 30 px correspond à une haute hampe ($4.78\text{ mm}$).
-   - La classe `MetricScaleCalibration` unifie tous les filtres géométriques et cinématiques en unités physiques réelles : **millimètres (mm)** et **dixièmes de millimètre (dmm, $0.1\text{ mm}$)**.
+### V. Physical Metric Calibration & Scale-Invariant Thresholds (mm and dmm)
+1. **Codicological Motivation & Resolution (DPI) Independence**:
+   - Digital scans of historical manuscripts exhibit widely disparate pixel resolutions and spatial densities:
+     - **Yale Beinecke MS 408 HD Scan**: $3168 \times 2500\text{ px}$ for a $225.0\text{ mm}$ tall folio $\implies \approx 14.08\text{ px/mm}$ ($1\text{ mm} \approx 14.1\text{ px}$, $0.1\text{ mm} = 1\text{ dmm} \approx 1.4\text{ px}$).
+     - **Standard Voynich Scan**: $\approx 1800 \times 1280\text{ px}$ $\implies \approx 8.00\text{ px/mm}$ ($1\text{ mm} \approx 8.0\text{ px}$, $0.1\text{ mm} \approx 0.8\text{ px}$).
+     - **Codex Seraphinianus (Franco Maria Ricci 1981)**: $\approx 2200 \times 1500\text{ px}$ for a $350.0\text{ mm}$ folio page $\implies \approx 6.28\text{ px/mm}$ ($1\text{ mm} \approx 6.3\text{ px}$, $0.1\text{ mm} \approx 0.63\text{ px}$).
+   - A threshold expressed in arbitrary pixels (e.g., `height >= 30 px`) severely biases cross-codex comparisons: on Yale HD, 30 px corresponds to a small minim body ($2.13\text{ mm}$), whereas on Seraphinianus, 30 px corresponds to a tall ascender ($4.78\text{ mm}$).
+   - The `MetricScaleCalibration` class unifies all geometric and kinematic filters into real physical metric units: **millimeters (mm)** and **tenths of a millimeter (dmm, $0.1\text{ mm}$)**.
 
-2. **Tableau des Seuils Paléographiques Calibrés en Unités Physiques**:
-   - **Empreinte d'impact nib / point vertical** : $\text{diamètre} \le 0.55\text{ mm}$ ($5.5\text{ dmm}$), $\text{aire} \le 0.35\text{ mm}^2$.
-   - **Seuil minimal de lisibilité d'un glyphe textuel** : $\text{hauteur} \ge 0.85\text{ mm}$ ($8.5\text{ dmm}$), $\text{largeur} \ge 0.45\text{ mm}$ ($4.5\text{ dmm}$), $\text{aire} \ge 0.12\text{ mm}^2$.
-   - **Bandes d'Échelle Paléographique (Induction de Catalogue)** :
-     - `TINY` (diacritiques, points, micro-ponctuation) : $\text{hauteur} \le 1.30\text{ mm}$ ($13.0\text{ dmm}$).
-     - `CORE` (minims médiévaux, boucles, $c, i, o, a, e$) : $1.30\text{ mm} \le \text{hauteur} < 3.40\text{ mm}$ ($13-34\text{ dmm}$).
-     - `TALL` (hastes ascendantes, gallows, $t, k, p, f, d, l$) : $\text{hauteur} \ge 3.40\text{ mm}$ ($34.0\text{ dmm}$).
-     - `WIDE` (bancs composites, ligatures étirées, $ch, sh, cth$) : $\text{largeur} \ge 3.40\text{ mm}$ ($34.0\text{ dmm}$).
-   - **Interligne médiéval moyen (Ruling Pitch)** : $\approx 6.50\text{ mm}$ ($65.0\text{ dmm}$).
-   - **Espace inter-mots physique** : $\ge 1.10\text{ mm}$ ($11.0\text{ dmm}$).
-   - **Zone d'attachement supralinéaire** : $\le 0.90\text{ mm}$ ($9.0\text{ dmm}$) au-dessus de la ligne de tête du caractère.
-   - **Débris d'illustrations / Miniatures** : $\text{hauteur} \ge 14.0\text{ mm}$ ($140\text{ dmm}$) ou $\text{aire} \ge 25.0\text{ mm}^2$.
+2. **Table of Paleographic Thresholds Calibrated in Physical Metric Units**:
+   - **Nib impact footprint / vertical dot**: $\text{diameter} \le 0.55\text{ mm}$ ($5.5\text{ dmm}$), $\text{area} \le 0.35\text{ mm}^2$.
+   - **Minimum legibility threshold of a textual glyph**: $\text{height} \ge 0.85\text{ mm}$ ($8.5\text{ dmm}$), $\text{width} \ge 0.45\text{ mm}$ ($4.5\text{ dmm}$), $\text{area} \ge 0.12\text{ mm}^2$.
+   - **Paleographic Scale Bands (Catalogue Induction)**:
+     - `TINY` (diacritics, dots, micro-punctuation): $\text{height} \le 1.30\text{ mm}$ ($13.0\text{ dmm}$).
+     - `CORE` (medieval minims, bowls, $c, i, o, a, e$): $1.30\text{ mm} \le \text{height} < 3.40\text{ mm}$ ($13-34\text{ dmm}$).
+     - `TALL` (ascending stems, gallows, $t, k, p, f, d, l$): $\text{height} \ge 3.40\text{ mm}$ ($34.0\text{ dmm}$).
+     - `WIDE` (composite benches, stretched ligatures, $ch, sh, cth$): $\text{width} \ge 3.40\text{ mm}$ ($34.0\text{ dmm}$).
+   - **Mean medieval line spacing (Ruling Pitch)**: $\approx 6.50\text{ mm}$ ($65.0\text{ dmm}$).
+   - **Physical inter-word whitespace**: $\ge 1.10\text{ mm}$ ($11.0\text{ dmm}$).
+   - **Supralinear attachment zone**: $\le 0.90\text{ mm}$ ($9.0\text{ dmm}$) above the character headline.
+   - **Illustration debris / Miniatures**: $\text{height} \ge 14.0\text{ mm}$ ($140\text{ dmm}$) or $\text{area} \ge 25.0\text{ mm}^2$.
 
 ---
 

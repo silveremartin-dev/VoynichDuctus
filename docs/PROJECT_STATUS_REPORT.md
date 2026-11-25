@@ -103,8 +103,8 @@ data/
 ### 4.7 Full Cloud Batch Production Execution & Repatriation
 - **Compute Architecture**: Deployed via **Google Cloud Run Jobs** (8 vCPUs, 32 GiB RAM, 24h task limit) with automatic GCS synchronisation.
 - **Production Scale**:
-  - **Voynich MS**: 225 / 225 folios processed, **200,272 glyphs**, 35 canonical archetypes (`voynich_alphabet_catalogue.json`, 76.8 MB).
-  - **Codex Seraphinianus**: 371 / 371 pages processed, **5,258 glyphs**, 55 archetypes (`seraphinianus_alphabet_catalogue.json`, 1.8 MB).
+  - **Voynich MS**: 225 / 225 folios processed, **37,212 disjoint words**, **162,333 canonical glyphs** (from 200,272 raw components), 35–48 canonical archetypes (`voynich_alphabet_catalogue.json`, 76.8 MB).
+  - **Codex Seraphinianus**: 371 / 371 pages processed, **68,430 words**, **456,943 full-corpus glyphs** (5,258 high-confidence benchmark medoid exemplars), 55 archetypes (`seraphinianus_alphabet_catalogue.json`, 1.8 MB).
   - **Synchronized Volume**: 970 objects / 4.2 GiB on Google Cloud Storage (`gs://ether-509812-voynich-atlas`).
 - **Cost Discipline**: Ephemeral serverless execution with automatic termination; zero persistent VM charges.
 - **Data Repatriation**: Local workspace `data/processed/atlas_dataset/` contains complete vector JSONs and the standalone web application [`grand_glyph_explorer.html`](file:///c:/Silvere/Encours/Developpement/VoynichDuctus/data/processed/atlas_dataset/grand_glyph_explorer.html) (46.3 MB).

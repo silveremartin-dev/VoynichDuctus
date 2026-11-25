@@ -57,6 +57,7 @@ releases/
 *.jpg
 *.jpeg
 *.png
+!docs/images/*.png
 *.h5
 *.pt
 *.onnx

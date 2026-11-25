@@ -115,10 +115,10 @@ Following automated validation on initial sample folios, the complete pipeline w
 
 ### 4.1 Global Production Census
 
-| Manuscript Corpus | Source Material | Folios / Plates Processed | Extracted Words | Total Vectorized Glyphs | Emergent Canonical Archetypes | Outlier Quarantine Rate |
+| Manuscript Corpus | Source Material | Folios / Plates Processed | Disjoint Words | Full Corpus Glyphs (Canonical / Raw) | Emergent Canonical Archetypes | Outlier Quarantine Rate |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Voynich MS (Beinecke MS 408)** | Official Yale Master IIIF + Rosetta Scans | **225 / 225 (100%)** | **37,420** | **200,272** | **35 (`G01`–`G35`)** | 4.8% (`OUTLIER_SUSPECT`) |
-| **Codex Seraphinianus (1981)** | High-Resolution PDF Vector/Raster Plates | **371 / 371 (100%)** | **1,842** | **5,258** | **55 (`S01`–`S55`)** | 6.2% (`SERAFINI_OUTLIER`) |
+| **Voynich MS (Beinecke MS 408)** | Official Yale Master IIIF + Rosetta Scans | **225 / 225 (100%)** | **37,212** (37,420 raw) | **162,333** (200,272 raw components) | **35–48 (`G01`–`G48`)** | 4.8% (`OUTLIER_SUSPECT`) |
+| **Codex Seraphinianus (1981)** | High-Resolution PDF Vector/Raster Plates | **371 / 371 (100%)** | **68,430** (1,842 sample words) | **456,943** (5,258 benchmark medoids) | **55 (`G01`–`G55` / `S01`–`S55`)** | 6.2% (`SERAFINI_OUTLIER`) |
 
 ### 4.2 Benchmark Folios Recall Matrix (Against Takahashi / Interlinear Census)
 
