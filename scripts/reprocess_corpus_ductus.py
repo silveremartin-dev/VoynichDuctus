@@ -482,7 +482,7 @@ def reprocess_voynich(base_dir: Path):
     hybrid_decomposer = HybridNeuroKinematicDecomposer()
 
     scale_calib = MetricScaleCalibration(manuscript_type="voynich", image_height_px=H_img, image_width_px=W_img)
-    binarizer = Binarizer(method="sauvola")
+    binarizer = Binarizer()
     segmenter = GlyphSegmenter(scale_calib=scale_calib)
     tracker = CalligraphicVectorizer(nib_angle_deg=40.0)
     skel_eng = Skeletonizer()
@@ -506,12 +506,8 @@ def reprocess_voynich(base_dir: Path):
 
         w_patch = img[wy0:wy1, wx0:wx1]
         gray_w = cv2.cvtColor(w_patch, cv2.COLOR_BGR2GRAY)
-        try:
-            w_mask = binarizer.binarize(gray_w).astype(bool)
-            if np.sum(w_mask) < 25:
-                t_w = threshold_otsu(gray_w)
-                w_mask = (gray_w < t_w).astype(bool)
-        except Exception:
+        w_mask = binarizer.binarize_manuscript(gray_w, contrast_stretch=True).astype(bool)
+        if np.sum(w_mask) < 25 or np.sum(w_mask) > (w_mask.size * 0.85):
             t_w = threshold_otsu(gray_w)
             w_mask = (gray_w < t_w).astype(bool)
 

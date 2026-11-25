@@ -3862,36 +3862,17 @@ def generate_explorer_html(
 
                 ${{corpusHtml}}
 
-                <!-- 5-Way Comparative AI Vision & Ductus Suite Panel & Modal Launcher -->
-                <div style="background:#0f172a; border:1px solid #334155; border-radius:6px; padding:8px 10px; font-size:0.68rem; margin-top:6px;">
-                    <div style="color:#38bdf8; font-weight:bold; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
-                        <span>🔬 5-Way Vision & Ductus Suite</span>
-                        <button onclick="openComparativeVisionModal()" style="background:#0284c7; color:#fff; border:none; border-radius:4px; padding:2px 7px; font-size:0.62rem; cursor:pointer; font-weight:bold;">🔍 Launch 5-Way Modal</button>
-                    </div>
-                    <div style="display:flex; flex-direction:column; gap:4px; color:var(--text-muted); line-height:1.35;">
-                        <div><strong style="color:#f59e0b;">1. Our In-House Physical Nib Model:</strong> 40° bevel plein/délié, unbroken continuous loops, right-handed scribal prior.</div>
-                        <div><strong style="color:#38bdf8;">2. Euler-Bernoulli Skeleton:</strong> 1D Medial Axis + NetworkX graph resolver (min bending energy).</div>
-                        <div><strong style="color:#06b6d4;">3. Kinematic Flow Net:</strong> Neural U-Net directional flow field + touchdown/lift detection.</div>
-                        <div><strong style="color:#c084fc;">4. DINOv2 ViT:</strong> 768-D patch tokens capturing curvature & nib pressure invariants.</div>
-                        <div><strong style="color:#10b981;">5. InkSight Transformer:</strong> Autoregressive (x, y, t, pen-lift) sequence prediction.</div>
-                    </div>
-                </div>
-
                 <div class="meta-list">
-                    <div><strong>Glyph ID:</strong> ${{selectedGlyph.glyph_id}}</div>
-                    ${{selectedGlyph.eva_char ? `<div style="background:#111827; border:1px solid #f59e0b; border-radius:6px; padding:4px 8px; margin:4px 0;"><span style="color:var(--text-muted); font-size:0.65rem; display:block;">VOYNICHESE GROUND TRUTH:</span><strong style="color:#f59e0b; font-size:1.15rem; font-family:monospace;">'${{selectedGlyph.eva_char}}'</strong> <span style="color:var(--text-muted); font-size:0.65rem;">(word: '${{selectedGlyph.ref_eva_text || ''}}')</span></div>` : ''}}
-                    <div><strong>Page / Line / Word:</strong> ${{selectedGlyph.page_id}} / Line ${{selectedGlyph.line_id}} / ${{selectedGlyph.word_id}}</div>
-                    <div><strong>Coordinates (y0, x0, y1, x1):</strong> [${{selectedGlyph.bbox.join(', ')}}]</div>
-                    <div><strong>Dimensions:</strong> ${{selectedGlyph.width}}x${{selectedGlyph.height}} px <span style="color:#38bdf8; font-weight:600;">(${{selectedGlyph.width_mm ? `${{selectedGlyph.width_mm}}×${{selectedGlyph.height_mm}} mm · ${{selectedGlyph.width_dmm}}×${{selectedGlyph.height_dmm}} dmm` : `${{(selectedGlyph.width*0.125).toFixed(2)}}×${{(selectedGlyph.height*0.125).toFixed(2)}} mm`}})</span> · Area: ${{selectedGlyph.area}} px² <span style="color:#38bdf8;">(${{selectedGlyph.area_mm2 ? `${{selectedGlyph.area_mm2}} mm²` : `${{(selectedGlyph.area*0.0156).toFixed(2)}} mm²`}})</span></div>
-                    <div><strong>Fill Factor:</strong> ${{selectedGlyph.fill_factor}} (1D Filiform)</div>
-                    <div><strong>Stroke Count:</strong> ${{selectedGlyph.stroke_count}} kinematic strokes</div>
-                    <div><strong>Segmentation & Support:</strong> <span class="badge-support ${{getSupportBadgeClass(selectedGlyph.support_badge)}}">${{selectedGlyph.support_badge || 'A+B+C (Consensus)'}}</span></div>
-                    ${{selectedGlyph.is_disjoint ? '<div style="color:#c084fc; font-size:0.68rem; font-style:italic;">⚠️ Disjoint Archetype (unique to this segmentation option)</div>' : '<div style="color:#10b981; font-size:0.68rem; font-style:italic;">✅ Corroborated by multi-option consensus</div>'}}
-                    <div><strong>Archetype:</strong> <span style="color:var(--accent); font-weight:bold; cursor:pointer;" onclick="openArchetypeVariations('${{selectedGlyph.canonical_type}}')">${{selectedGlyph.canonical_type}} (Click to view all variations)</span></div>
+                    <div><strong>Glyph:</strong> ${{selectedGlyph.glyph_id}}</div>
+                    <div><strong>Archetype Class:</strong> <span style="color:var(--accent); font-weight:bold;">${{selectedGlyph.canonical_type || 'G??'}}</span> (${{selectedGlyph.stroke_count || 1}} stroke(s))</div>
+                    <div><strong>Segmentation Support:</strong> <span class="badge-support ${{getSupportBadgeClass(selectedGlyph.support_badge)}}">${{selectedGlyph.support_badge || 'A+B+C (Consensus)'}}</span></div>
+                    ${{selectedGlyph.is_disjoint ? '<div style="color:#c084fc; font-size:0.68rem; font-style:italic;">⚠️ Disjoint Archetype (unique to this segmentation option)</div>' : '<div style="color:#10b981; font-size:0.68rem; font-style:italic;">✅ Corroborated by multi-model consensus</div>'}}
                 </div>
 
-                <button class="btn-variations" onclick="openArchetypeVariations('${{selectedGlyph.canonical_type}}')">🔍 View All ${{arch?.total_instances_count || ''}} Variations of ${{selectedGlyph.canonical_type}}</button>
-                <a href="${{svgDownloadHref}}" download="${{selectedGlyph.glyph_id}}.svg" class="btn-toggle" style="text-decoration:none; margin-top:2px; text-align:center;">⬇ Download Glyph SVG</a>
+                <button class="btn-variations" onclick="openArchetypeVariations('${{selectedGlyph.canonical_type}}')" style="width:100%; margin-top:6px;">
+                    🔍 View All Variations of Archetype ${{selectedGlyph.canonical_type || 'G??'}}
+                </button>
+                <a href="${{svgDownloadHref}}" download="${{selectedGlyph.glyph_id}}.svg" class="btn-toggle" style="text-decoration:none; margin-top:4px; text-align:center;">⬇ Download Glyph SVG</a>
             `;
         }}
 
@@ -4083,13 +4064,10 @@ def generate_explorer_html(
                 let matchHeader = '';
                 let refSvgElem = '';
                 if (currentMs === 'voynich' && evaEq) {{
-                    const schemeLabel = getTranslitLabel(a);
-                    matchHeader = `<div style="color:var(--accent); font-size:0.85rem; font-weight:bold;">${{schemeLabel}} <span style="font-size:0.75rem; color:var(--success); font-weight:normal;">(${{cm ? cm.confidence_pct : 85}}% match)</span></div>`;
+                    matchHeader = `<div style="color:var(--accent); font-size:0.85rem; font-weight:bold;">Consensus Ductus <span style="font-size:0.75rem; color:var(--success); font-weight:normal;">(${{cm ? cm.confidence_pct : 85}}% match)</span></div>`;
                     refSvgElem = `
                         <div class="c-box" style="display:flex; flex-direction:column; justify-content:center; align-items:center; background:#0b0f19;">
-                            <span style="font-size:0.58rem; color:#f59e0b; margin-bottom:2px; font-weight:bold;">CANONICAL FONT</span>
                             <div style="font-family:'VoynichEVA', monospace; font-size:2.8rem; color:#fbbf24; line-height:1;">${{evaEq}}</div>
-                            <div style="font-size:0.58rem; color:var(--text-muted); font-family:monospace; margin-top:2px;">EVA: '${{evaEq}}'</div>
                         </div>
                     `;
                 }} else if (cm && cm.reference_svg && cm.confidence_pct >= 40) {{
@@ -4097,7 +4075,6 @@ def generate_explorer_html(
                     matchHeader = `<div style="color:var(--accent); font-size:0.85rem; font-weight:bold;">${{schemeLabel}} <span style="font-size:0.75rem; color:var(--success); font-weight:normal;">(${{cm.confidence_pct}}% match)</span></div>`;
                     refSvgElem = `
                         <div class="c-box">
-                            <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">STANDARD REF (${{cm.scheme || activeAlphabetScheme.toUpperCase()}})</span>
                             ${{cm.reference_svg || ''}}
                         </div>
                     `;
@@ -4178,13 +4155,16 @@ def generate_explorer_html(
                         <span style="font-size:0.65rem; background:#0f172a; border:1px solid #334155; color:#38bdf8; padding:2px 6px; border-radius:4px; font-weight:600; white-space:nowrap;">🔒 ${{loopCountVal}} loop(s) • ${{topoLabel}}</span>
                     </div>
                     ${{schemesSummaryHtml}}
+                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; font-size:0.56rem; color:var(--text-muted); font-weight:bold; text-align:center; margin-bottom:3px; letter-spacing:0.3px;">
+                        <span>SCAN</span>
+                        <span>KINEMATIC DUCTUS</span>
+                        <span>CANONICAL FONT</span>
+                    </div>
                     <div class="catalogue-trio">
                         <div class="c-box">
-                            <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">ORIGINAL SCAN (MEDOID)</span>
                             ${{exCropHtml}}
                         </div>
                         <div class="c-box">
-                            <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:2px;">KINEMATIC DUCTUS</span>
                             ${{cleanSvgString(a.exemplar_svg_content || '') || '<div style="color:var(--text-muted); font-size:0.7rem; padding:10px;">(Ductus)</div>'}}
                         </div>
                         ${{refSvgElem}}
@@ -4203,9 +4183,26 @@ def generate_explorer_html(
 
         // Archetype Variations Modal Functionality
         function openArchetypeVariations(typeId) {{
+            if (!typeId) return;
             const cat = data[currentMs].catalogue;
-            const arch = cat.alphabet.find(a => a.type_id === typeId);
-            if (!arch) return;
+            if (!cat || !cat.alphabet) return;
+            let arch = cat.alphabet.find(a => a.type_id === typeId);
+            if (!arch && typeId.startsWith('S')) {{
+                arch = cat.alphabet.find(a => a.type_id === typeId.replace('S', 'G'));
+            }}
+            if (!arch && typeId.startsWith('G')) {{
+                arch = cat.alphabet.find(a => a.type_id === typeId.replace('G', 'S'));
+            }}
+            if (!arch) {{
+                const num = typeId.replace(/\D/g, '');
+                if (num) {{
+                    arch = cat.alphabet.find(a => (a.type_id && a.type_id.endsWith(num)) || a.type_id === `G${{num}}` || a.type_id === `S${{num}}`);
+                }}
+            }}
+            if (!arch) {{
+                console.warn('Archetype not found for typeId:', typeId);
+                return;
+            }}
 
             const cm = arch.corpus_match;
             const multi = arch.corpus_matches || {{}};
