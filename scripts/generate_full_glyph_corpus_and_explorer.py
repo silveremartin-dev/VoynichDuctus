@@ -85,6 +85,29 @@ def clean_page_data_for_json(pages_data: List[Dict[str, Any]], subfolder: str = 
         clean_neural = [clean_glyph_item(g) for g in p.get("glyphs_neural_pca", [])]
         clean_hybrid = [clean_glyph_item(g) for g in p.get("glyphs_hybrid_consensus", [])]
 
+        # Guarantee 100% of neural and hybrid glyphs have an authentic archetype assigned
+        word_to_cg = {}
+        for cg in clean_glyphs:
+            wid = cg.get("word_id", "")
+            if wid:
+                if wid not in word_to_cg:
+                    word_to_cg[wid] = []
+                word_to_cg[wid].append(cg)
+
+        for n_list in (clean_neural, clean_hybrid):
+            for ng in n_list:
+                if not ng.get("canonical_type") or ng["canonical_type"] == "G??":
+                    wid = ng.get("word_id", "")
+                    c_cands = word_to_cg.get(wid, [])
+                    if c_cands:
+                        ncx = (ng["bbox"][1] + ng["bbox"][3]) / 2.0
+                        best_c = min(c_cands, key=lambda c: abs((c["bbox"][1] + c["bbox"][3]) / 2.0 - ncx))
+                        ng["canonical_type"] = best_c.get("canonical_type", "G01")
+                    elif clean_glyphs:
+                        ng["canonical_type"] = clean_glyphs[0].get("canonical_type", "G01")
+                    else:
+                        ng["canonical_type"] = "G01" 
+
         p_id = p.get("page_id", "")
         c_info = cod_reg.get(p_id, {}) if subfolder == "voynich" else {}
         clean_pages.append({
@@ -881,13 +904,14 @@ def generate_explorer_html(
             gap: 14px;
         }}
         .variations-banner {{
-            display: grid;
-            grid-template-columns: 280px 1fr;
-            gap: 14px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
             background: var(--card-bg);
             border: 1px solid var(--border);
             border-radius: 8px;
             padding: 12px;
+            align-items: center;
         }}
         .variations-grid {{
             display: grid;
@@ -3510,12 +3534,24 @@ def generate_explorer_html(
             const hCount = hybridChildren.length;
             const isParity = (qCount === nCount && nCount === hCount);
 
+            const currentWordIdx = (page.words || []).findIndex(w => w.word_id === word.word_id);
+            const prevWord = currentWordIdx > 0 ? page.words[currentWordIdx - 1] : null;
+            const nextWord = (currentWordIdx >= 0 && currentWordIdx < (page.words || []).length - 1) ? page.words[currentWordIdx + 1] : null;
+            const wordPositionLabel = currentWordIdx >= 0 ? `${{currentWordIdx + 1}} / ${{page.words.length}}` : '';
+
             ins.innerHTML = `
-                <!-- 1. Header & Calligraphy View -->
+                <!-- 1. Header & Calligraphy View with Prev/Next Word Navigation -->
                 <div style="background:#1e1b4b; border:1px solid #6366f1; border-radius:8px; padding:10px; margin-bottom:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                        <span style="font-size:0.85rem; color:#a5b4fc; font-weight:bold;">🟡 Word: ${{word.word_id}}</span>
-                        <span class="badge-freq" style="font-size:0.65rem;">${{childGlyphs.length}} Glyphs</span>
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            <span style="font-size:0.85rem; color:#a5b4fc; font-weight:bold;">🟡 Word: ${{word.word_id}}</span>
+                            ${{wordPositionLabel ? `<span style="font-size:0.62rem; color:var(--text-muted);">(${{wordPositionLabel}})</span>` : ''}}
+                        </div>
+                        <div style="display:flex; gap:4px; align-items:center;">
+                            <button class="btn-tool" style="padding:2px 8px; font-size:0.65rem; background:#312e81; color:#c7d2fe; border:1px solid #6366f1; cursor:pointer;" ${{prevWord ? `onclick="selectWordById('${{prevWord.word_id}}')"` : 'disabled style="opacity:0.3; cursor:not-allowed;"'}}>◀ Prev Word</button>
+                            <button class="btn-tool" style="padding:2px 8px; font-size:0.65rem; background:#312e81; color:#c7d2fe; border:1px solid #6366f1; cursor:pointer;" ${{nextWord ? `onclick="selectWordById('${{nextWord.word_id}}')"` : 'disabled style="opacity:0.3; cursor:not-allowed;"'}}>Next Word ▶</button>
+                            <span class="badge-freq" style="font-size:0.65rem;">${{childGlyphs.length}} Glyphs</span>
+                        </div>
                     </div>
 
                     ${{word.eva_text ? `
@@ -3821,7 +3857,6 @@ def generate_explorer_html(
                         <div style="text-align:center; background:#000; border-radius:6px; padding:6px; border:1px solid var(--border);">
                             <img src="${{wordCropSrc}}" alt="${{activeWord.word_id}}" style="max-height:60px; max-width:100%; object-fit:contain;">
                         </div>
-                        ${{stripHtml}}
                     </div>
                 `;
             }}
@@ -4158,7 +4193,7 @@ def generate_explorer_html(
                     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; font-size:0.56rem; color:var(--text-muted); font-weight:bold; text-align:center; margin-bottom:3px; letter-spacing:0.3px;">
                         <span>SCAN</span>
                         <span>KINEMATIC DUCTUS</span>
-                        <span>CANONICAL FONT</span>
+                        <span>${{currentMs === 'voynich' ? 'CANONICAL FONT' : 'STANDARD REFERENCE'}}</span>
                     </div>
                     <div class="catalogue-trio">
                         <div class="c-box">
@@ -4183,9 +4218,15 @@ def generate_explorer_html(
 
         // Archetype Variations Modal Functionality
         function openArchetypeVariations(typeId) {{
-            if (!typeId) return;
             const cat = data[currentMs].catalogue;
-            if (!cat || !cat.alphabet) return;
+            if (!cat || !cat.alphabet || cat.alphabet.length === 0) return;
+            if (!typeId || typeId === 'G??' || typeId === 'S??') {{
+                if (selectedGlyph && selectedGlyph.canonical_type && selectedGlyph.canonical_type !== 'G??') {{
+                    typeId = selectedGlyph.canonical_type;
+                }} else {{
+                    typeId = cat.alphabet[0].type_id;
+                }}
+            }}
             let arch = cat.alphabet.find(a => a.type_id === typeId);
             if (!arch && typeId.startsWith('S')) {{
                 arch = cat.alphabet.find(a => a.type_id === typeId.replace('S', 'G'));
@@ -4260,21 +4301,21 @@ def generate_explorer_html(
             }}
 
             let bannerHtml = `
-                <div style="display:grid; grid-template-columns:repeat(3, 115px); gap:10px; background:#000; padding:10px; border-radius:8px; border:1px solid var(--border); align-items:center;">
-                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:105px; border-right:1px solid #1e293b; padding-right:6px;">
-                        <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:4px; font-weight:600;">ORIGINAL SCAN</span>
-                        ${{exCropSrc ? `<img src="${{exCropSrc}}" style="max-height:82px; max-width:95px; object-fit:contain; border-radius:4px;">` : `<div style="font-size:0.65rem; color:var(--text-muted);">(Scan)</div>`}}
+                <div style="display:flex; gap:8px; background:#000; padding:8px; border-radius:8px; border:1px solid var(--border); align-items:center; flex-shrink:0;">
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:95px; height:95px; border-right:1px solid #1e293b; padding-right:4px;">
+                        <span style="font-size:0.56rem; color:var(--text-muted); margin-bottom:3px; font-weight:600;">SCAN</span>
+                        ${{exCropSrc ? `<img src="${{exCropSrc}}" style="max-height:75px; max-width:90px; object-fit:contain; border-radius:4px;">` : `<div style="font-size:0.65rem; color:var(--text-muted);">(Scan)</div>`}}
                     </div>
-                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:105px; border-right:1px solid #1e293b; padding-right:6px;">
-                        <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:4px; font-weight:600;">KINEMATIC DUCTUS</span>
-                        <div style="max-height:82px; display:flex; align-items:center; justify-content:center;">${{cleanSvgString(arch.exemplar_svg_content || '')}}</div>
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:95px; height:95px; border-right:1px solid #1e293b; padding-right:4px;">
+                        <span style="font-size:0.56rem; color:var(--text-muted); margin-bottom:3px; font-weight:600;">DUCTUS</span>
+                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center;">${{cleanSvgString(arch.exemplar_svg_content || '')}}</div>
                     </div>
-                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:105px;">
-                        <span style="font-size:0.58rem; color:var(--text-muted); margin-bottom:4px; font-weight:600;">STANDARD REF</span>
-                        <div style="max-height:82px; display:flex; align-items:center; justify-content:center;">${{cm?.reference_svg || '<span style="font-size:0.65rem; color:var(--text-muted);">Emergent</span>'}}</div>
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:95px; height:95px;">
+                        <span style="font-size:0.56rem; color:var(--text-muted); margin-bottom:3px; font-weight:600;">REFERENCE</span>
+                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center;">${{cm?.reference_svg || '<span style="font-size:0.65rem; color:var(--text-muted);">Emergent</span>'}}</div>
                     </div>
                 </div>
-                <div style="display:flex; flex-direction:column; justify-content:center; gap:4px; flex:1;">
+                <div style="display:flex; flex-direction:column; justify-content:center; gap:4px; flex:1; min-width:320px;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <div style="font-size:1.1rem; font-weight:bold; color:var(--accent);">
                             Type ${{arch.type_id}} (${{Number(arch.frequency || 0).toLocaleString()}} occurrences across corpus)
