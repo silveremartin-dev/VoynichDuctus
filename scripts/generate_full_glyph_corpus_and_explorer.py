@@ -72,7 +72,7 @@ def clean_page_data_for_json(pages_data: List[Dict[str, Any]], subfolder: str = 
                 "stroke_count": int(g.get("stroke_count", len(g.get("strokes", [])))),
                 "png_rel": g.get("png_rel", ""),
                 "svg_rel": g.get("svg_rel", ""),
-                "svg_content": g.get("svg_content", ""),
+                "svg_content": g.get("svg_content", g.get("ductus_svg", "")),
                 "canonical_type": g.get("canonical_type", ""),
                 "segmentation_mode": g.get("segmentation_mode", ""),
                 "support_badge": g.get("support_badge", ""),
@@ -1080,11 +1080,11 @@ def generate_explorer_html(
                             <option value="raw" title="Raw uncalibrated scan">📷 Natural</option>
                         </select>
                         <div style="display:flex; align-items:center; gap:3px;">
-                            <span style="font-size:0.66rem; color:var(--text-muted); font-weight:600;" title="How intact lexical words are segmented into constituent glyphs">Decomp:</span>
-                            <select id="segmentation-mode-select" class="select-filter" onchange="setSegmentationMode(this.value)" style="font-size:0.68rem; padding:2px 5px; background:#0f172a; border-color:#38bdf8; color:#38bdf8; font-weight:600;" title="Word-to-glyph segmentation algorithm (Quill Ductus, Neural PCA, Hybrid Consensus)">
-                                <option value="heuristic_calligraphic" title="Physical medieval quill mechanics (40° nib bevel) and supralinear diacritic decoupling">Quill Ductus (40°)</option>
-                                <option value="neural_word_pca" title="Self-supervised neural word decomposer extracting horizontal principal spatial basis components">AI Neural PCA</option>
-                                <option value="hybrid_consensus" title="Strict mathematical consensus between physical quill kinematics and neural basis decomposition">Hybrid Consensus</option>
+                            <span style="font-size:0.66rem; color:var(--text-muted); font-weight:600;" title="Word-to-glyph decomposition algorithm">Word Decomposition:</span>
+                            <select id="segmentation-mode-select" class="select-filter" onchange="setSegmentationMode(this.value)" style="font-size:0.68rem; padding:2px 5px; background:#0f172a; border-color:#38bdf8; color:#38bdf8; font-weight:600;" title="Word-to-glyph decomposition algorithm (Topological & Valley, Spatial PCA, Hybrid Consensus)">
+                                <option value="heuristic_calligraphic" title="Decomposition A: Topological loops, supralinear diacritic decoupling, and minimum-energy ink valleys">A · Topological &amp; Valley (40°)</option>
+                                <option value="neural_word_pca" title="Decomposition B: 1D horizontal spatial PCA latent transition boundaries ||dZ/dx||">B · Spatial PCA Decomposition</option>
+                                <option value="hybrid_consensus" title="Decomposition C: Mathematical consensus between A and B with Euler loop protection">C · Hybrid Consensus</option>
                             </select>
                         </div>
                     </div>
@@ -1145,15 +1145,6 @@ def generate_explorer_html(
                     <h3 style="margin:0; border:none; padding:0; font-size:0.85rem; color:var(--accent);" title="Detailed inspection of selected word or glyph, physical metrics, ductus strokes and transcription">
                         Inspector &amp; Ductus
                     </h3>
-                    <div style="display:flex; align-items:center; gap:4px;">
-                        <span style="font-size:0.65rem; color:#f59e0b; font-weight:700;" title="Standard transliteration reference alphabet">Translit:</span>
-                        <select id="active-translit-scheme-select" class="select-filter" onchange="setAlphabetScheme(this.value)" style="font-size:0.68rem; padding:2px 5px; background:#0f172a; border-color:#f59e0b; color:#f59e0b; font-weight:600;" title="Transliteration alignment scheme (EVA, Currier, v101, Voynichese 2014)">
-                            <option value="eva">EVA</option>
-                            <option value="currier">Currier</option>
-                            <option value="v101">v101</option>
-                            <option value="voynichese">Voynichese (2014)</option>
-                        </select>
-                    </div>
                 </div>
                 <div class="inspector-panel" id="inspector-content"></div>
             </div>
@@ -1926,17 +1917,34 @@ def generate_explorer_html(
         }}
 
         function setSegmentationMode(mode) {{
+            const wasInspectingGlyph = Boolean(selectedGlyph);
             activeSegmentationMode = mode;
             showGlyphs = true;
+            const page = data[currentMs].pages[currentPageIdx];
+            if (selectedWord) {{
+                const childGlyphs = page ? getPageGlyphs(page).filter(g => g.word_id === selectedWord.word_id) : [];
+                if (wasInspectingGlyph) {{
+                    selectedGlyph = childGlyphs.length > 0 ? childGlyphs[0] : null;
+                }} else {{
+                    selectedGlyph = null;
+                }}
+            }} else if (selectedGlyph && page) {{
+                const allNewGlyphs = getPageGlyphs(page);
+                selectedGlyph = allNewGlyphs.length > 0 ? allNewGlyphs[0] : null;
+                if (selectedGlyph && selectedGlyph.word_id && page.words) {{
+                    selectedWord = page.words.find(w => w.word_id === selectedGlyph.word_id) || null;
+                }}
+            }}
             updateLayerButtonStates();
             drawCanvasOverlay();
             renderCurrentGrid();
             updateSegmentationUI();
-            if (selectedWord) {{
-                const page = data[currentMs].pages[currentPageIdx];
-                const childGlyphs = page ? getPageGlyphs(page).filter(g => g.word_id === selectedWord.word_id) : [];
-                selectedGlyph = childGlyphs.length > 0 ? childGlyphs[0] : null;
+            if (wasInspectingGlyph && selectedGlyph) {{
+                renderInspector();
+            }} else if (selectedWord) {{
                 renderInspectorWord(selectedWord);
+            }} else {{
+                renderInspectorEmpty();
             }}
         }}
 
@@ -2745,9 +2753,9 @@ def generate_explorer_html(
                         const wordChildren = getPageGlyphs(page).filter(g => g.word_id === selectedWord.word_id);
                         wordChildren.forEach(g => {{
                             const isThisGlyph = selectedGlyph && selectedGlyph.glyph_id === g.glyph_id;
-                            ctx.strokeStyle = isThisGlyph ? '#ffffff' : activeColor;
-                            ctx.lineWidth = isThisGlyph ? glyphThickness * 2.2 : glyphThickness * 1.3;
-                            ctx.fillStyle = isThisGlyph ? 'rgba(255, 255, 255, 0.25)' : glyphFill;
+                            ctx.strokeStyle = isThisGlyph ? '#fbbf24' : activeColor;
+                            ctx.lineWidth = isThisGlyph ? glyphThickness * 2.4 : glyphThickness * 1.3;
+                            ctx.fillStyle = isThisGlyph ? 'rgba(251, 191, 36, 0.35)' : glyphFill;
                             renderShape(g, true, true);
                         }});
                     }}
@@ -2761,9 +2769,9 @@ def generate_explorer_html(
                         const rh = Math.min(canvas.height - ry, (gy1 - gy0 + pad * 2) * scaleY);
                         ctx.drawImage(pageImageObj, rx, ry, rw, rh, rx, ry, rw, rh);
                     }}
-                    ctx.strokeStyle = activeColor;
-                    ctx.lineWidth = glyphThickness * 1.8;
-                    ctx.fillStyle = glyphFill;
+                    ctx.strokeStyle = '#fbbf24';
+                    ctx.lineWidth = glyphThickness * 2.4;
+                    ctx.fillStyle = 'rgba(251, 191, 36, 0.35)';
                     renderShape(selectedGlyph, true, true);
                 }}
                 return;
@@ -2876,9 +2884,9 @@ def generate_explorer_html(
 
                     const isSelected = selectedGlyph && selectedGlyph.glyph_id === g.glyph_id;
                     if (isSelected) {{
-                        ctx.strokeStyle = activeColor;
-                        ctx.lineWidth = glyphThickness * 2.0;
-                        ctx.fillStyle = (activeSegmentationMode === 'neural_word_pca') ? 'rgba(244, 63, 94, 0.40)' : (activeSegmentationMode === 'hybrid_consensus' ? 'rgba(52, 211, 153, 0.40)' : 'rgba(0, 229, 255, 0.40)');
+                        ctx.strokeStyle = '#fbbf24';
+                        ctx.lineWidth = glyphThickness * 2.4;
+                        ctx.fillStyle = 'rgba(251, 191, 36, 0.35)';
                     }} else {{
                         ctx.strokeStyle = glyphStroke;
                         ctx.lineWidth = glyphThickness;
@@ -3027,6 +3035,159 @@ def generate_explorer_html(
             if (w) selectWord(w, shouldAutoZoom);
         }}
 
+        async function selectPageAndWord(pageIdx, wordSelector) {{
+            const msData = data[currentMs];
+            if (!msData || !msData.pages) return;
+            currentPageIdx = pageIdx;
+            zoomScale = 1.0;
+            panX = 0;
+            panY = 0;
+            await ensurePageLoaded(currentMs, pageIdx);
+            const page = msData.pages[pageIdx];
+            if (page && page.words && page.words.length > 0) {{
+                const targetWord = (wordSelector === 'last') 
+                    ? page.words[page.words.length - 1] 
+                    : page.words[0];
+                selectedWord = targetWord;
+                selectedGlyph = null;
+                selectedLineId = targetWord.line_id || null;
+            }} else {{
+                selectedWord = null;
+                selectedGlyph = null;
+            }}
+            renderPagesTab();
+            if (selectedWord) {{
+                autoZoomOnWord(selectedWord);
+            }}
+        }}
+
+        async function selectPageAndGlyph(pageIdx, glyphSelector) {{
+            const msData = data[currentMs];
+            if (!msData || !msData.pages) return;
+            currentPageIdx = pageIdx;
+            zoomScale = 1.0;
+            panX = 0;
+            panY = 0;
+            await ensurePageLoaded(currentMs, pageIdx);
+            const page = msData.pages[pageIdx];
+            const glyphs = getPageGlyphs(page);
+            if (glyphs && glyphs.length > 0) {{
+                const targetGlyph = (glyphSelector === 'last') 
+                    ? glyphs[glyphs.length - 1] 
+                    : glyphs[0];
+                selectedGlyph = targetGlyph;
+                if (targetGlyph.word_id && page.words) {{
+                    selectedWord = page.words.find(w => w.word_id === targetGlyph.word_id) || null;
+                }}
+                selectedLineId = targetGlyph.line_id || null;
+            }} else {{
+                selectedGlyph = null;
+                selectedWord = null;
+            }}
+            renderPagesTab();
+            if (selectedGlyph) {{
+                autoZoomOnGlyph(selectedGlyph);
+            }}
+        }}
+
+        async function goToPrevWord() {{
+            const msData = data[currentMs];
+            if (!msData || !msData.pages || msData.pages.length === 0) return;
+            const page = msData.pages[currentPageIdx];
+            if (!page || !page.words || page.words.length === 0) {{
+                const prevPageIdx = (currentPageIdx - 1 + msData.pages.length) % msData.pages.length;
+                await selectPageAndWord(prevPageIdx, 'last');
+                return;
+            }}
+            const activeW = selectedWord || (selectedGlyph ? page.words.find(w => w.word_id === selectedGlyph.word_id) : null);
+            if (!activeW) {{
+                selectWord(page.words[page.words.length - 1], true);
+                return;
+            }}
+            const idx = page.words.findIndex(w => w.word_id === activeW.word_id);
+            if (idx > 0) {{
+                selectWord(page.words[idx - 1], true);
+            }} else {{
+                // Seamless cross-page traversal to the last word of the previous page in active folio order!
+                const prevPageIdx = (currentPageIdx - 1 + msData.pages.length) % msData.pages.length;
+                await selectPageAndWord(prevPageIdx, 'last');
+            }}
+        }}
+
+        async function goToNextWord() {{
+            const msData = data[currentMs];
+            if (!msData || !msData.pages || msData.pages.length === 0) return;
+            const page = msData.pages[currentPageIdx];
+            if (!page || !page.words || page.words.length === 0) {{
+                const nextPageIdx = (currentPageIdx + 1) % msData.pages.length;
+                await selectPageAndWord(nextPageIdx, 'first');
+                return;
+            }}
+            const activeW = selectedWord || (selectedGlyph ? page.words.find(w => w.word_id === selectedGlyph.word_id) : null);
+            if (!activeW) {{
+                selectWord(page.words[0], true);
+                return;
+            }}
+            const idx = page.words.findIndex(w => w.word_id === activeW.word_id);
+            if (idx >= 0 && idx < page.words.length - 1) {{
+                selectWord(page.words[idx + 1], true);
+            }} else {{
+                // Seamless cross-page traversal to the first word of the next page in active folio order!
+                const nextPageIdx = (currentPageIdx + 1) % msData.pages.length;
+                await selectPageAndWord(nextPageIdx, 'first');
+            }}
+        }}
+
+        async function goToPrevGlyph() {{
+            const msData = data[currentMs];
+            if (!msData || !msData.pages || msData.pages.length === 0) return;
+            const page = msData.pages[currentPageIdx];
+            if (!page) return;
+            const allGlyphs = getPageGlyphs(page);
+            if (allGlyphs.length === 0) {{
+                const prevPageIdx = (currentPageIdx - 1 + msData.pages.length) % msData.pages.length;
+                await selectPageAndGlyph(prevPageIdx, 'last');
+                return;
+            }}
+            if (!selectedGlyph) {{
+                selectGlyph(allGlyphs[allGlyphs.length - 1], true);
+                return;
+            }}
+            const idx = allGlyphs.findIndex(g => g.glyph_id === selectedGlyph.glyph_id);
+            if (idx > 0) {{
+                selectGlyph(allGlyphs[idx - 1], true);
+            }} else {{
+                // Seamless cross-page traversal to the last glyph of the previous page in active folio order!
+                const prevPageIdx = (currentPageIdx - 1 + msData.pages.length) % msData.pages.length;
+                await selectPageAndGlyph(prevPageIdx, 'last');
+            }}
+        }}
+
+        async function goToNextGlyph() {{
+            const msData = data[currentMs];
+            if (!msData || !msData.pages || msData.pages.length === 0) return;
+            const page = msData.pages[currentPageIdx];
+            if (!page) return;
+            const allGlyphs = getPageGlyphs(page);
+            if (allGlyphs.length === 0) {{
+                const nextPageIdx = (currentPageIdx + 1) % msData.pages.length;
+                await selectPageAndGlyph(nextPageIdx, 'first');
+                return;
+            }}
+            if (!selectedGlyph) {{
+                selectGlyph(allGlyphs[0], true);
+                return;
+            }}
+            const idx = allGlyphs.findIndex(g => g.glyph_id === selectedGlyph.glyph_id);
+            if (idx >= 0 && idx < allGlyphs.length - 1) {{
+                selectGlyph(allGlyphs[idx + 1], true);
+            }} else {{
+                // Seamless cross-page traversal to the first glyph of the next page in active folio order!
+                const nextPageIdx = (currentPageIdx + 1) % msData.pages.length;
+                await selectPageAndGlyph(nextPageIdx, 'first');
+            }}
+        }}
+
         // Setup Interactive Mouse Zoom & Pan
         (function setupPanZoom() {{
             const wrapper = document.getElementById('canvas-wrapper');
@@ -3118,6 +3279,19 @@ def generate_explorer_html(
                         return x >= x0 - 2 && x <= x1 + 2 && y >= y0 - 2 && y <= y1 + 2;
                     }}
                     return false;
+                }}
+
+                // Click-outside-to-deselect:
+                // When a word or glyph is currently isolated, clicking outside of that word immediately clears isolation and deselects all!
+                if (selectedWord || selectedGlyph) {{
+                    const activeWordObj = selectedWord || (page.words && selectedGlyph ? page.words.find(w => w.word_id === selectedGlyph.word_id) : null);
+                    if (activeWordObj) {{
+                        const inActiveWord = isHit(activeWordObj, clickCanvasX, clickCanvasY);
+                        if (!inActiveWord) {{
+                            deselectAll();
+                            return;
+                        }}
+                    }}
                 }}
 
                 // 1. If Glyphs layer is visible: find ALL candidate hits, pick the closest one to click!
@@ -3535,25 +3709,57 @@ def generate_explorer_html(
             const isParity = (qCount === nCount && nCount === hCount);
 
             const currentWordIdx = (page.words || []).findIndex(w => w.word_id === word.word_id);
-            const prevWord = currentWordIdx > 0 ? page.words[currentWordIdx - 1] : null;
-            const nextWord = (currentWordIdx >= 0 && currentWordIdx < (page.words || []).length - 1) ? page.words[currentWordIdx + 1] : null;
+            const hasPrevWord = currentWordIdx > 0;
+            const hasNextWord = currentWordIdx >= 0 && currentWordIdx < (page.words || []).length - 1;
             const wordPositionLabel = currentWordIdx >= 0 ? `${{currentWordIdx + 1}} / ${{page.words.length}}` : '';
 
-            ins.innerHTML = `
-                <!-- 1. Header & Calligraphy View with Prev/Next Word Navigation -->
-                <div style="background:#1e1b4b; border:1px solid #6366f1; border-radius:8px; padding:10px; margin-bottom:8px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                        <div style="display:flex; align-items:center; gap:6px;">
-                            <span style="font-size:0.85rem; color:#a5b4fc; font-weight:bold;">🟡 Word: ${{word.word_id}}</span>
-                            ${{wordPositionLabel ? `<span style="font-size:0.62rem; color:var(--text-muted);">(${{wordPositionLabel}})</span>` : ''}}
+            // Kinematic Ductus Chain
+            let ductusChainHtml = '';
+            if (childGlyphs.length > 0) {{
+                ductusChainHtml = `
+                    <div style="background:#050914; border:1px solid #38bdf8; border-radius:6px; padding:8px 10px; margin-bottom:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <span style="font-size:0.68rem; color:#38bdf8; font-weight:bold; text-transform:uppercase; letter-spacing:0.04em;">
+                                🖋️ Kinematic Ductus Chain (${{childGlyphs.length}} glyphs)
+                            </span>
+                            <span style="font-size:0.58rem; color:var(--text-muted);">
+                                Left-to-Right Execution Order
+                            </span>
                         </div>
-                        <div style="display:flex; gap:4px; align-items:center;">
-                            <button class="btn-tool" style="padding:2px 8px; font-size:0.65rem; background:#312e81; color:#c7d2fe; border:1px solid #6366f1; cursor:pointer;" ${{prevWord ? `onclick="selectWordById('${{prevWord.word_id}}')"` : 'disabled style="opacity:0.3; cursor:not-allowed;"'}}>◀ Prev Word</button>
-                            <button class="btn-tool" style="padding:2px 8px; font-size:0.65rem; background:#312e81; color:#c7d2fe; border:1px solid #6366f1; cursor:pointer;" ${{nextWord ? `onclick="selectWordById('${{nextWord.word_id}}')"` : 'disabled style="opacity:0.3; cursor:not-allowed;"'}}>Next Word ▶</button>
-                            <span class="badge-freq" style="font-size:0.65rem;">${{childGlyphs.length}} Glyphs</span>
+                        <div style="display:flex; align-items:center; justify-content:center; gap:6px; overflow-x:auto; padding:6px; background:#000; border-radius:5px; border:1px solid #1e293b; min-height:60px;">
+                            ${{childGlyphs.map((cg, idx) => {{
+                                const s = cg.svg_content || getRenderableDuctusSvg(cg, 3);
+                                const fontChar = (currentMs === 'voynich' && cg.eva_char) ? cg.eva_char : '';
+                                return `
+                                    <div onclick="selectGlyphById('${{cg.glyph_id}}', true)" title="Inspect Glyph ${{cg.glyph_id}} (${{cg.canonical_type || 'G??'}})" style="cursor:pointer; display:inline-flex; flex-direction:column; align-items:center; background:#090d16; border:1px solid #334155; border-radius:5px; padding:4px 6px; min-width:40px; transition:border-color 0.15s ease;" onmouseover="this.style.borderColor='#38bdf8'" onmouseout="this.style.borderColor='#334155'">
+                                        <div style="height:44px; width:auto; display:flex; align-items:center; justify-content:center;">
+                                            ${{s}}
+                                        </div>
+                                        <div style="display:flex; gap:3px; align-items:center; margin-top:3px;">
+                                            <span style="font-size:0.60rem; color:#38bdf8; font-family:monospace; font-weight:bold;">${{cg.canonical_type || 'G??'}}</span>
+                                            ${{fontChar ? `<span style="font-size:0.65rem; color:#f59e0b; font-weight:bold; font-family:'VoynichEVA', monospace;">'${{fontChar}}'</span>` : ''}}
+                                        </div>
+                                    </div>
+                                `;
+                            }}).join('')}}
                         </div>
                     </div>
+                `;
+            }}
 
+            ins.innerHTML = `
+                <!-- 1. Sleek Word Navigation Toolbar -->
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; background:#0f172a; border:1px solid #334155; border-radius:6px; padding:6px 10px; margin-bottom:8px;">
+                    <button class="btn-tool" onclick="goToPrevWord()" style="padding:4px 10px; font-size:0.75rem; background:#1e293b; color:#fbbf24; font-weight:bold; border:1px solid #f59e0b; border-radius:4px; cursor:pointer;" title="${{hasPrevWord ? 'Previous Word' : 'Previous Folio in active order (last word)'}}">◀ Prev Word</button>
+                    <div style="text-align:center; flex:1; overflow:hidden;">
+                        <span style="font-size:0.85rem; color:#fbbf24; font-weight:bold;">🟡 Word: ${{word.word_id}}</span>
+                        <span style="font-size:0.62rem; color:var(--text-muted); display:block;">${{wordPositionLabel ? `Word ${{wordPositionLabel}} · ` : ''}}${{childGlyphs.length}} glyphs (${{page.page_id}})</span>
+                    </div>
+                    <button class="btn-tool" onclick="goToNextWord()" style="padding:4px 10px; font-size:0.75rem; background:#1e293b; color:#fbbf24; font-weight:bold; border:1px solid #f59e0b; border-radius:4px; cursor:pointer;" title="${{hasNextWord ? 'Next Word' : 'Next Folio in active order (first word)'}}">Next Word ▶</button>
+                </div>
+
+                <!-- 2. Calligraphy Font, Ductus Chain & Transliteration -->
+                <div style="background:#1e1b4b; border:1px solid #6366f1; border-radius:8px; padding:10px; margin-bottom:8px;">
                     ${{word.eva_text ? `
                         <div style="text-align:center; background:#000; border-radius:6px; padding:8px 6px; border:1px solid #334155; margin-bottom:8px;">
                             <span style="font-family:'VoynichEVA', monospace; font-size:2.6rem; color:#fbbf24; letter-spacing:4px; display:inline-block; line-height:1.1;">${{word.eva_text}}</span>
@@ -3562,10 +3768,21 @@ def generate_explorer_html(
 
                     ${{translitBarHtml}}
                     ${{serafiniBarHtml}}
+                    ${{ductusChainHtml}}
 
-                    <div style="text-align:center; background:#000; border-radius:6px; padding:8px; border:1px solid #334155;">
-                        <div style="font-size:0.58rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:4px; letter-spacing:0.04em;">Original Manuscript Parchment Ink</div>
-                        <img src="${{wordCropSrc}}" alt="${{word.word_id}}" style="max-height:85px; max-width:100%; object-fit:contain;">
+                    <!-- Ductus Kinematic Color Legend -->
+                    <div style="background:#0b1329; border:1px solid #1e293b; border-radius:6px; padding:5px 8px; font-size:0.65rem;">
+                        <div style="color:var(--accent); font-weight:bold; margin-bottom:2px; display:flex; justify-content:space-between;">
+                            <span>🖋️ Kinematic Ductus Legend</span>
+                            <span style="color:var(--text-muted); font-size:0.58rem;">Stroke Order: 1 ➔ 2 ➔ 3 ➔ 4</span>
+                        </div>
+                        <div style="display:flex; flex-wrap:wrap; gap:6px; line-height:1.3; color:var(--text-muted);">
+                            <span><strong style="color:#10b981;">● Green Dot:</strong> Pen Touchdown</span>
+                            <span><strong style="color:#38bdf8;">— Cyan:</strong> Stroke 1</span>
+                            <span><strong style="color:#10b981;">— Emerald:</strong> Stroke 2</span>
+                            <span><strong style="color:#f59e0b;">— Amber:</strong> Stroke 3</span>
+                            <span><strong style="color:#c084fc;">— Violet:</strong> Stroke 4+</span>
+                        </div>
                     </div>
                 </div>
 
@@ -3693,6 +3910,21 @@ def generate_explorer_html(
                 return;
             }}
 
+            const page = data[currentMs].pages[currentPageIdx];
+            const allGlyphs = getPageGlyphs(page);
+            const globalGIdx = allGlyphs.findIndex(g => g.glyph_id === selectedGlyph.glyph_id);
+            const hasPrevG = globalGIdx > 0;
+            const hasNextG = globalGIdx >= 0 && globalGIdx < allGlyphs.length - 1;
+
+            const activeWord = selectedWord || (page && page.words ? page.words.find(w => w.word_id === selectedGlyph.word_id) : null);
+            const wordGlyphs = activeWord ? allGlyphs.filter(g => g.word_id === activeWord.word_id) : [];
+            const glyphInWordIdx = wordGlyphs.findIndex(g => g.glyph_id === selectedGlyph.glyph_id);
+            const glyphPosLabel = (wordGlyphs.length > 0 && glyphInWordIdx >= 0) 
+                ? `Glyph ${{glyphInWordIdx + 1}} of ${{wordGlyphs.length}} in '${{activeWord.word_id}}'`
+                : `Glyph ${{globalGIdx + 1}} / ${{allGlyphs.length}}`;
+
+            const glyphShortLabel = getModelGlyphLabel(selectedGlyph);
+
             const cat = data[currentMs].catalogue;
             const arch = cat.alphabet.find(a => a.type_id === selectedGlyph.canonical_type);
             const multiMatches = arch ? (arch.corpus_matches || {{}}) : {{}};
@@ -3763,100 +3995,33 @@ def generate_explorer_html(
             let refSvgBox = '';
             if (currentMs === 'voynich' && evaChar) {{
                 refSvgBox = `
-                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:center; align-items:center; background:#0b0f19;">
-                        <span style="font-size:0.65rem; color:#f59e0b; margin-bottom:4px; font-weight:bold;">VOYNICH CANONICAL FONT</span>
-                        <div style="font-family:'VoynichEVA', monospace; font-size:3.6rem; color:#fbbf24; line-height:1.1; filter:drop-shadow(0 0 6px rgba(245,158,11,0.5));">${{evaChar}}</div>
-                        <div style="font-size:0.65rem; color:var(--text-muted); font-family:monospace; margin-top:4px;">Reference EVA: '${{evaChar}}'</div>
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:120px; background:#0b0f19; border:1px solid #f59e0b; border-radius:6px; padding:8px;">
+                        <span style="font-size:0.65rem; color:#f59e0b; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase;">VOYNICH CANONICAL FONT</span>
+                        <div style="flex:1; display:flex; align-items:center; justify-content:center;">
+                            <span style="font-family:'VoynichEVA', monospace; font-size:3.6rem; color:#fbbf24; line-height:1.1; filter:drop-shadow(0 0 6px rgba(245,158,11,0.5));">${{evaChar}}</span>
+                        </div>
+                        <span style="font-size:0.60rem; color:var(--text-muted); font-family:monospace;">Reference EVA: '${{evaChar}}'</span>
                     </div>
                 `;
             }} else if (cm && cm.reference_svg) {{
                 refSvgBox = `
-                    <div class="preview-box-large">
-                        <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">REFERENCE DUCTUS</span>
-                        ${{cm.reference_svg}}
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:120px; background:#0b0f19; border:1px solid #c084fc; border-radius:6px; padding:8px;">
+                        <span style="font-size:0.65rem; color:#c084fc; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase;">STANDARD REFERENCE</span>
+                        <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; max-height:100px;">
+                            ${{cm.reference_svg}}
+                        </div>
+                        <span style="font-size:0.58rem; color:var(--text-muted); font-family:monospace;">Archetype ${{selectedGlyph.canonical_type || 'G??'}}</span>
                     </div>
                 `;
             }} else {{
                 refSvgBox = `
-                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:center; align-items:center;">
-                        <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">AUTONOMOUS FORM</span>
-                        <div style="color:var(--text-muted); font-size:0.68rem; text-align:center; padding:6px;">
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:120px; background:#0b0f19; border:1px solid #334155; border-radius:6px; padding:8px;">
+                        <span style="font-size:0.65rem; color:var(--text-muted); font-weight:bold; letter-spacing:0.04em; text-transform:uppercase;">CANONICAL EXEMPLAR</span>
+                        <div style="color:var(--text-muted); font-size:0.68rem; text-align:center; padding:6px; flex:1; display:flex; flex-direction:column; justify-content:center;">
                             <div>✨ Emergent Ductus</div>
-                            <div style="font-size:0.58rem; opacity:0.7; margin-top:2px;">(No Prior Translit)</div>
+                            <div style="font-size:0.58rem; opacity:0.7; margin-top:2px;">Archetype ${{selectedGlyph.canonical_type || 'G??'}}</div>
                         </div>
-                    </div>
-                `;
-            }}
-
-            let corpusHtml = multiCardsHtml;
-
-            const glyphCropSrc = selectedGlyph.png_rel || getOnTheFlyCrop(selectedGlyph, 6);
-            const wordCropSrc = selectedGlyph.word_png_rel || (selectedGlyph.word_bbox ? getOnTheFlyCrop(selectedGlyph.word_bbox, 6) : '');
-
-            let wordHtml = '';
-            const page = data[currentMs].pages[currentPageIdx];
-            const activeWord = selectedWord || (selectedGlyph && page && page.words ? page.words.find(w => w.word_id === selectedGlyph.word_id) : null);
-            if (activeWord) {{
-                const childGlyphs = getPageGlyphs(page).filter(g => g.word_id === activeWord.word_id);
-                const wordCropSrc = activeWord.word_png_rel || (activeWord.bbox ? getOnTheFlyCrop(activeWord.bbox, 6) : '');
-                const currentGIdx = childGlyphs.findIndex(g => g.glyph_id === (selectedGlyph ? selectedGlyph.glyph_id : ''));
-                const prevG = currentGIdx > 0 ? childGlyphs[currentGIdx - 1] : null;
-                const nextG = currentGIdx >= 0 && currentGIdx < childGlyphs.length - 1 ? childGlyphs[currentGIdx + 1] : null;
-
-                let stripHtml = '';
-                if (childGlyphs.length > 0) {{
-                    stripHtml = `
-                        <div style="background:#0c1222; border:1px solid #1e293b; border-radius:6px; padding:6px; margin-top:6px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; font-size:0.68rem; color:var(--accent); font-weight:bold;">
-                                <span>Constituent Glyphs (${{childGlyphs.length}})</span>
-                                <span style="color:var(--text-muted); font-size:0.62rem;">${{currentGIdx >= 0 ? `Glyph ${{currentGIdx + 1}} of ${{childGlyphs.length}}` : ''}}</span>
-                            </div>
-                            <div style="display:flex; gap:6px; overflow-x:auto; padding-bottom:4px;">
-                                ${{childGlyphs.map((cg, idx) => {{
-                                    const isCurrent = selectedGlyph && selectedGlyph.glyph_id === cg.glyph_id;
-                                    const cgCrop = cg.png_rel || getOnTheFlyCrop(cg, 4);
-                                    const cgVisual = cgCrop ? `<img src="${{cgCrop}}" alt="${{cg.glyph_id}}" style="height:32px; object-fit:contain;">` : `<div style="height:32px; display:flex; align-items:center;">${{getRenderableDuctusSvg(cg, 3)}}</div>`;
-                                    const fontPreview = (currentMs === 'voynich' && cg.eva_char) 
-                                        ? `<span style="font-family:'VoynichEVA', monospace; font-size:1.1rem; color:#f59e0b; display:block; margin:1px 0;">${{cg.eva_char}}</span>` 
-                                        : '';
-                                    return `
-                                        <div class="glyph-card ${{isCurrent ? 'selected' : ''}}" style="padding:4px; min-width:58px; flex-shrink:0; cursor:pointer; text-align:center; ${{isCurrent ? 'border:2px solid #00e5ff; box-shadow:0 0 8px rgba(0,229,255,0.4); background:#1e293b;' : ''}}" onclick="selectGlyphById('${{cg.glyph_id}}', true)">
-                                            <div style="height:34px; display:flex; align-items:center; justify-content:center; background:#000; border-radius:3px;">${{cgVisual}}</div>
-                                            <div style="font-size:0.60rem; font-weight:bold; margin-top:2px; color:#94a3b8;">${{getModelGlyphLabel(cg)}}</div>
-                                            ${{fontPreview}}
-                                            ${{cg.eva_char ? `<span class="badge-type" style="background:#f59e0b; color:#000; font-weight:bold; font-size:0.58rem; padding:0 3px;">'${{cg.eva_char}}'</span>` : `<span class="badge-type" style="font-size:0.58rem; padding:0 3px;">${{cg.canonical_type || 'G??'}}</span>`}}
-                                        </div>
-                                    `;
-                                }}).join('')}}
-                            </div>
-                            <div style="display:flex; justify-content:space-between; gap:6px; margin-top:6px;">
-                                <button class="btn-locate" style="flex:1; padding:4px;" ${{prevG ? `onclick="selectGlyphById('${{prevG.glyph_id}}', true)"` : 'disabled style="opacity:0.35; cursor:not-allowed;"'}}>◀ Prev Glyph</button>
-                                <button class="btn-locate" style="flex:1; padding:4px;" ${{nextG ? `onclick="selectGlyphById('${{nextG.glyph_id}}', true)"` : 'disabled style="opacity:0.35; cursor:not-allowed;"'}}>Next Glyph ▶</button>
-                            </div>
-                        </div>
-                    `;
-                }}
-
-                wordHtml = `
-                    <div style="background:#091e17; border:1px solid #10b981; border-radius:8px; padding:8px 10px; margin-bottom:10px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                            <span style="font-size:0.75rem; color:#10b981; font-weight:bold;">🟢 Active Word: ${{activeWord.word_id}}</span>
-                            <span class="badge-freq">${{childGlyphs.length}} Glyphs</span>
-                        </div>
-                        ${{activeWord.eva_text ? `
-                            <div style="background:#111827; border:1px solid #f59e0b; border-radius:6px; padding:6px 10px; margin-bottom:6px;">
-                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
-                                    <span style="font-size:0.62rem; color:var(--text-muted); font-weight:bold;">VOYNICHESE (2014) EVA:</span>
-                                    <span style="font-size:0.85rem; color:#f59e0b; font-family:monospace; font-weight:bold;">'${{activeWord.eva_text}}'</span>
-                                </div>
-                                <div style="text-align:center; background:#000; border-radius:5px; padding:6px; border:1px solid #334155;">
-                                    <span style="font-family:'VoynichEVA', monospace; font-size:2.2rem; color:#fbbf24; letter-spacing:3px;">${{activeWord.eva_text}}</span>
-                                </div>
-                            </div>
-                        ` : ''}}
-                        <div style="text-align:center; background:#000; border-radius:6px; padding:6px; border:1px solid var(--border);">
-                            <img src="${{wordCropSrc}}" alt="${{activeWord.word_id}}" style="max-height:60px; max-width:100%; object-fit:contain;">
-                        </div>
+                        <span style="font-size:0.58rem; color:var(--text-muted);">(No Prior Translit)</span>
                     </div>
                 `;
             }}
@@ -3865,23 +4030,46 @@ def generate_explorer_html(
             const svgDownloadHref = selectedGlyph.svg_rel || ('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(cleanDuctusSvg));
 
             ins.innerHTML = `
-                ${{wordHtml}}
-
-                <!-- 3-Way Side-by-Side Large Comparison -->
-                <div class="inspector-trio">
-                    <div class="preview-box-large">
-                        <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">ORIGINAL SCAN CROP</span>
-                        ${{glyphCropSrc ? `<img src="${{glyphCropSrc}}" alt="${{selectedGlyph.glyph_id}}">` : `<div style="color:var(--text-muted); font-size:0.7rem; padding:10px;">(Scan Crop Loading...)</div>`}}
+                <!-- 1. Sleek Glyph Navigation Toolbar -->
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; background:#0f172a; border:1px solid #334155; border-radius:6px; padding:6px 10px; margin-bottom:8px;">
+                    <button class="btn-tool" onclick="goToPrevGlyph()" style="padding:4px 10px; font-size:0.75rem; background:#1e293b; color:#38bdf8; font-weight:bold; border:1px solid #38bdf8; border-radius:4px; cursor:pointer;" title="${{hasPrevG ? 'Previous Glyph (wraps across words)' : 'Previous Folio in active order (last glyph)'}}">◀ Prev Glyph</button>
+                    <div style="text-align:center; flex:1; overflow:hidden;">
+                        <div style="display:flex; align-items:center; justify-content:center; gap:6px;">
+                            <span style="font-size:0.85rem; color:#38bdf8; font-weight:bold;">🔵 ${{glyphShortLabel}}</span>
+                            <span class="badge-type" style="font-size:0.62rem; background:#0284c7; color:#fff;">${{selectedGlyph.canonical_type || 'G??'}}</span>
+                        </div>
+                        <span style="font-size:0.62rem; color:var(--text-muted); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${{glyphPosLabel}} · ${{page.page_id}} (${{globalGIdx + 1}}/${{allGlyphs.length}})</span>
                     </div>
-                    <div class="preview-box-large">
-                        <span style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px;">KINEMATIC DUCTUS</span>
-                        ${{cleanDuctusSvg}}
+                    <button class="btn-tool" onclick="goToNextGlyph()" style="padding:4px 10px; font-size:0.75rem; background:#1e293b; color:#38bdf8; font-weight:bold; border:1px solid #38bdf8; border-radius:4px; cursor:pointer;" title="${{hasNextG ? 'Next Glyph (wraps across words)' : 'Next Folio in active order (first glyph)'}}">Next Glyph ▶</button>
+                </div>
+
+                ${{activeWord ? `
+                    <!-- Parent Word Fast-Jump -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:#0b1120; border:1px solid #1e293b; border-radius:5px; padding:4px 8px; margin-bottom:8px;">
+                        <button class="btn-tool" onclick="selectWordById('${{activeWord.word_id}}')" style="padding:2px 8px; font-size:0.65rem; background:#1e1b4b; color:#c7d2fe; border:1px solid #6366f1; border-radius:4px; cursor:pointer;" title="Inspect entire word ductus chain">
+                            🔍 Word '${{activeWord.word_id}}' (${{wordGlyphs.length}} glyphs)
+                        </button>
+                        <div style="display:flex; gap:4px;">
+                            <button class="btn-tool" onclick="goToPrevWord()" style="padding:2px 6px; font-size:0.62rem; background:#111827; color:#fbbf24; border:1px solid #334155; border-radius:3px; cursor:pointer;" title="Previous Word">◀ Word</button>
+                            <button class="btn-tool" onclick="goToNextWord()" style="padding:2px 6px; font-size:0.62rem; background:#111827; color:#fbbf24; border:1px solid #334155; border-radius:3px; cursor:pointer;" title="Next Word">Word ▶</button>
+                        </div>
+                    </div>
+                ` : ''}}
+
+                <!-- 2. Side-by-Side Focused Ductus & Reference Comparison -->
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:120px; background:#000; border:1px solid #38bdf8; border-radius:6px; padding:8px;">
+                        <span style="font-size:0.65rem; color:#38bdf8; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase;">🖋️ Kinematic Ductus</span>
+                        <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; max-height:100px;">
+                            ${{cleanDuctusSvg}}
+                        </div>
+                        <span style="font-size:0.58rem; color:var(--text-muted);">${{selectedGlyph.stroke_count || 1}} stroke(s) · Vector Trajectory</span>
                     </div>
                     ${{refSvgBox}}
                 </div>
 
-                <!-- Ductus Kinematic Color Legend -->
-                <div style="background:#0b1329; border:1px solid #1e293b; border-radius:6px; padding:6px 10px; font-size:0.68rem; margin-top:2px;">
+                <!-- 3. Ductus Kinematic Color Legend -->
+                <div style="background:#0b1329; border:1px solid #1e293b; border-radius:6px; padding:6px 10px; font-size:0.68rem; margin-bottom:8px;">
                     <div style="color:var(--accent); font-weight:bold; margin-bottom:3px; display:flex; justify-content:space-between;">
                         <span>🖋️ Kinematic Ductus Legend</span>
                         <span style="color:var(--text-muted); font-size:0.62rem;">Stroke Order: 1 ➔ 2 ➔ 3 ➔ 4</span>
@@ -3895,7 +4083,7 @@ def generate_explorer_html(
                     </div>
                 </div>
 
-                ${{corpusHtml}}
+                ${{multiCardsHtml}}
 
                 <div class="meta-list">
                     <div><strong>Glyph:</strong> ${{selectedGlyph.glyph_id}}</div>
