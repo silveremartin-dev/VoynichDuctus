@@ -535,10 +535,9 @@ def reprocess_voynich(base_dir: Path):
 
         eva_text = w.get("eva_text", "")
         eva_tokens = tokenize_eva_word(eva_text)
-        expected_k = len(eva_tokens) if eva_tokens else None
 
-        # OPTION A: Ductus Géométrique & Découplage Diacritique
-        assembled = segmenter.assemble_word_into_glyphs(w_mask, expected_glyph_count=expected_k, scale_calib=scale_calib)
+        # OPTION A: Ductus Géométrique & Découplage Diacritique (Zero circularity: purely data-driven)
+        assembled = segmenter.assemble_word_into_glyphs(w_mask, expected_glyph_count=None, scale_calib=scale_calib)
         line_id = w.get("line_id", "L00")
         word_id = w.get("word_id", f"{line_id}_W00")
 
@@ -655,8 +654,8 @@ def reprocess_voynich(base_dir: Path):
             regenerated_glyphs.append(g_rec)
             glyph_idx += 1
 
-        # OPTION B: Décomposition Neuronale de Mots (PCA / NMF)
-        neural_comps = neural_decomposer.decompose_word(w_mask, expected_glyph_count=expected_k)
+        # OPTION B: Décomposition Neuronale de Mots (PCA / NMF) (Purely data-driven)
+        neural_comps = neural_decomposer.decompose_word(w_mask, expected_glyph_count=None)
         n_idx = 0
         for comp in neural_comps:
             ng_mask = comp["mask"].astype(bool)
@@ -716,8 +715,8 @@ def reprocess_voynich(base_dir: Path):
             neural_glyphs.append(ng_rec)
             n_idx += 1
 
-        # OPTION C: Hybride Neuro-Cinématique & Consensus
-        hybrid_comps = hybrid_decomposer.decompose_word_hybrid(w_mask, assembled, neural_comps, expected_glyph_count=expected_k)
+        # OPTION C: Hybride Neuro-Cinématique & Consensus (Purely data-driven)
+        hybrid_comps = hybrid_decomposer.decompose_word_hybrid(w_mask, assembled, neural_comps, expected_glyph_count=None)
         h_idx = 0
         for comp in hybrid_comps:
             hg_mask = comp["mask"].astype(bool)

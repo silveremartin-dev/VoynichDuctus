@@ -678,13 +678,15 @@ class GlyphSegmenter:
         """
         if mask is None or np.sum(mask) == 0:
             return []
-        from scipy.ndimage import binary_dilation
+        from scipy.ndimage import binary_dilation, binary_closing
         from skimage.measure import find_contours, approximate_polygon
 
-        pad_w = pad + 2
+        pad_w = pad + 4
         padded_m = np.pad(mask, pad_width=pad_w, mode="constant", constant_values=False)
+        # Apply morphological closing to bridge gaps between multi-stroke parts of the same glyph
+        closed_m = binary_closing(padded_m, structure=np.ones((7, 7), dtype=bool))
         struct = np.ones((pad * 2 + 1, pad * 2 + 1), dtype=bool)
-        dilated = binary_dilation(padded_m, structure=struct)
+        dilated = binary_dilation(closed_m, structure=struct)
         contours = find_contours(dilated.astype(float), level=0.5)
         if not contours:
             return []
