@@ -549,22 +549,146 @@ class VoynicheseRosettaLoader:
             return f"f{num}{side}"
         return clean
 
+    def _fetch_glance_reference_image(self, folio_id: str) -> Optional[Image.Image]:
+        """
+        Fetches the lightweight 636x900 Voynichese reference image transiently in memory
+        solely as a geometric template for SIFT/RANSAC coordinate projection onto Yale HD scans.
+        Never saves low-resolution images to the output atlas dataset.
+        """
+        import io
+        norm_name = self._normalize_folio_id(folio_id)
+        url = f"https://www.voynichese.com/2/data/folio/image/glance/color/large/{norm_name}.jpg"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                data = resp.read()
+            return Image.open(io.BytesIO(data)).convert("RGB")
+        except Exception:
+            return None
+
+    def get_yale_hd_scan_and_words(
+        self,
+        folio_id: str,
+        yale_cache_dir: Optional[Union[str, Path]] = None,
+        reg_cache_dir: Optional[Union[str, Path]] = "data/intermediate/registration",
+        min_hd_width: int = 1800,
+    ) -> Tuple[Path, Image.Image, List[RosettaWord]]:
+        """
+        Single High-Resolution Source of Truth:
+        1. Loads the Yale Beinecke HD scan from `yale_cache_dir`, or downloads the native
+           IIIF Master scan on the fly via `IIIFClient` (never stored in git).
+        2. Loads Voynichese .js word annotations and aligns them onto the Yale HD scan
+           using cached SIFT+RANSAC planar registration (with cross-correlation fallback).
+        Returns (yale_scan_path, yale_pil_image, aligned_rosetta_words).
+        """
+        from voynich_ductus.ingestion.iiif_client import IIIFClient
+        from voynich_ductus.ingestion.image_registration import MultimodalFolioAligner
+
+        iiif = IIIFClient(cache_dir=str(yale_cache_dir or self.scans_dir))
+        norm_yale = iiif.normalize_folio_name(folio_id)
+        yale_path = iiif.cache_dir / f"{norm_yale}.jpg"
+
+        need_download = not yale_path.exists() or yale_path.stat().st_size < 100000
+        if not need_download:
+            try:
+                with Image.open(yale_path) as probe:
+                    if probe.width < min_hd_width:
+                        need_download = True
+            except Exception:
+                need_download = True
+
+        if need_download:
+            if yale_path.exists():
+                yale_path.unlink()
+            yale_path = iiif.download_folio(folio_id, output_path=str(yale_path), max_width=None)
+
+        yale_img = Image.open(yale_path).convert("RGB")
+        W_y, H_y = yale_img.size
+
+        norm_js = self._normalize_folio_id(folio_id)
+        try:
+            js_words = self.load_folio_words_from_js(norm_js)
+        except Exception:
+            js_words = self.load_folio_words(norm_js)
+            sx, sy, tx, ty = self.compute_scan_affine_transform(norm_js, yale_img, use_js=False)
+            out_words: List[RosettaWord] = []
+            for w in js_words:
+                x0 = max(0, min(W_y - 1, int(round(tx + w.x_xml * sx))))
+                y0 = max(0, min(H_y - 1, int(round(ty + w.y_xml * sy))))
+                x1 = max(x0 + 1, min(W_y, int(round(tx + (w.x_xml + w.width_xml) * sx))))
+                y1 = max(y0 + 1, min(H_y, int(round(ty + (w.y_xml + w.height_xml) * sy))))
+                out_words.append(RosettaWord(
+                    folio=w.folio, index=w.index, eva_text=w.eva_text,
+                    x_xml=w.x_xml, y_xml=w.y_xml, width_xml=w.width_xml, height_xml=w.height_xml,
+                    bbox_scan=(x0, y0, x1, y1),
+                ))
+            return yale_path, yale_img, out_words
+
+        aligner = MultimodalFolioAligner(cache_dir=reg_cache_dir)
+        reg = None
+        cache_file = Path(reg_cache_dir) / f"{norm_js.lower()}_affine.json" if reg_cache_dir else None
+        if cache_file and cache_file.exists():
+            try:
+                with open(cache_file, "r", encoding="utf-8") as fc:
+                    reg = json.load(fc)
+                reg["matrix_2x3"] = np.array(reg["matrix_2x3"], dtype=np.float32)
+            except Exception:
+                reg = None
+
+        # Verify cached registration matches the target Yale HD resolution scale (~2.5x - 5.0x from 636px)
+        if reg is not None and reg.get("status") == "success":
+            sx_est = float(reg.get("scale_x", 1.0))
+            expected_scale = float(W_y) / 636.0
+            if sx_est < 1.8 or abs(sx_est - expected_scale) > expected_scale * 0.45:
+                reg = None
+
+        if reg is None or reg.get("status") != "success":
+            glance_img = self._fetch_glance_reference_image(norm_js)
+            if glance_img is not None:
+                reg = aligner.compute_registration(glance_img, yale_img, folio_id=norm_js, force_recompute=True)
+
+        aligned_words: List[RosettaWord] = []
+        if reg is not None and reg.get("status") == "success":
+            M = reg["matrix_2x3"]
+            for w in js_words:
+                rx0, ry0, rx1, ry1 = w.bbox_scan if w.bbox_scan else (w.x_xml, w.y_xml, w.x_xml + w.width_xml, w.y_xml + w.height_xml)
+                hy0, hx0, hy1, hx1 = aligner.transform_bbox((ry0, rx0, ry1, rx1), M)
+                hx0 = max(0, min(W_y - 1, int(hx0)))
+                hy0 = max(0, min(H_y - 1, int(hy0)))
+                hx1 = max(hx0 + 1, min(W_y, int(hx1)))
+                hy1 = max(hy0 + 1, min(H_y, int(hy1)))
+                aligned_words.append(RosettaWord(
+                    folio=w.folio, index=w.index, eva_text=w.eva_text,
+                    x_xml=w.x_xml, y_xml=w.y_xml, width_xml=w.width_xml, height_xml=w.height_xml,
+                    bbox_scan=(hx0, hy0, hx1, hy1),
+                ))
+        else:
+            sx, sy, tx, ty = self.compute_scan_affine_transform(norm_js, yale_img, use_js=True)
+            for w in js_words:
+                x0 = max(0, min(W_y - 1, int(round(tx + w.x_xml * sx))))
+                y0 = max(0, min(H_y - 1, int(round(ty + w.y_xml * sy))))
+                x1 = max(x0 + 1, min(W_y, int(round(tx + (w.x_xml + w.width_xml) * sx))))
+                y1 = max(y0 + 1, min(H_y, int(round(ty + (w.y_xml + w.height_xml) * sy))))
+                aligned_words.append(RosettaWord(
+                    folio=w.folio, index=w.index, eva_text=w.eva_text,
+                    x_xml=w.x_xml, y_xml=w.y_xml, width_xml=w.width_xml, height_xml=w.height_xml,
+                    bbox_scan=(x0, y0, x1, y1),
+                ))
+
+        return yale_path, yale_img, aligned_words
+
     def _find_scan_path(self, folio_id: str) -> Optional[Path]:
         """
-        Locates the corresponding scan image file in scans_dir or voynichese_scans.
+        Locates the corresponding Yale Beinecke HD scan image file in scans_dir.
         """
         norm_name = self._normalize_folio_id(folio_id)
-        # Try both f001r and f1r formatting
         match = re.match(r"f(\d+)([rv]\d*)?", norm_name)
         candidates = []
-        voynichese_scans = Path("data/raw/scans/voynich/voynichese_scans")
         if match:
             num = int(match.group(1))
             side = match.group(2) or ""
             padded = f"f{num:03d}{side}"
             candidates.extend([
-                voynichese_scans / f"{norm_name}.jpg",
-                voynichese_scans / f"{padded}.jpg",
                 self.scans_dir / f"{padded}.jpg",
                 self.scans_dir / f"{norm_name}.jpg",
                 self.scans_dir.parent / f"{padded}.jpg",
@@ -572,7 +696,6 @@ class VoynicheseRosettaLoader:
             ])
         else:
             candidates.extend([
-                voynichese_scans / f"{norm_name}.jpg",
                 self.scans_dir / f"{norm_name}.jpg",
             ])
 

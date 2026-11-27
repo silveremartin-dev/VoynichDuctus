@@ -54,18 +54,34 @@ class ShannonEntropyAnalyzer:
 
         return float(cond_entropy)
 
+    @staticmethod
+    def extract_atomic_symbols(words: List[str]) -> List[str]:
+        """
+        Splits tokenized words into atomic symbol units:
+        - Hyphen-delimited glyph sequences ('G01-G14-G03') -> ['G01', 'G14', 'G03']
+        - Plain alphabetic strings ('qokedy') -> ['q', 'o', 'k', 'e', 'd', 'y']
+        """
+        symbols: List[str] = []
+        for w in words:
+            if not w:
+                continue
+            if "-" in w and any(part.startswith(("G", "S")) and len(part) >= 2 for part in w.split("-")):
+                symbols.extend([part for part in w.split("-") if part])
+            else:
+                symbols.extend(list(w))
+        return symbols
+
     @classmethod
     def analyze_text(cls, text_or_tokens: Union[str, List[str]]) -> Dict[str, float]:
         """
-        Calculates character-level and word-level entropy metrics.
+        Calculates symbol/character-level and word-level entropy metrics.
         """
         if isinstance(text_or_tokens, str):
-            chars = list(text_or_tokens)
             words = text_or_tokens.split()
+            chars = cls.extract_atomic_symbols(words) if any("-" in w for w in words) else list(text_or_tokens)
         else:
-            # Flatten characters
-            chars = list("".join(text_or_tokens))
-            words = text_or_tokens
+            words = list(text_or_tokens)
+            chars = cls.extract_atomic_symbols(words)
 
         h1_char = cls.shannon_entropy(chars)
         h2_char = cls.conditional_entropy_order2(chars)

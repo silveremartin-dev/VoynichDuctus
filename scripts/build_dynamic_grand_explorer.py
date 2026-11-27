@@ -17,22 +17,90 @@ sys.path.insert(0, str(root_dir / "scripts"))
 from generate_full_glyph_corpus_and_explorer import generate_explorer_html
 
 
-def clean_catalogue_for_embed(cat_dict: dict) -> dict:
-    """Retains full archetype metadata, exemplars and transliteration alignments while embedding rich sample instances."""
+def _make_crop_uri_from_page(
+    page_id: str,
+    bbox: list,
+    pages_img_dir: Optional[Path],
+    img_cache: dict,
+    pad: int = 4,
+    polygon: Optional[list] = None,
+    hole_polygons: Optional[list] = None,
+) -> str:
+    """Slices a compact JPEG data-URI scan thumbnail from a cached page image (punching out exterior & interior loop holes when polygons are provided)."""
+    if not pages_img_dir or not page_id or not bbox or len(bbox) < 4:
+        return ""
+    if page_id not in img_cache:
+        img_file = pages_img_dir / f"{page_id}.jpg"
+        if not img_file.exists():
+            img_cache[page_id] = None
+        else:
+            try:
+                from PIL import Image
+                with Image.open(img_file) as im:
+                    img_cache[page_id] = im.convert("RGB")
+            except Exception:
+                img_cache[page_id] = None
+    im_page = img_cache.get(page_id)
+    if im_page is None:
+        return ""
+    try:
+        import base64
+        import io
+        from PIL import Image, ImageDraw
+        y0, x0, y1, x1 = [int(v) for v in bbox[:4]]
+        pw, ph = im_page.size
+        cx0, cy0 = max(0, x0 - pad), max(0, y0 - pad)
+        cx1, cy1 = min(pw, x1 + pad), min(ph, y1 + pad)
+        if cx1 <= cx0 or cy1 <= cy0:
+            return ""
+        crop = im_page.crop((cx0, cy0, cx1, cy1)).copy()
+        if polygon and len(polygon) >= 3:
+            mask_im = Image.new("L", crop.size, 0)
+            draw = ImageDraw.Draw(mask_im)
+            outer_pts = [(int(pt[0]) - cx0, int(pt[1]) - cy0) for pt in polygon]
+            draw.polygon(outer_pts, fill=255)
+            if hole_polygons:
+                for hp in hole_polygons:
+                    if hp and len(hp) >= 3:
+                        inner_pts = [(int(pt[0]) - cx0, int(pt[1]) - cy0) for pt in hp]
+                        draw.polygon(inner_pts, fill=0)
+            bg_black = Image.new("RGB", crop.size, (0, 0, 0))
+            crop = Image.composite(crop, bg_black, mask_im)
+        if max(crop.size) > 96:
+            crop.thumbnail((96, 96))
+        buf = io.BytesIO()
+        crop.save(buf, format="JPEG", quality=80)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return ""
+
+
+def _clean_alphabet_list(arch_list: list, pages_img_dir: Optional[Path] = None, img_cache: Optional[dict] = None) -> list:
+    """Cleans an induced alphabet entry list for compact JSON embedding in the HTML explorer."""
+    if img_cache is None:
+        img_cache = {}
     cleaned_alphabet = []
-    for arch in cat_dict.get("alphabet", []):
+    for arch in arch_list:
         all_inst = arch.get("all_instances", [])
         source_insts = all_inst if all_inst else arch.get("sample_instances", [])
         samples = []
         for inst in source_insts[:36]:
             if isinstance(inst, dict):
+                inst_page = inst.get("page_id", "")
+                inst_bbox = inst.get("bbox", [0, 0, 0, 0])
+                inst_poly = inst.get("polygon", [])
+                inst_holes = inst.get("hole_polygons", [])
+                c_uri = _make_crop_uri_from_page(
+                    inst_page, inst_bbox, pages_img_dir, img_cache, polygon=inst_poly, hole_polygons=inst_holes
+                ) or inst.get("crop_uri", "")
                 samples.append({
                     "glyph_id": inst.get("glyph_id", ""),
-                    "page_id": inst.get("page_id", ""),
+                    "page_id": inst_page,
                     "line_id": inst.get("line_id", ""),
                     "word_id": inst.get("word_id", ""),
-                    "bbox": inst.get("bbox", [0, 0, 0, 0]),
-                    "polygon": inst.get("polygon", []),
+                    "bbox": inst_bbox,
+                    "polygon": inst_poly,
+                    "hole_polygons": inst_holes,
                     "width": inst.get("width", 0),
                     "height": inst.get("height", 0),
                     "height_mm": inst.get("height_mm", round(inst.get("height", 0) * 0.125, 2)),
@@ -43,7 +111,7 @@ def clean_catalogue_for_embed(cat_dict: dict) -> dict:
                     "stroke_count": inst.get("stroke_count", 1),
                     "loop_count": inst.get("loop_count", arch.get("loop_count", 0)),
                     "topology_group": inst.get("topology_group", arch.get("topology_group", "")),
-                    "crop_uri": inst.get("crop_uri", ""),
+                    "crop_uri": c_uri,
                     "svg_content": inst.get("svg_content", inst.get("ductus_svg", "")),
                     "euler_svg_content": inst.get("euler_svg_content", ""),
                     "euler_stroke_count": inst.get("euler_stroke_count", len(inst.get("euler_strokes", []))),
@@ -64,19 +132,34 @@ def clean_catalogue_for_embed(cat_dict: dict) -> dict:
                     "eva_char": ""
                 })
 
+        ex_page = arch.get("exemplar_page_id", "") or (samples[0].get("page_id", "") if samples else "")
+        ex_bbox = arch.get("exemplar_bbox", [0, 0, 0, 0])
+        if (not ex_bbox or ex_bbox == [0, 0, 0, 0]) and samples:
+            ex_bbox = samples[0].get("bbox", [0, 0, 0, 0])
+        ex_poly = samples[0].get("polygon", []) if samples else []
+        ex_holes = samples[0].get("hole_polygons", []) if samples else []
+        ex_crop_uri = (
+            _make_crop_uri_from_page(ex_page, ex_bbox, pages_img_dir, img_cache, polygon=ex_poly, hole_polygons=ex_holes)
+            or (samples[0].get("crop_uri", "") if samples else "")
+            or arch.get("exemplar_crop_uri", "")
+        )
+
         cleaned_alphabet.append({
             "type_id": arch.get("type_id"),
             "rank": arch.get("rank"),
             "cluster_index": arch.get("cluster_index"),
+            "ductus_engine": arch.get("ductus_engine", "quill_40"),
             "frequency": arch.get("frequency"),
             "folio_frequency": arch.get("folio_frequency", len(samples)),
             "percentage": arch.get("percentage"),
+            "indexed_pages": arch.get("indexed_pages", []),
+            "page_count": arch.get("page_count", len(arch.get("indexed_pages", []))),
             "topology_group": arch.get("topology_group", ""),
             "loop_count": arch.get("loop_count", 0),
             "exemplar_id": arch.get("exemplar_id"),
-            "exemplar_page_id": arch.get("exemplar_page_id", ""),
-            "exemplar_bbox": arch.get("exemplar_bbox", [0, 0, 0, 0]),
-            "exemplar_crop_uri": arch.get("exemplar_crop_uri", ""),
+            "exemplar_page_id": ex_page,
+            "exemplar_bbox": ex_bbox,
+            "exemplar_crop_uri": ex_crop_uri,
             "exemplar_png": arch.get("exemplar_png", ""),
             "exemplar_svg": arch.get("exemplar_svg", ""),
             "exemplar_svg_content": arch.get("exemplar_svg_content", ""),
@@ -93,10 +176,244 @@ def clean_catalogue_for_embed(cat_dict: dict) -> dict:
             "total_instances_count": arch.get("total_instances_count", arch.get("frequency", 0)),
             "sample_instances": samples
         })
+    return cleaned_alphabet
+
+
+def clean_catalogue_for_embed(cat_dict: dict, pages_img_dir: Optional[Path] = None, img_cache: Optional[dict] = None) -> dict:
+    """Cleans the unified Canonical Alphabet (each card with Scan, Quill 40° Bézier, Euler-Bernoulli, Symbol) for Explorer HTML."""
+    if img_cache is None:
+        img_cache = {}
+    cleaned_a = _clean_alphabet_list(cat_dict.get("alphabet", []), pages_img_dir=pages_img_dir, img_cache=img_cache)
     return {
         "total_glyphs": cat_dict.get("total_glyphs", 0),
-        "canonical_alphabet_size": len(cleaned_alphabet),
-        "alphabet": cleaned_alphabet
+        "indexed_pages_count": cat_dict.get("indexed_pages_count", 1),
+        "canonical_alphabet_size": len(cleaned_a),
+        "alphabet": cleaned_a,
+    }
+
+
+def rebuild_dual_catalogue_from_pages(
+    pages_dir: Path,
+    out_cat_path: Path,
+    corpus_type: str,
+    target_size: int,
+    min_img_width: int = 0,
+    preferred_stems: list = None,
+) -> dict:
+    """
+    Rebuilds the unified Canonical Alphabet from all processed folio JSONs meeting
+    `min_img_width` (or `preferred_stems`) and writes back `canonical_type`.
+    """
+    from voynich_ductus.clustering.glyph_catalogue import GlyphCatalogue
+    from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
+
+    all_json = sorted(pages_dir.glob("*.json"))
+    selected_files = []
+    for jf in all_json:
+        if preferred_stems and jf.stem not in preferred_stems:
+            continue
+        stub = parse_page_stub_fast(jf, corpus_type)
+        if min_img_width > 0 and stub.get("image_width", 0) < min_img_width:
+            continue
+        if stub.get("glyph_count", 0) > 0:
+            selected_files.append(jf)
+
+    if not selected_files:
+        if out_cat_path.exists():
+            with open(out_cat_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {"total_glyphs": 0, "canonical_alphabet_size": 0, "alphabet": []}
+
+    loaded_pages = []
+    pool = []
+    calib_ref = None
+    for jf in selected_files:
+        with open(jf, "r", encoding="utf-8") as f:
+            pdata = json.load(f)
+        gs = pdata.get("glyphs", [])
+        if not gs:
+            continue
+        if calib_ref is None:
+            calib_ref = MetricScaleCalibration(
+                manuscript_type=corpus_type,
+                image_width_px=pdata.get("image_width", 2400),
+                image_height_px=pdata.get("image_height", 3200),
+            )
+        loaded_pages.append((jf, pdata))
+        pool.extend(gs)
+
+    if not pool:
+        return {"total_glyphs": 0, "canonical_alphabet_size": 0, "alphabet": []}
+
+    builder = GlyphCatalogue(target_alphabet_size=target_size)
+    cat = builder.build_catalogue(
+        pool,
+        corpus_type=corpus_type,
+        scale_calib=calib_ref,
+        stroke_key="strokes",
+        tag_field="canonical_type",
+    )
+    cat["indexed_pages_count"] = len(loaded_pages)
+
+    # Persist induced canonical_type back onto processed page JSONs (and strip legacy multi-model arrays)
+    for jf, pdata in loaded_pages:
+        pdata.pop("glyphs_neural_pca", None)
+        pdata.pop("glyphs_hybrid_consensus", None)
+        pdata.pop("glyph_count_neural_pca", None)
+        pdata.pop("glyph_count_hybrid_consensus", None)
+        with open(jf, "w", encoding="utf-8") as f:
+            json.dump(pdata, f)
+
+    builder.export_catalogue_json(cat, out_cat_path)
+    return cat
+
+
+def compute_live_corpus_statistics(
+    voynich_pages_dir: Path,
+    serafini_pages_dir: Path,
+    v_cat: dict,
+    s_cat: dict,
+    v_min_width: int = 2000,
+    s_preferred_stems: list = None,
+) -> dict:
+    """
+    Dynamically computes real corpus counts and information-theoretic diagnostics
+    directly from all processed page JSONs and induced alphabets (zero hardcoded stats).
+    """
+    from voynich_ductus.diagnostics.benchmark_suite import BenchmarkSuite
+    from voynich_ductus.generators.baselines import BaselineGenerator
+    from voynich_ductus.generators.timm_self_citation import TimmSelfCitationGenerator
+    from voynich_ductus.generators.rugg_cardan import RuggCardanGenerator
+
+    def _collect_ms_stats(pages_dir: Path, subfolder: str, min_w: int = 0, stems: list = None) -> dict:
+        all_files = sorted(pages_dir.glob("*.json"))
+        indexed_words = 0
+        indexed_glyphs_a = 0
+        processed_ids = []
+        proc_words = 0
+        proc_a = 0
+        proc_b = 0
+        proc_c = 0
+        word_token_seqs = []
+
+        for jf in all_files:
+            stub = parse_page_stub_fast(jf, subfolder)
+            indexed_words += stub.get("word_count", 0)
+            indexed_glyphs_a += stub.get("glyph_count", 0)
+
+            in_scope = True
+            if stems and jf.stem not in stems:
+                in_scope = False
+            if min_w > 0 and stub.get("image_width", 0) < min_w:
+                in_scope = False
+            if in_scope and stub.get("glyph_count", 0) > 0:
+                with open(jf, "r", encoding="utf-8") as f:
+                    pd = json.load(f)
+                processed_ids.append(pd.get("page_id", jf.stem))
+                proc_words += len(pd.get("words", []))
+                ga = pd.get("glyphs", [])
+                gb = pd.get("glyphs_neural_pca", [])
+                gc = pd.get("glyphs_hybrid_consensus", [])
+                proc_a += len(ga)
+                proc_b += len(gb)
+                proc_c += len(gc)
+
+                by_w = {}
+                for g in ga:
+                    by_w.setdefault(g.get("word_id", ""), []).append(g)
+                for w in pd.get("words", []):
+                    wg = sorted(by_w.get(w.get("word_id", ""), []), key=lambda x: x.get("bbox", [0, 0, 0, 0])[1])
+                    if wg:
+                        word_token_seqs.append("-".join(g.get("canonical_type", "G01") for g in wg))
+
+        return {
+            "indexed_pages_total": len(all_files),
+            "indexed_words_total": indexed_words,
+            "indexed_glyphs_total": indexed_glyphs_a,
+            "processed_pages_count": len(processed_ids),
+            "processed_page_ids": processed_ids,
+            "processed_words": proc_words,
+            "processed_glyphs_a": proc_a,
+            "processed_glyphs_b": proc_b,
+            "processed_glyphs_c": proc_c,
+            "word_token_seqs": word_token_seqs,
+        }
+
+    v_stats = _collect_ms_stats(voynich_pages_dir, "voynich", min_w=v_min_width)
+    s_stats = _collect_ms_stats(
+        serafini_pages_dir,
+        "seraphinianus",
+        stems=s_preferred_stems or ["serafini_p002", "serafini_p004", "serafini_p006", "serafini_p008", "serafini_p011", "serafini_p030"],
+    )
+
+    suite = BenchmarkSuite()
+    v_tokens = v_stats.pop("word_token_seqs") or ["G01-G02"]
+    s_tokens = s_stats.pop("word_token_seqs") or ["G01-G02"]
+    ctrl_n = max(120, len(v_tokens))
+
+    latin_words = BaselineGenerator.get_natural_latin_sample(num_words=ctrl_n)
+    timm_words = TimmSelfCitationGenerator(seed=42).generate(num_words=ctrl_n)
+    rugg_words = RuggCardanGenerator(seed=42).generate(num_words=ctrl_n)
+    random_words = BaselineGenerator.get_uniform_random_gibberish(num_words=ctrl_n)
+
+    def _summarize_diag(name: str, seq: list, scope_note: str) -> dict:
+        import math
+        r = suite.evaluate_corpus(name, seq)
+        ent = r.get("entropy", {})
+        mem = r.get("memory", {})
+        comp = r.get("compressibility", {})
+        mkv = r.get("markov_automata", {})
+        o1 = mkv.get("order_1", {}).get("top1_prediction_accuracy", 0.0)
+        o2 = mkv.get("order_2", {}).get("top1_prediction_accuracy", 0.0)
+        def _safe_round(val, ndigits=2):
+            try:
+                fv = float(val)
+                return round(fv, ndigits) if math.isfinite(fv) else None
+            except Exception:
+                return None
+        return {
+            "name": name,
+            "scope": scope_note,
+            "token_count": len(seq),
+            "h1": _safe_round(ent.get("h1_char_bits", 0.0)),
+            "h2": _safe_round(ent.get("h2_cond_char_bits", 0.0)),
+            "hurst": _safe_round(mem.get("hurst_exponent", 0.5)),
+            "lzma_ratio": _safe_round(comp.get("lzma_ratio", comp.get("gzip_ratio", 0.0))),
+            "markov_order": f"O1={o1:.0%} / O2={o2:.0%}",
+        }
+
+    diagnostics = [
+        _summarize_diag(
+            "Voynich (HD Ductus G-Tokens)",
+            v_tokens,
+            f"{v_stats['processed_pages_count']} HD folios ({v_stats['processed_words']} words)",
+        ),
+        _summarize_diag(
+            "Codex Seraphinianus (Ribbon G-Tokens)",
+            s_tokens,
+            f"{s_stats['processed_pages_count']} text pages ({s_stats['processed_words']} words)",
+        ),
+        _summarize_diag("Natural Latin Herbal (Control)", latin_words, f"Seeded baseline ({ctrl_n} words)"),
+        _summarize_diag("Timm Self-Citation (Baseline)", timm_words, f"Seeded baseline ({ctrl_n} words)"),
+        _summarize_diag("Rugg Cardan Grille (Baseline)", rugg_words, f"Seeded baseline ({ctrl_n} words)"),
+        _summarize_diag("Random Uniform Noise (Baseline)", random_words, f"Seeded baseline ({ctrl_n} words)"),
+    ]
+
+    v_m = v_cat.get("models", {})
+    s_m = s_cat.get("models", {})
+    v_stats["alphabet_a_size"] = v_m.get("heuristic_calligraphic", {}).get("canonical_alphabet_size", v_cat.get("canonical_alphabet_size", 0))
+    v_stats["alphabet_b_size"] = v_m.get("neural_word_pca", {}).get("canonical_alphabet_size", 0)
+    v_stats["alphabet_c_size"] = v_m.get("hybrid_consensus", {}).get("canonical_alphabet_size", 0)
+    s_stats["alphabet_a_size"] = s_m.get("heuristic_calligraphic", {}).get("canonical_alphabet_size", s_cat.get("canonical_alphabet_size", 0))
+    s_stats["alphabet_b_size"] = s_m.get("neural_word_pca", {}).get("canonical_alphabet_size", 0)
+    s_stats["alphabet_c_size"] = s_m.get("hybrid_consensus", {}).get("canonical_alphabet_size", 0)
+
+    from datetime import datetime
+    return {
+        "computed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "voynich": v_stats,
+        "seraphinianus": s_stats,
+        "diagnostics": diagnostics,
     }
 
 
@@ -104,7 +421,7 @@ def parse_page_stub_fast(json_path: Path, subfolder: str) -> dict:
     """Fast header reading without parsing megabytes of internal stroke arrays."""
     stem = json_path.stem
     with open(json_path, "r", encoding="utf-8") as f:
-        head = f.read(800)
+        head = f.read(4096)
 
     m_pid = re.search(r'"page_id":\s*"([^"]+)"', head)
     page_id = m_pid.group(1) if m_pid else stem
@@ -114,36 +431,73 @@ def parse_page_stub_fast(json_path: Path, subfolder: str) -> dict:
     m_lines = re.search(r'"line_count":\s*(\d+)', head)
     m_words = re.search(r'"word_count":\s*(\d+)', head)
     m_glyphs = re.search(r'"glyph_count":\s*(\d+)', head)
+    m_gn = re.search(r'"glyph_count_neural_pca":\s*(\d+)', head)
+    m_gh = re.search(r'"glyph_count_hybrid_consensus":\s*(\d+)', head)
 
     return {
         "page_id": page_id,
         "page_img_rel": f"{subfolder}/pages/{stem}.jpg",
         "json_rel": f"{subfolder}/pages/{stem}.json",
-        "image_width": int(m_w.group(1)) if m_w else 1600,
-        "image_height": int(m_h.group(1)) if m_h else 2200,
+        "image_width": int(m_w.group(1)) if m_w else 2400,
+        "image_height": int(m_h.group(1)) if m_h else 3300,
         "line_count": int(m_lines.group(1)) if m_lines else 0,
         "word_count": int(m_words.group(1)) if m_words else 0,
         "glyph_count": int(m_glyphs.group(1)) if m_glyphs else 0,
+        "glyph_count_neural_pca": int(m_gn.group(1)) if m_gn else 0,
+        "glyph_count_hybrid_consensus": int(m_gh.group(1)) if m_gh else 0,
         "yield_report": {}
     }
 
 
-def main():
+def main(skip_catalogue: bool = False):
+    import os
+    import sys
+    if "--skip-catalogue" in sys.argv:
+        skip_catalogue = True
+    try:
+        import torch
+        torch.set_num_threads(max(2, (os.cpu_count() or 4) // 2))
+    except Exception:
+        pass
     base_out = Path("data/processed/atlas_dataset")
     voynich_dir = base_out / "voynich"
     serafini_dir = base_out / "seraphinianus"
 
-    print("[*] Loading Voynich Alphabet Catalogue...")
-    with open(voynich_dir / "voynich_alphabet_catalogue.json", "r", encoding="utf-8") as f:
-        v_cat_raw = json.load(f)
-    v_cat = clean_catalogue_for_embed(v_cat_raw)
-    print(f"  [+] Voynich Catalogue: {v_cat['canonical_alphabet_size']} canonical archetypes.")
+    if skip_catalogue and (voynich_dir / "voynich_alphabet_catalogue.json").exists():
+        with open(voynich_dir / "voynich_alphabet_catalogue.json", "r", encoding="utf-8") as f:
+            v_cat_raw = json.load(f)
+    else:
+        print("[*] Rebuilding Unified Canonical Alphabet from Voynich HD pages...")
+        v_cat_raw = rebuild_dual_catalogue_from_pages(
+            pages_dir=voynich_dir / "pages",
+            out_cat_path=voynich_dir / "voynich_alphabet_catalogue.json",
+            corpus_type="voynich",
+            target_size=28,
+            min_img_width=2000,
+        )
+    v_cat = clean_catalogue_for_embed(v_cat_raw, pages_img_dir=voynich_dir / "pages")
+    print(
+        f"  [+] Voynich Canonical Alphabet: {v_cat['canonical_alphabet_size']} archetypes "
+        f"({v_cat['total_glyphs']} glyphs across {v_cat['indexed_pages_count']} HD folios)."
+    )
 
-    print("[*] Loading Seraphinianus Alphabet Catalogue...")
-    with open(serafini_dir / "seraphinianus_alphabet_catalogue.json", "r", encoding="utf-8") as f:
-        s_cat_raw = json.load(f)
-    s_cat = clean_catalogue_for_embed(s_cat_raw)
-    print(f"  [+] Seraphinianus Catalogue: {s_cat['canonical_alphabet_size']} canonical archetypes.")
+    if skip_catalogue and (serafini_dir / "seraphinianus_alphabet_catalogue.json").exists():
+        with open(serafini_dir / "seraphinianus_alphabet_catalogue.json", "r", encoding="utf-8") as f:
+            s_cat_raw = json.load(f)
+    else:
+        print("[*] Rebuilding Unified Canonical Alphabet from Seraphinianus pages...")
+        s_cat_raw = rebuild_dual_catalogue_from_pages(
+            pages_dir=serafini_dir / "pages",
+            out_cat_path=serafini_dir / "seraphinianus_alphabet_catalogue.json",
+            corpus_type="seraphinianus",
+            target_size=45,
+            preferred_stems=["serafini_p002", "serafini_p004", "serafini_p006", "serafini_p008", "serafini_p011", "serafini_p030"],
+        )
+    s_cat = clean_catalogue_for_embed(s_cat_raw, pages_img_dir=serafini_dir / "pages")
+    print(
+        f"  [+] Seraphinianus Canonical Alphabet: {s_cat['canonical_alphabet_size']} archetypes "
+        f"({s_cat['total_glyphs']} glyphs across {s_cat['indexed_pages_count']} pages)."
+    )
 
     # 1. Index Voynich Pages
     print("[*] Indexing Voynich pages...")
@@ -172,11 +526,7 @@ def main():
             stub["lines"] = p_full.get("lines", [])
             stub["words"] = p_full.get("words", [])
             stub["glyphs"] = p_full.get("glyphs", [])
-            stub["glyphs_neural_pca"] = p_full.get("glyphs_neural_pca", [])
-            stub["glyphs_hybrid_consensus"] = p_full.get("glyphs_hybrid_consensus", [])
             stub["glyph_count"] = len(stub["glyphs"])
-            stub["glyph_count_neural_pca"] = len(stub["glyphs_neural_pca"])
-            stub["glyph_count_hybrid_consensus"] = len(stub["glyphs_hybrid_consensus"])
             stub["yield_report"] = p_full.get("yield_report", {})
         v_pages_stubs.append(stub)
 
@@ -195,13 +545,20 @@ def main():
             stub["lines"] = p_full.get("lines", [])
             stub["words"] = p_full.get("words", [])
             stub["glyphs"] = p_full.get("glyphs", [])
-            stub["glyphs_neural_pca"] = p_full.get("glyphs_neural_pca", [])
-            stub["glyphs_hybrid_consensus"] = p_full.get("glyphs_hybrid_consensus", [])
-            stub["glyph_count_neural_pca"] = len(stub["glyphs_neural_pca"])
-            stub["glyph_count_hybrid_consensus"] = len(stub["glyphs_hybrid_consensus"])
+            stub["glyph_count"] = len(stub["glyphs"])
         s_pages_stubs.append(stub)
 
     print(f"  [+] Indexed {len(s_pages_stubs)} Seraphinianus pages.")
+
+    print("[*] Computing live corpus statistics & information-theoretic diagnostics...")
+    live_stats = compute_live_corpus_statistics(
+        voynich_pages_dir=voynich_dir / "pages",
+        serafini_pages_dir=serafini_dir / "pages",
+        v_cat=v_cat,
+        s_cat=s_cat,
+        v_min_width=2000,
+        s_preferred_stems=["serafini_p002", "serafini_p004", "serafini_p006", "serafini_p008", "serafini_p011", "serafini_p030"],
+    )
 
     # 3. Call official generator (Python f-string correctly unescapes all CSS and JS braces!)
     out_html_path = base_out / "grand_glyph_explorer.html"
@@ -211,7 +568,8 @@ def main():
         voynich_catalogue=v_cat,
         serafini_pages_data=s_pages_stubs,
         serafini_catalogue=s_cat,
-        output_path=out_html_path
+        output_path=out_html_path,
+        live_stats=live_stats,
     )
 
     print(f"[+] Successfully generated: {out_html_path.resolve()}")

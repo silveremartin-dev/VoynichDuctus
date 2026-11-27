@@ -139,3 +139,27 @@ def test_cross_option_consensus_and_disjoint_tagging():
     assert g_b[1]["support_badge"] == "B only (Disjoint)"
     assert g_b[1]["is_disjoint"] is True
 
+
+def test_generative_typewriter_viterbi_decomposer():
+    """Verifies closed-loop GenerativeTypewriterDecomposer sprite dictionary induction & Viterbi decoding."""
+    from voynich_ductus.embeddings.word_decomposition import GenerativeTypewriterDecomposer
+
+    # Synthetic word with 1 closed loop ('o'), 1 multi-stroke 'a' ('c'+'i' micro-gap), and 1 tall stem ('l')
+    w1 = np.zeros((44, 120), dtype=bool)
+    rr, cc = np.ogrid[:44, :120]
+    o_ring = ((rr - 24) ** 2 + (cc - 18) ** 2 <= 9 ** 2) & (~((rr - 24) ** 2 + (cc - 18) ** 2 <= 4 ** 2))
+    w1 |= o_ring
+    # 'a' = open 'c' + micro-gap + 'i'
+    w1[16:33, 42:49] = True
+    w1[16:20, 49:53] = True
+    w1[29:33, 49:53] = True
+    w1[16:34, 55:60] = True
+    # 'l' = tall stem
+    w1[6:35, 82:88] = True
+
+    tw = GenerativeTypewriterDecomposer(is_serafini=False)
+    tw.fit_on_word_masks([w1, w1, w1, w1])
+    glyphs = tw.decompose_word(w1)
+    assert len(glyphs) == 3
+    assert all(g["segmentation_type"] == "GENERATIVE_TYPEWRITER" for g in glyphs)
+

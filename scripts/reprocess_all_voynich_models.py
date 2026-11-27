@@ -46,27 +46,34 @@ def _worker_process_page(
     with open(json_path, "r", encoding="utf-8") as f:
         page_data = json.load(f)
 
-    if (
-        not force
-        and page_data.get("glyphs")
-        and page_data.get("glyphs_neural_pca")
-        and page_data.get("glyphs_hybrid_consensus")
-    ):
-        return (
-            json_path.stem,
-            len(page_data["glyphs"]),
-            len(page_data["glyphs_neural_pca"]),
-            len(page_data["glyphs_hybrid_consensus"]),
-            time.time() - t0,
-            True,
-        )
+    page_id = page_data.get("page_id", json_path.stem)
+
+    if not force and page_data.get("glyphs") and page_data.get("segmentation_modes") == ["generative_typewriter_viterbi"]:
+        already_hd = (manuscript_type != "voynich") or (int(page_data.get("image_width", 0)) >= 1800)
+        if already_hd:
+            return (
+                json_path.stem,
+                len(page_data["glyphs"]),
+                0,
+                0,
+                time.time() - t0,
+                True,
+            )
 
     if not page_data.get("words"):
         return json_path.stem, 0, 0, 0, time.time() - t0, True
 
-    img = cv2.imread(str(img_path))
-    if img is None:
-        return json_path.stem, 0, 0, 0, time.time() - t0, True
+    if manuscript_type == "voynich":
+        import numpy as np
+        from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader
+        rosetta_loader = VoynicheseRosettaLoader()
+        _, pil_hd, _ = rosetta_loader.get_yale_hd_scan_and_words(page_id)
+        img = cv2.cvtColor(np.array(pil_hd.convert("RGB")), cv2.COLOR_RGB2BGR)
+        cv2.imwrite(str(img_path), img, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    else:
+        img = cv2.imread(str(img_path))
+        if img is None:
+            return json_path.stem, 0, 0, 0, time.time() - t0, True
 
     a_cnt, b_cnt, c_cnt = enrich_page_multimodel(
         page_data=page_data,
@@ -76,8 +83,23 @@ def _worker_process_page(
         recompute_option_a=True,
     )
 
+    # Keep scalar metadata keys at the top of the JSON for fast stub indexing
+    ordered_data = {
+        "page_id": page_data.get("page_id", json_path.stem),
+        "page_img_rel": page_data.get("page_img_rel", f"{manuscript_type}/pages/{json_path.stem}.jpg"),
+        "image_width": page_data.get("image_width", img.shape[1]),
+        "image_height": page_data.get("image_height", img.shape[0]),
+        "line_count": page_data.get("line_count", len(page_data.get("lines", []))),
+        "word_count": page_data.get("word_count", len(page_data.get("words", []))),
+        "glyph_count": page_data.get("glyph_count", a_cnt),
+        "segmentation_modes": page_data.get("segmentation_modes", []),
+    }
+    for k, v in page_data.items():
+        if k not in ordered_data:
+            ordered_data[k] = v
+
     with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(page_data, f, ensure_ascii=False, indent=2)
+        json.dump(ordered_data, f, ensure_ascii=False, indent=2)
 
     return json_path.stem, a_cnt, b_cnt, c_cnt, time.time() - t0, False
 

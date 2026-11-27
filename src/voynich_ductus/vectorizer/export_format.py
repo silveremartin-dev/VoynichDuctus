@@ -13,7 +13,7 @@ class VectorExporter:
     """
 
     @staticmethod
-    def _points_to_smooth_path_d(pts: List[Tuple[float, float, float]]) -> str:
+    def _points_to_smooth_path_d(pts: List[Tuple[float, float, float]], min_step: Optional[float] = None) -> str:
         """
         Converts discrete pixel stroke points into a smooth cubic Bézier path.
         Eliminates discrete pixel staircase jitter, producing calligraphic cursive strokes.
@@ -25,38 +25,59 @@ class VectorExporter:
         if len(pts) == 2:
             return f"M {pts[0][1]:.2f} {pts[0][0]:.2f} L {pts[1][1]:.2f} {pts[1][0]:.2f}"
 
-        # Subsample / simplify points slightly so cubic spline doesn't wobble
+        # Subsample / simplify points so cubic spline doesn't wobble with sub-mm jitter
         coords = [(float(p[1]), float(p[0])) for p in pts]  # (x, y)
+        is_closed = (len(coords) >= 5 and ((coords[0][0] - coords[-1][0]) ** 2 + (coords[0][1] - coords[-1][1]) ** 2) <= 12.25)
+        if min_step is None:
+            xs = [c[0] for c in coords]
+            ys = [c[1] for c in coords]
+            span = max(max(xs) - min(xs), max(ys) - min(ys), 1.0)
+            min_step = max(1.0, min(2.2, span * 0.035))
+        min_step_sq = float(min_step * min_step)
+
         simplified = [coords[0]]
         for p in coords[1:-1]:
             dx = p[0] - simplified[-1][0]
             dy = p[1] - simplified[-1][1]
-            if (dx * dx + dy * dy) >= 2.25:  # min 1.5px step
+            if (dx * dx + dy * dy) >= min_step_sq:
                 simplified.append(p)
-        simplified.append(coords[-1])
+        simplified.append(coords[0] if is_closed else coords[-1])
 
         if len(simplified) < 3:
             return " ".join([f"M {simplified[0][0]:.2f} {simplified[0][1]:.2f}"] + [f"L {p[0]:.2f} {p[1]:.2f}" for p in simplified[1:]])
 
-        # Catmull-Rom to Cubic Bézier spline
+        # Catmull-Rom to Cubic Bézier spline (periodic wrap for closed loops)
         d_tokens = [f"M {simplified[0][0]:.2f} {simplified[0][1]:.2f}"]
         n = len(simplified)
-        for i in range(n - 1):
-            p0 = simplified[max(0, i - 1)]
-            p1 = simplified[i]
-            p2 = simplified[i + 1]
-            p3 = simplified[min(n - 1, i + 2)]
+        if is_closed and n >= 5:
+            m = n - 1
+            for i in range(m):
+                p0 = simplified[(i - 1) % m]
+                p1 = simplified[i]
+                p2 = simplified[(i + 1) % m]
+                p3 = simplified[(i + 2) % m]
+                cp1x = p1[0] + (p2[0] - p0[0]) / 6.0
+                cp1y = p1[1] + (p2[1] - p0[1]) / 6.0
+                cp2x = p2[0] - (p3[0] - p1[0]) / 6.0
+                cp2y = p2[1] - (p3[1] - p1[1]) / 6.0
+                d_tokens.append(f"C {cp1x:.2f} {cp1y:.2f}, {cp2x:.2f} {cp2y:.2f}, {p2[0]:.2f} {p2[1]:.2f}")
+            d_tokens.append("Z")
+        else:
+            for i in range(n - 1):
+                p0 = simplified[max(0, i - 1)]
+                p1 = simplified[i]
+                p2 = simplified[i + 1]
+                p3 = simplified[min(n - 1, i + 2)]
 
-            cp1x = p1[0] + (p2[0] - p0[0]) / 6.0
-            cp1y = p1[1] + (p2[1] - p0[1]) / 6.0
-            cp2x = p2[0] - (p3[0] - p1[0]) / 6.0
-            cp2y = p2[1] - (p3[1] - p1[1]) / 6.0
+                cp1x = p1[0] + (p2[0] - p0[0]) / 6.0
+                cp1y = p1[1] + (p2[1] - p0[1]) / 6.0
+                cp2x = p2[0] - (p3[0] - p1[0]) / 6.0
+                cp2y = p2[1] - (p3[1] - p1[1]) / 6.0
 
-            d_tokens.append(f"C {cp1x:.2f} {cp1y:.2f}, {cp2x:.2f} {cp2y:.2f}, {p2[0]:.2f} {p2[1]:.2f}")
+                d_tokens.append(f"C {cp1x:.2f} {cp1y:.2f}, {cp2x:.2f} {cp2y:.2f}, {p2[0]:.2f} {p2[1]:.2f}")
 
         return " ".join(d_tokens)
 
-    @staticmethod
     @staticmethod
     def to_svg(
         strokes: List[Dict[str, Any]],
@@ -107,9 +128,9 @@ class VectorExporter:
 
             color = colors[i % len(colors)] if include_order_colors else "#38bdf8"
             glyph_dim = max(width, height)
-            max_allowed_w = max(1.8, min(glyph_dim * 0.10, 3.2))
+            max_allowed_w = max(0.85, min(glyph_dim * 0.068, 3.4))
             avg_width = sum(p[2] for p in norm_pts) / len(norm_pts)
-            stroke_width = max(1.2, min(avg_width * 0.75, max_allowed_w))
+            stroke_width = max(0.65, min(avg_width * 0.48, max_allowed_w))
 
             d_str = VectorExporter._points_to_smooth_path_d(norm_pts)
             start_y, start_x = norm_pts[0][0], norm_pts[0][1]
@@ -120,7 +141,7 @@ class VectorExporter:
                 f'stroke-linecap="round" stroke-linejoin="round" data-order="{stroke.get("order_index", i)}"/>'
             )
             # Pen-down touch point indicator (small circle on stroke start)
-            dot_r = max(1.1, min(stroke_width * 0.65, 2.0))
+            dot_r = max(0.55, min(stroke_width * 0.70, glyph_dim * 0.052, 2.1))
             svg_lines.append(
                 f'    <circle cx="{start_x:.2f}" cy="{start_y:.2f}" r="{dot_r:.2f}" fill="#10b981" opacity="0.95"/>'
             )

@@ -3,6 +3,7 @@ Junction resolution and scribal ductus kinematics ordering based on tangent cont
 and 15th-century right-handed quill mechanics.
 """
 
+import math
 from typing import List, Dict, Tuple, Any
 import numpy as np
 
@@ -35,6 +36,7 @@ class JunctionResolver:
     def orient_stroke(self, stroke: Dict[str, Any]) -> Dict[str, Any]:
         """
         Orients individual stroke in accordance with right-handed scribal priors:
+        - Closed loops preserve their sequential cycle closure intact.
         - Predominantly top-to-bottom (downstrokes on ascenders/descenders).
         - Predominantly left-to-right (horizontal traverses/ligatures).
         """
@@ -44,6 +46,10 @@ class JunctionResolver:
 
         y0, x0 = pts[0][0], pts[0][1]
         y1, x1 = pts[-1][0], pts[-1][1]
+
+        if len(pts) >= 6 and np.hypot(y1 - y0, x1 - x0) <= 3.5:
+            stroke["reversed_by_prior"] = False
+            return stroke
 
         dy = y1 - y0
         dx = x1 - x0
@@ -73,26 +79,36 @@ class JunctionResolver:
             return 1.0
         # Exit vector of pts1
         idx1 = max(0, len(pts1) - 1 - k)
-        v1 = np.array(pts1[-1][:2]) - np.array(pts1[idx1][:2])
+        dy1 = float(pts1[-1][0]) - float(pts1[idx1][0])
+        dx1 = float(pts1[-1][1]) - float(pts1[idx1][1])
         # Entry vector of pts2
         idx2 = min(len(pts2) - 1, k)
-        v2 = np.array(pts2[idx2][:2]) - np.array(pts2[0][:2])
+        dy2 = float(pts2[idx2][0]) - float(pts2[0][0])
+        dx2 = float(pts2[idx2][1]) - float(pts2[0][1])
 
-        n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
+        n1, n2 = math.hypot(dy1, dx1), math.hypot(dy2, dx2)
         if n1 < 1e-4 or n2 < 1e-4:
             return 1.0
-        return float(np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0))
+        val = (dy1 * dy2 + dx1 * dx2) / (n1 * n2)
+        return max(-1.0, min(1.0, val))
 
-    def chain_collinear_strokes(self, strokes: List[Dict[str, Any]], max_gap: float = 8.0) -> List[Dict[str, Any]]:
+    def chain_collinear_strokes(
+        self,
+        strokes: List[Dict[str, Any]],
+        max_gap: float = 8.0,
+        min_cos: float = -0.1,
+        max_strokes: int = 0
+    ) -> List[Dict[str, Any]]:
         """
         Merges adjacent stroke segments meeting at junctions or corners into continuous, unified strokes.
-        Enforces tangent continuity (cos theta >= -0.1) to prevent unnatural hairpin reversals.
+        Enforces tangent continuity (cos theta >= min_cos) to prevent unnatural hairpin reversals,
+        and if max_strokes > 0, iteratively coalesces remaining close segments or drops minor fragments
+        until stroke count respects physical pen-lift bounds.
         """
         if len(strokes) <= 1:
             return strokes
 
         # Filter out micro-spur artifacts (< 5 points or < 5px length when substantial strokes exist)
-        total_len = sum(s.get("length", len(s.get("points", []))) for s in strokes)
         valid = []
         for s in strokes:
             s_len = s.get("length", len(s.get("points", [])))
@@ -112,43 +128,47 @@ class JunctionResolver:
 
             for i in range(len(current_strokes)):
                 s1 = current_strokes[i]
-                p1_start = np.array(s1["points"][0][:2])
-                p1_end = np.array(s1["points"][-1][:2])
+                p1_s = s1["points"][0]
+                p1_e = s1["points"][-1]
+                p1sy, p1sx = float(p1_s[0]), float(p1_s[1])
+                p1ey, p1ex = float(p1_e[0]), float(p1_e[1])
 
                 for j in range(len(current_strokes)):
                     if i == j:
                         continue
                     s2 = current_strokes[j]
-                    p2_start = np.array(s2["points"][0][:2])
-                    p2_end = np.array(s2["points"][-1][:2])
+                    p2_s = s2["points"][0]
+                    p2_e = s2["points"][-1]
+                    p2sy, p2sx = float(p2_s[0]), float(p2_s[1])
+                    p2ey, p2ex = float(p2_e[0]), float(p2_e[1])
 
                     # Option 1: s1 end -> s2 start
-                    if np.linalg.norm(p1_end - p2_start) <= max_gap:
+                    if math.hypot(p1ey - p2sy, p1ex - p2sx) <= max_gap:
                         cos_sim = self._tangent_cosine(s1["points"], s2["points"])
-                        if cos_sim >= -0.1 and cos_sim > best_cos:
+                        if cos_sim >= min_cos and cos_sim > best_cos:
                             best_cos = cos_sim
                             best_merge = (i, j, s1["points"] + s2["points"], s1["start"], s2["end"])
 
                     # Option 2: s1 end -> s2 end (s2 reversed)
-                    if np.linalg.norm(p1_end - p2_end) <= max_gap:
+                    if math.hypot(p1ey - p2ey, p1ex - p2ex) <= max_gap:
                         rev_s2 = list(reversed(s2["points"]))
                         cos_sim = self._tangent_cosine(s1["points"], rev_s2)
-                        if cos_sim >= -0.1 and cos_sim > best_cos:
+                        if cos_sim >= min_cos and cos_sim > best_cos:
                             best_cos = cos_sim
                             best_merge = (i, j, s1["points"] + rev_s2, s1["start"], s2["start"])
 
                     # Option 3: s2 end -> s1 start
-                    if np.linalg.norm(p2_end - p1_start) <= max_gap:
+                    if math.hypot(p2ey - p1sy, p2ex - p1sx) <= max_gap:
                         cos_sim = self._tangent_cosine(s2["points"], s1["points"])
-                        if cos_sim >= -0.1 and cos_sim > best_cos:
+                        if cos_sim >= min_cos and cos_sim > best_cos:
                             best_cos = cos_sim
                             best_merge = (i, j, s2["points"] + s1["points"], s2["start"], s1["end"])
 
                     # Option 4: s1 start -> s2 start (s1 reversed)
-                    if np.linalg.norm(p1_start - p2_start) <= max_gap:
+                    if math.hypot(p1sy - p2sy, p1sx - p2sx) <= max_gap:
                         rev_s1 = list(reversed(s1["points"]))
                         cos_sim = self._tangent_cosine(rev_s1, s2["points"])
-                        if cos_sim >= -0.1 and cos_sim > best_cos:
+                        if cos_sim >= min_cos and cos_sim > best_cos:
                             best_cos = cos_sim
                             best_merge = (i, j, rev_s1 + s2["points"], s1["end"], s2["end"])
 
@@ -166,20 +186,80 @@ class JunctionResolver:
                 current_strokes.pop(j)
                 merged = True
 
+        # Second pass if count still exceeds physical ceiling: merge adjacent junction legs even across sharper bends
+        if max_strokes > 0 and len(current_strokes) > max_strokes:
+            gap_relaxed = max_gap * 1.6
+            changed = True
+            while changed and len(current_strokes) > max_strokes:
+                changed = False
+                best_pair = None
+                best_dist = gap_relaxed + 1.0
+                for i in range(len(current_strokes)):
+                    s1 = current_strokes[i]
+                    p1_s, p1_e = s1["points"][0], s1["points"][-1]
+                    p1sy, p1sx = float(p1_s[0]), float(p1_s[1])
+                    p1ey, p1ex = float(p1_e[0]), float(p1_e[1])
+                    for j in range(i + 1, len(current_strokes)):
+                        s2 = current_strokes[j]
+                        p2_s, p2_e = s2["points"][0], s2["points"][-1]
+                        p2sy, p2sx = float(p2_s[0]), float(p2_s[1])
+                        p2ey, p2ex = float(p2_e[0]), float(p2_e[1])
+                        candidates = [
+                            (math.hypot(p1ey - p2sy, p1ex - p2sx), s1["points"] + s2["points"], s1["start"], s2["end"]),
+                            (math.hypot(p1ey - p2ey, p1ex - p2ex), s1["points"] + list(reversed(s2["points"])), s1["start"], s2["start"]),
+                            (math.hypot(p2ey - p1sy, p2ex - p1sx), s2["points"] + s1["points"], s2["start"], s1["end"]),
+                            (math.hypot(p1sy - p2sy, p1sx - p2sx), list(reversed(s1["points"])) + s2["points"], s1["end"], s2["end"]),
+                        ]
+                        for d_val, comb, st, en in candidates:
+                            if d_val < best_dist:
+                                best_dist = d_val
+                                best_pair = (i, j, comb, st, en)
+                if best_pair is not None and best_dist <= gap_relaxed:
+                    i, j, comb, st, en = best_pair
+                    s_base = current_strokes[i]
+                    current_strokes[i] = {
+                        "stroke_id": s_base["stroke_id"],
+                        "type": s_base.get("type", "segment"),
+                        "points": comb,
+                        "length": float(len(comb)),
+                        "start": st,
+                        "end": en
+                    }
+                    current_strokes.pop(j)
+                    changed = True
+
+            if len(current_strokes) > max_strokes:
+                current_strokes.sort(key=lambda s: len(s.get("points", [])), reverse=True)
+                current_strokes = current_strokes[:max_strokes]
+
         return current_strokes
 
     @staticmethod
     def smooth_stroke_points(points: List[Tuple[float, float, float]], window: int = 3) -> List[Tuple[float, float, float]]:
         """
-        Applies a moving average smoothing filter to stroke coordinates to simulate natural fluid pen trajectories.
+        Applies a moving average smoothing filter to stroke coordinates (wrapping periodically for closed loops).
         """
         if len(points) <= window:
             return points
-        smoothed = []
         n = len(points)
+        is_closed = (n >= 6 and float(np.hypot(points[0][0] - points[-1][0], points[0][1] - points[-1][1])) <= 3.5)
+        half_w = window // 2
+        smoothed = []
+        if is_closed:
+            ring = points[:-1]
+            m = len(ring)
+            for i in range(m):
+                pts_slice = [ring[(i + k) % m] for k in range(-half_w, half_w + 1)]
+                avg_y = sum(p[0] for p in pts_slice) / len(pts_slice)
+                avg_x = sum(p[1] for p in pts_slice) / len(pts_slice)
+                avg_w = sum(p[2] for p in pts_slice) / len(pts_slice)
+                smoothed.append((round(avg_y, 2), round(avg_x, 2), round(avg_w, 2)))
+            smoothed.append(smoothed[0])
+            return smoothed
+
         for i in range(n):
-            w_start = max(0, i - window // 2)
-            w_end = min(n, i + window // 2 + 1)
+            w_start = max(0, i - half_w)
+            w_end = min(n, i + half_w + 1)
             pts_slice = points[w_start:w_end]
             avg_y = sum(p[0] for p in pts_slice) / len(pts_slice)
             avg_x = sum(p[1] for p in pts_slice) / len(pts_slice)
@@ -187,11 +267,17 @@ class JunctionResolver:
             smoothed.append((round(avg_y, 2), round(avg_x, 2), round(avg_w, 2)))
         return smoothed
 
-    def resolve_and_order_strokes(self, strokes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def resolve_and_order_strokes(
+        self,
+        strokes: List[Dict[str, Any]],
+        max_gap: float = 8.0,
+        min_cos: float = -0.1,
+        max_strokes: int = 0
+    ) -> List[Dict[str, Any]]:
         """
         Chains adjacent collinear segments, orients, smooths, and sorts strokes into a chronological sequence.
         """
-        chained = self.chain_collinear_strokes(strokes)
+        chained = self.chain_collinear_strokes(strokes, max_gap=max_gap, min_cos=min_cos, max_strokes=max_strokes)
         oriented = [self.orient_stroke(s) for s in chained]
 
         for s in oriented:

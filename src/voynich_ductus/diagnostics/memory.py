@@ -54,31 +54,51 @@ class LongRangeMemoryAnalyzer:
                 fluctuations.append(np.mean(rms_list))
                 valid_scales.append(s)
 
-        if len(valid_scales) < 3:
+        if len(valid_scales) < 3 or float(np.std(series)) < 1e-9:
+            return 0.5
+
+        fluct_arr = np.array(fluctuations, dtype=float)
+        scale_arr = np.array(valid_scales, dtype=float)
+        pos_mask = fluct_arr > 1e-12
+        if int(np.sum(pos_mask)) < 3:
             return 0.5
 
         # Log-log linear regression: log(F(s)) = H * log(s) + C
-        log_s = np.log(valid_scales)
-        log_f = np.log(fluctuations)
+        log_s = np.log(scale_arr[pos_mask])
+        log_f = np.log(fluct_arr[pos_mask])
 
         # Fit line
         slope, _ = np.polyfit(log_s, log_f, 1)
+        if not np.isfinite(slope):
+            return 0.5
         return float(np.clip(slope, 0.0, 1.5))
 
     @classmethod
     def word_recurrence_series(cls, words: List[str]) -> np.ndarray:
         """
-        Converts sequence of words into a word-recurrence distance time series.
-        For each word at index i, value is distance to previous occurrence of the same word.
+        Converts sequence of words into a recurrence distance time series.
+        When word repetition rate is sparse (< 20%, e.g. short folio slices or random noise),
+        falls back to atomic glyph/symbol recurrence intervals so hapax warm-up plateaus
+        cannot artificially inflate Hurst H or collapse variance to zero.
         """
+        if not words:
+            return np.array([], dtype=float)
+        rep_ratio = 1.0 - (len(set(words)) / float(max(1, len(words))))
+        if rep_ratio < 0.20:
+            from voynich_ductus.diagnostics.entropy import ShannonEntropyAnalyzer
+            units = ShannonEntropyAnalyzer.extract_atomic_symbols(words)
+        else:
+            units = words
+
         last_seen = {}
         series = []
-        for i, w in enumerate(words):
-            if w in last_seen:
-                dist = i - last_seen[w]
+        n_u = max(2, len(units))
+        for i, u in enumerate(units):
+            if u in last_seen:
+                dist = i - last_seen[u]
             else:
-                dist = len(words) // 2
-            last_seen[w] = i
+                dist = max(1, min(i + 1, n_u // 8))
+            last_seen[u] = i
             series.append(float(dist))
 
         return np.array(series, dtype=float)

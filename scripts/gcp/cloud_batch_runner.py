@@ -52,7 +52,7 @@ def process_single_voynich_folio(
         try:
             with open(p_json, "r", encoding="utf-8") as f:
                 d = json.load(f)
-            if d.get("glyphs") and d.get("glyphs_neural_pca") and d.get("glyphs_hybrid_consensus"):
+            if d.get("glyphs") and d.get("segmentation_modes") == ["generative_typewriter_viterbi"]:
                 is_preload = (folio_id.lower() in ["f001r", "f1r"])
                 return {
                     "page_id": d.get("page_id", folio_id),
@@ -63,126 +63,42 @@ def process_single_voynich_folio(
                     "line_count": d.get("line_count", len(d.get("lines", []))),
                     "word_count": d.get("word_count", len(d.get("words", []))),
                     "glyph_count": d.get("glyph_count", len(d.get("glyphs", []))),
-                    "glyph_count_neural_pca": d.get("glyph_count_neural_pca", len(d.get("glyphs_neural_pca", []))),
-                    "glyph_count_hybrid_consensus": d.get("glyph_count_hybrid_consensus", len(d.get("glyphs_hybrid_consensus", []))),
                     "yield_report": d.get("yield_report", {}),
                     "sample_glyphs": d.get("glyphs", [])[:30],
                     "lines": d.get("lines", []) if is_preload else [],
                     "words": d.get("words", []) if is_preload else [],
                     "glyphs": d.get("glyphs", []) if is_preload else [],
-                    "glyphs_neural_pca": d.get("glyphs_neural_pca", []) if is_preload else [],
-                    "glyphs_hybrid_consensus": d.get("glyphs_hybrid_consensus", []) if is_preload else [],
                     "cached": True
                 }
         except Exception:
             pass
 
     configure_gentle_worker_environment(low_priority=False)
-    raw_img = Image.open(scan_path)
-    # 2x Lanczos upscale for crisp pen stroke resolution (1272x1800)
-    img = raw_img.resize((raw_img.width * 2, raw_img.height * 2), Image.Resampling.LANCZOS)
-    scale_calib = MetricScaleCalibration(manuscript_type="voynich", image_height_px=img.height, image_width_px=img.width)
+    rosetta_loader = VoynicheseRosettaLoader()
+    _, yale_img, yale_r_words = rosetta_loader.get_yale_hd_scan_and_words(folio_id)
+    scale_calib = MetricScaleCalibration(manuscript_type="voynich", image_height_px=yale_img.height, image_width_px=yale_img.width)
     segmenter = GlyphSegmenter(scale_calib=scale_calib)
-    
-    # Check for authentic Yale HD Master plate
-    yale_img = None
-    yale_dir = Path("data/raw/scans/voynich/yale")
-    if yale_dir.exists():
-        import re
-        m = re.match(r"f0*(\d+)([rv]\d*)?", folio_id.lower())
-        if m:
-            num = int(m.group(1))
-            sfx = m.group(2) or "r"
-            cand_names = [f"f{num:03d}{sfx}.jpg", f"f{num}{sfx}.jpg", f"{folio_id}.jpg"]
-            for cn in cand_names:
-                ypath = yale_dir / cn
-                if ypath.exists():
-                    try:
-                        yale_img = Image.open(ypath).convert("RGB")
-                        break
-                    except Exception:
-                        pass
 
-    # Reconstruct RosettaWord objects if provided
-    r_words = None
-    if rosetta_words_serialized:
-        from voynich_ductus.ingestion.voynichese_rosetta import RosettaWord
-        r_words = []
-        for d in rosetta_words_serialized:
-            r_words.append(RosettaWord(
-                folio=d["folio"],
-                index=d["index"],
-                eva_text=d.get("eva_text", ""),
-                x_xml=d.get("x_xml", 0.0),
-                y_xml=d.get("y_xml", 0.0),
-                width_xml=d.get("width_xml", 0.0),
-                height_xml=d.get("height_xml", 0.0),
-                bbox_scan=tuple(d["bbox_scan"]) if d.get("bbox_scan") else None
-            ))
-
-    # If Yale HD is available and we have ground truth words, use SIFT/RANSAC alignment
-    if yale_img is not None and r_words:
-        try:
-            from voynich_ductus.ingestion.image_registration import MultimodalFolioAligner
-            aligner = MultimodalFolioAligner(cache_dir="data/intermediate/registration")
-            reg = aligner.compute_registration(raw_img, yale_img, folio_id=folio_id)
-            if reg and reg.get("status") == "success":
-                mat = np.array(reg["matrix_2x3"], dtype=np.float64)
-                yale_r_words = []
-                for rw in r_words:
-                    if rw.bbox_scan:
-                        # rw.bbox_scan is in glance coordinates (or 2x upscaled)
-                        # glance native is raw_img size
-                        transformed_bbox = aligner.transform_bbox(rw.bbox_scan, mat)
-                        from voynich_ductus.ingestion.voynichese_rosetta import RosettaWord
-                        yale_r_words.append(RosettaWord(
-                            folio=rw.folio,
-                            index=rw.index,
-                            eva_text=rw.eva_text,
-                            x_xml=rw.x_xml,
-                            y_xml=rw.y_xml,
-                            width_xml=rw.width_xml,
-                            height_xml=rw.height_xml,
-                            bbox_scan=transformed_bbox
-                        ))
-                res = segmenter.extract_page_glyphs_with_ground_truth(
-                    page_id=folio_id,
-                    image=yale_img,
-                    rosetta_words=yale_r_words,
-                    output_dir=base_out,
-                    subfolder="voynich"
-                )
-                print(f"  [HD] Aligned {folio_id} on Yale Master scan ({yale_img.width}x{yale_img.height}).")
-            else:
-                res = None
-        except Exception as e:
-            print(f"  [i] Yale HD registration fallback for {folio_id}: {e}")
-            res = None
+    if yale_r_words:
+        res = segmenter.extract_page_glyphs_with_ground_truth(
+            page_id=folio_id,
+            image=yale_img,
+            rosetta_words=yale_r_words,
+            output_dir=base_out,
+            subfolder="voynich"
+        )
+        print(f"  [HD] Aligned {folio_id} on Yale HD scan ({yale_img.width}x{yale_img.height}).")
     else:
-        res = None
-
-    # Fallback to 2x Lanczos glance image if Yale HD not available or failed
-    if res is None:
-        if r_words:
-            res = segmenter.extract_page_glyphs_with_ground_truth(
-                page_id=folio_id,
-                image=img,
-                rosetta_words=r_words,
-                output_dir=base_out,
-                subfolder="voynich"
-            )
-        else:
-            res = segmenter.extract_page_glyphs(
-                page_id=folio_id,
-                image=img,
-                output_dir=base_out,
-                subfolder="voynich"
-            )
+        res = segmenter.extract_page_glyphs(
+            page_id=folio_id,
+            image=yale_img,
+            output_dir=base_out,
+            subfolder="voynich"
+        )
 
     # Enrich with all 3 decomposition models (A, B, C), MetricScaleCalibration, and line-aware disjoint word partitioning
     import cv2 as _cv2
-    active_pil_img = yale_img if (yale_img is not None and r_words and res.get("image_width", 0) == getattr(yale_img, "width", 0)) else img
-    img_bgr = _cv2.cvtColor(np.array(active_pil_img.convert("RGB")), _cv2.COLOR_RGB2BGR)
+    img_bgr = _cv2.cvtColor(np.array(yale_img.convert("RGB")), _cv2.COLOR_RGB2BGR)
     enrich_page_multimodel(
         page_data=res,
         img_bgr=img_bgr,
@@ -243,7 +159,7 @@ def process_single_serafini_page(
         try:
             with open(p_json, "r", encoding="utf-8") as f:
                 d = json.load(f)
-            if d.get("glyphs") and d.get("glyphs_neural_pca") and d.get("glyphs_hybrid_consensus"):
+            if d.get("glyphs") and d.get("segmentation_modes") == ["generative_typewriter_viterbi"]:
                 is_preload = (page_id in ["serafini_p000", "serafini_p030"])
                 return {
                     "page_id": page_id,
@@ -254,14 +170,10 @@ def process_single_serafini_page(
                     "line_count": d.get("line_count", 0),
                     "word_count": d.get("word_count", 0),
                     "glyph_count": d.get("glyph_count", 0),
-                    "glyph_count_neural_pca": d.get("glyph_count_neural_pca", 0),
-                    "glyph_count_hybrid_consensus": d.get("glyph_count_hybrid_consensus", 0),
                     "sample_glyphs": d.get("glyphs", [])[:15],
                     "lines": d.get("lines", []) if is_preload else [],
                     "words": d.get("words", []) if is_preload else [],
                     "glyphs": d.get("glyphs", []) if is_preload else [],
-                    "glyphs_neural_pca": d.get("glyphs_neural_pca", []) if is_preload else [],
-                    "glyphs_hybrid_consensus": d.get("glyphs_hybrid_consensus", []) if is_preload else [],
                     "cached": True
                 }
         except Exception:
@@ -426,7 +338,7 @@ def main():
             for p_json in v_files:
                 with open(p_json, "r", encoding="utf-8") as f:
                     d = json.load(f)
-                if not d.get("glyphs_neural_pca") or not d.get("glyphs_hybrid_consensus"):
+                if d.get("segmentation_modes") != ["generative_typewriter_viterbi"]:
                     all_have_multimodel = False
                 p_id = d.get("page_id", p_json.stem)
                 c_info = cod_reg.get(p_id, {})
@@ -469,10 +381,8 @@ def main():
     # 2. Parallel Processing: Voynich Manuscript
     # -------------------------------------------------------------
     if do_voynich:
-        print("\n[*] Initializing Voynich Manuscript extraction queue...")
+        print("\n[*] Initializing Voynich Manuscript Yale Beinecke HD extraction queue...")
         rosetta_loader = VoynicheseRosettaLoader()
-        voynichese_scans_dir = Path("data/raw/scans/voynich/voynichese_scans")
-        voynichese_scans_dir.mkdir(parents=True, exist_ok=True)
 
         all_avail = rosetta_loader.list_available_folios()
         if all_avail:
@@ -502,40 +412,8 @@ def main():
             except Exception as e:
                 print(f"[GCS] Voynich pre-sync notice: {e}")
 
-        # Prepare task payloads
-        tasks = []
-        for f_id in folios:
-            norm_id = rosetta_loader._normalize_folio_id(f_id)
-            scan_path = voynichese_scans_dir / f"{norm_id}.jpg"
-            if not scan_path.exists():
-                import urllib.request
-                g_url = f"https://www.voynichese.com/2/data/folio/image/glance/color/large/{norm_id}.jpg"
-                req = urllib.request.Request(g_url, headers={"User-Agent": "Mozilla/5.0"})
-                with urllib.request.urlopen(req) as resp, open(scan_path, "wb") as f_out:
-                    f_out.write(resp.read())
-
-            # Pre-load ground truth words
-            r_words_ser = None
-            try:
-                # Use raw glance image for rosetta coordinate lookup
-                glance_im = Image.open(scan_path)
-                up_im = glance_im.resize((glance_im.width * 2, glance_im.height * 2), Image.Resampling.LANCZOS)
-                words = rosetta_loader.extract_aligned_words(f_id, scan_image=up_im)
-                if words:
-                    r_words_ser = [{
-                        "folio": w.folio,
-                        "index": w.index,
-                        "eva_text": w.eva_text,
-                        "x_xml": w.x_xml,
-                        "y_xml": w.y_xml,
-                        "width_xml": w.width_xml,
-                        "height_xml": w.height_xml,
-                        "bbox_scan": list(w.bbox_scan) if w.bbox_scan else None
-                    } for w in words]
-            except Exception as e:
-                print(f"  [i] Rosetta pre-fetch notice for {f_id}: {e}")
-
-            tasks.append((f_id, str(scan_path), str(base_out), r_words_ser, args.force_voynich))
+        # Prepare task payloads (Yale Beinecke HD scans are downloaded on demand inside workers)
+        tasks = [(f_id, "", str(base_out), None, args.force_voynich) for f_id in folios]
 
         print(f"[*] Dispatching {len(tasks)} Voynich folios across {args.workers} workers...")
         with ProcessPoolExecutor(max_workers=args.workers) as executor:

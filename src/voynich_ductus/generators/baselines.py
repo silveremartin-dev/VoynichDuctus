@@ -30,21 +30,35 @@ class BaselineGenerator:
     """
 
     @classmethod
-    def get_natural_latin_sample(cls, num_words: int = 1000) -> List[str]:
-        """Returns tokenized authentic 15th-century medieval Latin corpus repeated/expanded to target word length."""
-        raw_words = [w.lower().strip(".,;:!?") for w in cls.LATIN_HERBAL_CORPUS.split() if w.strip(".,;:!?")]
-        out = []
+    def get_natural_latin_sample(cls, num_words: int = 1000, seed: Optional[int] = 42) -> List[str]:
+        """Returns tokenized authentic 15th-century medieval Latin corpus without trivial verbatim block loops."""
+        rng = random.Random(seed)
+        sentences = [s.strip() for s in cls.LATIN_HERBAL_CORPUS.strip().splitlines() if s.strip()]
+        out: List[str] = []
+        pass_idx = 0
         while len(out) < num_words:
-            out.extend(raw_words)
+            block = list(sentences)
+            if pass_idx > 0:
+                rng.shuffle(block)
+            for sent in block:
+                words_s = [w.lower().strip(".,;:!?") for w in sent.split() if w.strip(".,;:!?")]
+                out.extend(words_s)
+            pass_idx += 1
         return out[:num_words]
 
     @staticmethod
-    def get_uniform_random_gibberish(num_words: int = 1000, avg_len: int = 5, alphabet: str = "abcdefghijklmnopqrstuvwxyz") -> List[str]:
-        """Generates memoryless random noise words with uniform character distribution."""
+    def get_uniform_random_gibberish(
+        num_words: int = 1000,
+        avg_len: int = 5,
+        alphabet: str = "abcdefghijklmnopqrstuvwxyz",
+        seed: Optional[int] = 42,
+    ) -> List[str]:
+        """Generates deterministic memoryless random noise words with uniform character distribution."""
+        rng = random.Random(seed)
         words = []
         for _ in range(num_words):
-            w_len = max(2, int(random.gauss(avg_len, 1.5)))
-            w = "".join(random.choice(alphabet) for _ in range(w_len))
+            w_len = max(2, int(rng.gauss(avg_len, 1.5)))
+            w = "".join(rng.choice(alphabet) for _ in range(w_len))
             words.append(w)
         return words
 

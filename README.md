@@ -20,11 +20,11 @@
 - [2. Visual Tour & Interactive Grand Glyph Explorer (`grand_glyph_explorer.html`)](#2-visual-tour--interactive-grand-glyph-explorer-grand_glyph_explorerhtml)
   - [2.1 Synchronized 4-Panel Workbench & Word-Level Ductus Inspector](#21-synchronized-4-panel-workbench--word-level-ductus-inspector)
   - [2.2 Glyph-Level Dual-Ductus Comparison (Quill 40° vs. Euler-Bernoulli Skeleton)](#22-glyph-level-dual-ductus-comparison-quill-40-vs-euler-bernoulli-skeleton)
-  - [2.3 Three Independent Word Decomposition Modes (`word_decomposition`: A, B, C)](#23-three-independent-word-decomposition-modes-word_decomposition-a-b-c)
+  - [2.3 Closed-Loop Generative Typewriter + Viterbi MDL Word Segmentation](#23-closed-loop-generative-typewriter--viterbi-mdl-word-segmentation)
   - [2.4 Unsupervised Canonical Alphabet & Graphical Symbol Catalogue](#24-unsupervised-canonical-alphabet--graphical-symbol-catalogue)
   - [2.5 Cross-Folio Archetype Variations & 1-Click Page Localization](#25-cross-folio-archetype-variations--1-click-page-localization)
   - [2.6 Codex Seraphinianus: Continuous Cursive Ribbon & Emergent Vector Symbols](#26-codex-seraphinianus-continuous-cursive-ribbon--emergent-vector-symbols)
-  - [2.7 Built-In Scientific Methodology & BnF Gallica Calibration Reference](#27-built-in-scientific-methodology--bnf-gallica-calibration-reference)
+  - [2.7 Built-In Scientific Methodology, Ductus Calibration & Live Diagnostics](#27-built-in-scientific-methodology-ductus-calibration--live-diagnostics)
 - [3. The Epistemic Trap: Human Transliteration Bias & The Anti-Circularity Firewall](#3-the-epistemic-trap-human-transliteration-bias--the-anti-circularity-firewall)
 - [4. End-to-End 6-Stage Pipeline Architecture](#4-end-to-end-6-stage-pipeline-architecture)
 - [5. Autonomous Multi-Scale Recognition: From Raw Parchment to Disjoint Words & Word Decomposition](#5-autonomous-multi-scale-recognition-from-raw-parchment-to-disjoint-words--word-decomposition)
@@ -47,13 +47,13 @@ Give `VoynichDuctus` raw scans of any manuscript—whether historical, undeciphe
 
 1. **Automatic Spatial Recognition (Lines $\to$ Words $\to$ Word Decomposition into Letters & Glyphs)**:
    - Filters out colored illustrations and parchment stains, detects text lines, and partitions the page into **strictly disjoint lexical words** (via Voronoi/watershed boundary arbitration with zero overlapping boxes).
-   - Decomposes each word into its constituent **letters, glyphs, and decoupled supralinear diacritics** using three parallel **Word Decomposition (`word_decomposition`)** modes: **A · Topological & Valley (40°)**, **B · Spatial PCA Decomposition** (`||dZ/dx||` horizontal latent transitions), and **C · Hybrid Consensus** (their geometric intersection with loop protection). Every glyph across all 3 decompositions receives its own complete Dual-Engine Ductus.
+   - Decomposes each word into its constituent **letters, glyphs, and decoupled supralinear diacritics** using our converged **Generative Typewriter + Viterbi MDL (`GenerativeTypewriterDecomposer`)** closed-loop engine — combining a corpus-induced `24×24` visual character sprite dictionary, topological loop invariants (`0L / 1L / 2+L`), and dynamic programming minimum-description-length decoding (outperforming earlier valley/PCA/consensus heuristics `A / B / C` while cutting pipeline runtime by ~3×).
 2. **Automatic Dual-Engine Kinematic Ductus Reconstruction (*Offline-to-Online Derendering*)**:
    - Infers how the writer's hand actually moved across the page and displays **two complementary ductus reconstructions side-by-side** for every glyph:
-     1. **Quill Calligraphic Ductus (40° Nib)**: Physical ridge tracker with lateral spur pruning, full nib-footprint extinction (`wake_mask` preventing internal zigzag or U-turns inside thick stems), Ramer-Douglas-Peucker spline simplification, and chronological stroke order (`●` Green touchdown, `1` $\to$ `2` $\to$ `3` $\to$ `4`).
+     1. **Quill Calligraphic Bézier Silhouette Fit (40° Nib)**: Crossing-preserving topological centerline extraction + 11-o'clock loop rings + normal-axis silhouette centering + residual uncovered-ink recovery + `IoU`-optimal 40° beveled quill width calibration (`IoU = 0.607`, `Recall = 77.9%` across HD Voynich glyphs).
      2. **Euler-Bernoulli Topological Skeleton**: Pure 1D Medial Axis Transform + `NetworkX` graph junction resolver minimizing bending energy $\int \kappa^2(s)\,ds$.
 3. **Automatic Unsupervised Alphabet & Graphical Archetype Induction**:
-   - Without knowing what alphabet is written on the page, the engine projects every extracted glyph into a joint visual, kinematic, and topological space (**16-D PCA projection of Meta DINOv2 ViT 768-D embeddings + high-weight kinematic ductus descriptors + physical millimeter scale bands**) and clusters them into an **emergent canonical alphabet of archetypes** (`G01`–`G49` for Voynich; `G01`–`G57` graphical vector symbols for Codex Seraphinianus).
+   - Without knowing what alphabet is written on the page, the engine projects every extracted glyph into a joint visual, kinematic, and topological space (**post-`StandardScaler` kinematic ductus descriptors + metric millimeter scale bands + 16-D PCA projection of Meta DINOv2 ViT 768-D embeddings**) and induces **Dual Canonical Alphabets** (independently for **Quill 40° / Ribbon** and **Euler-Bernoulli Skeleton**) with live synchronized counts computed across all active processed pages (no extrapolated totals).
 
 ### Why Two Flagship Codices? (Voynich MS vs. Codex Seraphinianus) — And Why It Extends to Any Project
 
@@ -61,10 +61,10 @@ Although the project is named **VoynichDuctus** after its initial benchmark, it 
 
 | Experimental Dimension | 1. Voynich Manuscript (*Beinecke MS 408*, ca. 1404–1438) | 2. *Codex Seraphinianus* (Luigi Serafini, 1981) | 3. Extensibility to Other Manuscripts & Scripts |
 | :--- | :--- | :--- | :--- |
-| **Nature of the Script** | Undeciphered 15th-century medieval codex (225 folios). | Famous 20th-century **asemic encyclopedia** (371 pages) written in an imaginary, untranscribed cursive script with **no existing alphabet or human transliteration**. | Any historical manuscript, undeciphered writing system (Rohonc Codex, Rongorongo, Linear A, Indus script), medieval palimpsest, or calligraphic corpus. |
-| **Why It Is in the Lab** | **Testbed for Falsifying Human Transliterations (EVA)**: Tests whether physical quill strokes match or refute 1990s human ASCII transcriptions (*Proposition 4*). | **Ultimate Blind Test for Pure Unsupervised Discovery**: Because no transcription exists for *Seraphinianus*, the pipeline recognizes all **68,430 words** and **456,943 glyphs**, reconstructs their continuous cursive ribbon ductus, induces **57 canonical graphical symbol archetypes (`G01`–`G57`)**, and produces the **first complete autonomous machine transliteration** of the codex from scratch. | **Universal Metric & Kinematic Plug-and-Play**: Calibrates automatically to any page size in millimeters (`MetricScaleCalibration`) and any writing tool (broad quill, reed calame, brush, or monoline stylus). |
-| **Physical Ductus Mode** | **Multi-Stroke Medieval Quill (`1 to 4 strokes/glyph`)**: 40° beveled goose quill producing *pleins et déliés* and deliberate pen lifts (calibrated on 3 BnF Gallica medieval codices). | **Single-Stroke Cursive Ribbon (`1 continuous stroke/glyph`)**: Modern monoline fineliner (`single_stroke_mode=True`) moving with smooth automotive inertia and zero internal pen lifts. | Configurable physical profile (`single_stroke_mode`, `max_strokes`, `nib_angle_deg`) tailored to the target scriptorium or medium. |
-| **Processed Corpus Scale** | **225 folios** $\to$ **37,212 disjoint words** $\to$ **162,333 canonical glyphs** (**49 archetypes `G01`–`G49`**). | **371 pages** $\to$ **68,430 disjoint words** $\to$ **456,943 glyphs** (**57 emergent graphical symbol archetypes `G01`–`G57`**). | Ready for batch processing locally or at cloud scale (Docker / Google Cloud Run). |
+| **Nature of the Script** | Undeciphered 15th-century medieval codex (225 folios indexed). | Famous 20th-century **asemic encyclopedia** (371 pages indexed) written in an imaginary, untranscribed cursive script with **no existing alphabet or human transliteration**. | Any historical manuscript, undeciphered writing system (Rohonc Codex, Rongorongo, Linear A, Indus script), medieval palimpsest, or calligraphic corpus. |
+| **Why It Is in the Lab** | **Testbed for Falsifying Human Transliterations (EVA)**: Tests whether physical quill strokes match or refute 1990s human ASCII transcriptions (*Proposition 4*). | **Ultimate Blind Test for Pure Unsupervised Discovery**: Recognizes words and glyphs autonomously from raw ink masks, reconstructs continuous single-stroke cursive ribbon ductus, and induces **emergent graphical vector archetypes (`G01`..`G_K`)** without any pre-existing transcription. | **Universal Metric & Kinematic Plug-and-Play**: Calibrates automatically to any page size in millimeters (`MetricScaleCalibration`) and any writing tool (broad quill, reed calame, brush, or monoline stylus). |
+| **Physical Ductus Mode** | **Multi-Stroke Medieval Quill (`1 to 4 strokes/glyph`)**: 40° beveled goose quill producing *pleins et déliés* and deliberate pen lifts in **both** Quill and Euler-Bernoulli modes. | **Single-Stroke Cursive Ribbon (`1 continuous stroke/glyph`)**: Modern monoline fineliner (`single_stroke_mode=True`) in **both** Ribbon and Euler-Bernoulli modes. | Configurable physical profile (`single_stroke_mode`, `max_strokes`, `nib_angle_deg`) tailored to the target scriptorium or medium. |
+| **Live Synchronized Scope** | **Live-synced counts**: Every explorer rebuild dynamically sums processed Yale HD folios, Dual Alphabet clusters, and live `BenchmarkSuite` diagnostics (no hardcoded numbers). | **Live-synced counts**: Processed HD plates recompute their live 1-stroke ribbon counts, graphical symbol clusters, and `BenchmarkSuite` metrics on every build. | Ready for batch processing locally (`2` gentle workers) or at cloud scale (Docker / Cloud Run). |
 
 ---
 
@@ -78,9 +78,9 @@ The pipeline compiles its entire multi-codex output into a standalone, zero-depe
 
 *Figure 1 — The 4-panel workspace on Voynich folio `f1r` with word `L01_W00` (`ykal`) selected:*
 - **Panel 1 (Left — Folio Navigator)**: Browse all 225 Voynich folios or 371 Seraphinianus pages. Switch dynamically between **Traditional Beinecke Codex Order** (`f1r` $\to$ `f116v`) and **Singulion Quire Order** (*Layfield & Davis, Digital Medievalist 2026*).
-- **Panel 2 (Center-Left — Deep-Zoom Parchment Canvas)**: Interactive high-resolution viewport (up to 800% magnification) with live minimap, image filters (*Ink Boost*, *High-Pass*, *Pure Ink*, *Natural*), real-time segmentation model selector (*Quill Ductus 40°*, *AI Neural PCA*, *Hybrid Consensus*), and toggleable vector layers (`🟣 Lines`, `📦 Voynich Boxes`, `🟡 Words`, `🔵 Glyphs`).
+- **Panel 2 (Center-Left — Deep-Zoom Parchment Canvas)**: Interactive high-resolution viewport (up to 800% magnification) with live minimap, display filter (`📷 Natural` vs. client-side `✨ InkBoost` contrast boost — note backend binarization always runs on `Natural` via Sauvola + bounded 8-connected hysteresis with loop-hole protection), **Generative Typewriter + Viterbi MDL** glyph contours (with interior holes punched out via `evenodd` clipping), and toggleable vector layers (`🟣 Lines`, `📦 Word Boxes`, `🟡 Words`, `🔵 Glyphs`).
 - **Panel 3 (Center-Right — Words & Glyphs Grid)**: Instant switching between extracted lexical word crops (`🟡 Words`) and constituent character crops (`🔵 Glyphs`), filterable by induced canonical archetype.
-- **Panel 4 (Right — Inspector & Kinematic Ductus)**: Displays the selected word's canonical calligraphy, 4-scheme transliteration correspondence (`EVA`, `Currier`, `v101`, `Voynichese 2014`), raw parchment ink crop, **Proposition 4 Scribal Ductus Analysis** (`1:1 PARITY`: 4 physical strokes $\equiv$ 4 reference letters, 100% ink assigned), and multi-model decomposition agreement (`HIGH CONSENSUS`: Quill 4, Neural 4, Hybrid 4).
+- **Panel 4 (Right — Inspector & Kinematic Ductus)**: In **Word view**, displays the word's **3-Scheme Reference Transcriptions (`EVA · Currier · v101`)**, the **Bounded 8-Connected Hysteresis Mask + MST Envelope** diagnostic, the **100%-Coverage Emergent Retro-Transcription** bar (`Gxx` canonical medoid reconstruction), and the **Instance Ductus Sequence**.
 
 ---
 
@@ -99,12 +99,12 @@ The pipeline compiles its entire multi-codex output into a standalone, zero-depe
 
 ---
 
-### 2.3 Three Independent Word Decomposition Modes (`word_decomposition`: A, B, C)
+### 2.3 Closed-Loop Generative Typewriter + Viterbi MDL Word Segmentation
 
-Using the **`Word Decomposition`** selector in the Canvas toolbar (or keyboard keys `1`, `2`, `3`), researchers can switch dynamically between three independent hypotheses for splitting words into constituent glyphs—with full **Quill 40° + Euler-Bernoulli Dual Ductus** computed on every glyph of all three decompositions:
-1. **`A · Topological & Valley (40°)` (`GlyphSegmenter`)**: Connected components + supralinear diacritic decoupling ($\le 0.55\text{ mm}$) + vertical projection & Euclidean Distance Transform (EDT) ink valleys that strictly respect closed loops.
-2. **`B · Spatial PCA Decomposition` (`NeuralWordDecomposition`)**: Encodes the intact word crop into a 1D horizontal latent trajectory $Z(x) \in \mathbb{R}^{32}$ via `WordScribalEncoder` and places cuts at local peaks of the latent transition velocity $\|dZ/dx\|$.
-3. **`C · Hybrid Consensus` (`HybridConsensusWordDecomposition`)**: Retains cuts where Decompositions A and B geometrically intersect ($\epsilon \le 3\text{ px}$) while enforcing Euler loop integrity.
+Instead of proliferating heuristic segmentation tabs (`A / B / C`), `VoynichDuctus` converges onto a single **Generative Typewriter + Viterbi Minimum Description Length (MDL)** word decomposer (`GenerativeTypewriterDecomposer`, inspired by *The Learnable Typewriter*, Siglidis et al.):
+1. **Candidate Cut Lattice**: Builds a strictly disjoint 2D ink-pixel lattice from topological components, supralinear diacritic decoupling ($\le 0.55\text{ mm}$), EDT ink valleys, and 1D horizontal latent velocity peaks $\|dZ/dx\|$ — never slicing through closed loops (`0L / 1L / 2+L`).
+2. **Unsupervised `24×24` Sprite Dictionary + Viterbi MDL**: Induces visual character templates directly across the manuscript via Ward clustering and decodes the globally optimal character sequence balancing template reconstruction MSE, metric width priors, and open-prefix coalescence (`ch`, `cth`).
+3. **Empirical Benchmark (575 HD Voynich words across `f1r–f3r`, 100% blind to EVA)**: Achieves **`51.7%` exact character-count match (`MAE = 0.581`)**, decisively outperforming legacy `Model A` (`41.6% / MAE 0.904`), `Model B` (`35.3% / MAE 0.890`), and `Model C` (`45.6% / MAE 0.703`), while accelerating full-page vectorization & catalogue generation by ~3×.
 
 ---
 
@@ -113,8 +113,8 @@ Using the **`Word Decomposition`** selector in the Canvas toolbar (or keyboard k
 ![Canonical Alphabet Archetypes & Standard Transliteration Corpora](docs/images/04_canonical_alphabet_catalogue.png)
 
 *Figure 4 — The **Canonical Alphabet & Corpora** tab (`setTab('catalogue')`):*
-- Displays the emergent alphabet induced purely from ink geometry, kinematic ductus features, 16-D PCA DINOv2 embeddings, topological loop invariants (`0L`, `1L`, `2+L`), and physical millimeter scale bands (`TINY`, `CORE`, `TALL`, `WIDE`).
-- Each archetype card (`49 archetypes G01–G49` for Voynich; `57 archetypes G01–G57` for Seraphinianus) displays a **4-column visual comparison** (`SCAN` | `QUILL DUCTUS` | `EULER-BERNOULLI` | `CANONICAL FONT / SYMBOL`), corpus occurrence count, loop lock badge, and physical dimensions in pixels and millimeters (`mm` / `dmm`).
+- Displays the unified Canonical Alphabet induced from **Generative Typewriter + Viterbi MDL** glyphs using ink geometry, kinematic ductus features, 16-D PCA DINOv2 embeddings (weighted *after* `StandardScaler`), topological loop invariants (`0L`, `1L`, `2+L`), and physical millimeter scale bands (`TINY`, `CORE`, `TALL`, `WIDE`).
+- Each archetype card displays a **4-column visual comparison** (`SCAN` | `QUILL DUCTUS` | `EULER-BERNOULLI` | `CANONICAL FONT / SYMBOL`), live observed occurrence count across processed pages (zero extrapolation), loop lock badge, and physical dimensions in pixels and millimeters (`mm` / `dmm`).
 
 ---
 
@@ -123,7 +123,7 @@ Using the **`Word Decomposition`** selector in the Canvas toolbar (or keyboard k
 ![Archetype Variations Modal & Cross-Corpus Localization](docs/images/05_archetype_variations_explorer.png)
 
 *Figure 5 — Clicking any archetype card opens the **Archetype Morphological Variations Explorer**:*
-- Inspect all physical instances of an induced archetype across the manuscript, complete with its 4-box header banner (`SCAN` | `QUILL 40°` | `EULER-BERN.` | `SYMBOL / REFERENCE`).
+- Inspect the **top 36 conformant instances sorted by ascending Euclidean distance to the cluster medoid** (interleaved across processed folios), complete with a 4-box header banner (`SCAN` | `QUILL 40°` | `EULER-BERN.` | `SYMBOL / REFERENCE`).
 - Each variation card shows the local `SCAN` crop alongside its reconstructed `DUCTUS` trajectory, physical metric dimensions (`mm`), stroke count, and a **`📍 Locate on f1r`** button that jumps directly to the folio canvas and highlights the exact glyph in context.
 
 ---
@@ -141,16 +141,16 @@ Using the **`Word Decomposition`** selector in the Canvas toolbar (or keyboard k
 
 ---
 
-### 2.7 Built-In Scientific Methodology & BnF Gallica Calibration Reference
+### 2.7 Built-In Scientific Methodology, Ductus Calibration & Live Diagnostics
 
 ![Scientific Methodology, Calibration Protocols & BnF Codices](docs/images/08_methodology_and_bnf_calibration.png)
 
 *Figure 7 — The **📖 Methodology & Help Guide** tab embeds five interactive documentation panes directly inside the application:*
-1. **Interface & Commands Guide**: 4-panel architecture and keyboard shortcuts (`◀`/`▶` folios, `1`/`2`/`3` segmentation models, `L`/`B`/`W`/`G` canvas layers, `Escape` reset).
-2. **Approach: Common vs. Codex-Specific**: Universal spatial pipeline vs. writing-instrument physical bifurcation.
-3. **Sources & Gallica BnF Calibration**: Direct IIIF ARK links and calibrated parameters from *BnF Latin 6823*, *BnF Latin 17868*, and *BnF Latin 10533304x*.
-4. **Segmentation Models & Anti-Circularity**: Formal definition of the 3 decomposition models and the Ouroboros prevention protocol.
-5. **Results & Corpus Statistics**: Complete census tables and information-theoretic benchmarks.
+1. **Interface & Commands**: 4-panel architecture, Word Hysteresis + Envelope preview, and keyboard shortcuts (`◀`/`▶` folios, `1`/`2`/`3` word decomposition modes, `Escape` reset).
+2. **Scientific Approach & Sources**: Word Decomposition vs. Ductus Creation, Bounded 8-Connected Hysteresis & MST Envelope, `Natural` vs. `InkBoost`, `1` XML corpus vs. `3` scheme tables (`EVA`, `Currier`, `v101`), primary scans (Yale HD, Seraphinianus), and the 3 BnF Gallica codices (*Latin 6823*, *Latin 6862*, *Français 12322*) originally curated for competitive neural HTR benchmarking against our geometric engines (plus open-source `PyLaia`/`Kraken` vs. proprietary `Transkribus` context).
+3. **Word Decomposition (A / B / C)**: Formal definition of `Topological & Valleys (40° Quill)`, `Spatial PCA Decomposition`, and `Hybrid Consensus`, their dependency on the shared word mask/envelope, and the Anti-Circularity Firewall.
+4. **Ductus Calibration**: Metric millimeter calibration (`225 mm` / `350 mm`), 40° quill bevel & `1–4` stroke limits (Voynich) vs. 1 continuous ribbon stroke (Seraphinianus), Euler-Bernoulli $\int \kappa^2(s)\,ds$, and Dual-Alphabet clustering rules.
+5. **Live Diagnostics & Corpus Statistics**: Dynamically computed counts across active processed HD pages and live `BenchmarkSuite` diagnostics (`H₁`, `H₂`, Hurst `H`, `LZMA`, Markov top-1 accuracy) with zero hardcoded numbers.
 
 ---
 
@@ -182,14 +182,12 @@ flowchart TD
         A3 --> A4["Disjoint Spatial Word Partitioner (Voronoi / Watershed: 0 Shared Parchment)"]
     end
 
-    subgraph S2["Stage 2: Multi-Model Word Decomposition & Scribal Kinematics"]
-        B1["Model 1: Physical Quill Ductus (40° Bevel / 1-Stroke Ribbon) & Supralinear Diacritic Decoupling"]
-        B2["Model 2: AI Neural Word Decomposer (1D Horizontal Latent Trajectory Z(x) & Spatial PCA/NMF)"]
-        B3["Model 3: Hybrid Neuro-Kinematic Consensus (Strict Geometric Intersection)"]
-        B4["Ordered Vector Trajectories (x, y, t, width) & Euler-Bernoulli Junction Resolution"]
-        B1 --> B4
-        B2 --> B4
-        B3 --> B4
+    subgraph S2["Stage 2: Closed-Loop Word Segmentation & Bézier Ductus Kinematics"]
+        B1["Disjoint Candidate Cut Lattice (Topological CC + Supralinear Diacritics + EDT Valleys + ||dZ/dx||)"]
+        B2["Generative Typewriter 24x24 Sprite Dictionary + Viterbi Minimum Description Length (MDL)"]
+        B3["Direct Calligraphic Bézier Silhouette Fitting (40° Quill Bevel / 1-Stroke Ribbon)"]
+        B4["Ordered Vector Trajectories (x, y, t, width) & Comparative Euler-Bernoulli Skeleton"]
+        B1 --> B2 --> B3 --> B4
     end
 
     subgraph S3["Stage 3: Self-Supervised & Geometric Embeddings"]
@@ -278,7 +276,7 @@ While the spatial recognition pipeline is universal, `CalligraphicVectorizer` ad
 3. **Ramer-Douglas-Peucker & Gaussian Spline Smoothing (`_rdp_simplify_with_width`)**: Raw pixel steps are simplified to true calligraphic inflection points while preserving closed loops (`1L`/`2+L`).
 
 ### B. Medieval Broad-Nib Quill Physics (Voynich & BnF Gallica Codices)
-Calibrated via `MedievalScribalTrainer` against three authentic 14th/15th-century codices from the Bibliothèque nationale de France (*BnF Latin 6823*, *Latin 17868*, *Latin 10533304x*):
+Calibrated offline via `MedievalScribalTrainer` against three authentic 14th/15th-century codices from the Bibliothèque nationale de France (*BnF Latin 6823*, *BnF Latin 6862*, *BnF Français 12322*)—originally curated to train competitive neural scribal recognizers (`ScribalKinematicFlowNet`, `ScribalContrastiveEmbeddingNet`) against our purely geometric ductus engines (runtime HD extraction applies the calibrated geometric priors deterministically):
 - **40° Bevel Pleins & Déliés Law**: Stroke width is governed by the angle $\theta$ of pen travel relative to the fixed $40^\circ$ quill bevel:
   $$w(\theta) = (W_{\text{nib}} - w_0) \cdot |\sin(\theta - 40^\circ)| + w_0$$
   Movements perpendicular to the bevel ($130^\circ$) produce thick downstrokes (*pleins*); parallel movements ($40^\circ$) produce delicate hairlines (*déliés*).
@@ -310,8 +308,8 @@ Rather than cluttering the workspace with redundant heuristics, `VoynichDuctus` 
 | Subsystem | Architecture & Mathematical Formulation | CPU / GPU Latency | Primary Scientific Role in Pipeline |
 | :--- | :--- | :---: | :--- |
 | **1. Quill Calligraphic Ductus (40°)** *(Primary Engine)* | $40^\circ$ beveled quill physics on EDT ridges + spur pruning + full nib-footprint extinction (`wake_mask`) + RDP spline smoothing | **0.42 ms** (CPU) | Primary physical derendering engine reconstructing realistic 1–4 quill strokes (Voynich) or 1-stroke continuous ribbons (Seraphinianus) with unbroken closed loops. |
-| **2. Euler-Bernoulli Topological Skeleton** *(Comparative Graph)* | 1D Medial Axis Transform + `NetworkX` topological graph minimizing bending energy $E = \int \kappa^2(s)\,ds$ across degree $\neq 2$ junctions | **0.95 ms** (CPU) | Displayed **side-by-side next to every Quill Ductus** in the Explorer to show pure graph-skeleton junction resolution vs. physical quill mechanics. |
-| **3. Joint Kinematic Ductus + Meta DINOv2 (16-D PCA)** *(Clustering Engine)* | High-weight kinematic ductus descriptors (`stroke_count * 3.5`, `tortuosity * 3.0`, entry/exit tangents `* 2.5`, 5-bin orientation histogram `* 2.2`) + **Top-16 PCA projection of 768-D Meta DINOv2 ViT embeddings** (`weight * 2.5`) | **Batch GPU/CPU** | Drives unsupervised induction of the **49 Voynich archetypes (`G01`–`G49`)** and **57 Seraphinianus graphical symbol archetypes (`G01`–`G57`)**. |
+| **2. Euler-Bernoulli Topological Skeleton** *(Comparative Graph)* | 1D Medial Axis Transform + `NetworkX` topological graph minimizing bending energy $E = \int \kappa^2(s)\,ds$ across degree $\neq 2$ junctions (1–4 strokes max in Voynich; 1 continuous stroke in Seraphinianus) | **0.95 ms** (CPU) | Displayed **side-by-side next to every Quill Ductus** in the Explorer to show pure graph-skeleton junction resolution vs. physical quill mechanics. |
+| **3. Joint Kinematic Ductus + Meta DINOv2 (16-D PCA)** *(Dual-Alphabet Clustering Engine)* | Post-`StandardScaler` kinematic ductus descriptors (`stroke_count`, `tortuosity`, entry/exit tangents, 5-bin orientation histogram) + metric mm dimensions + **16-D PCA projection of 768-D Meta DINOv2 ViT embeddings** | **Batch GPU/CPU** | Induces **Dual Canonical Alphabets** (independently for Quill and Euler-Bernoulli) synchronized live from active processed pages. |
 
 ---
 
@@ -334,15 +332,16 @@ In Panel 4 of the Explorer, the number of physical components $N$ extracted insi
 
 ## 9. Corpus Scale & Information-Theoretic Diagnostics Benchmark
 
-### A. Full-Corpus Production Census
+### A. Live Synchronized Corpus vs. Historical Full-Dataset Baseline
 
-| Corpus Property | Voynich Manuscript (Beinecke MS 408) | Codex Seraphinianus (Luigi Serafini, 1981) |
+Every run of `scripts/build_dynamic_grand_explorer.py` dynamically computes the active **Live Diagnostics & Corpus Statistics** (`live_stats`) directly from the currently processed HD pages in `data/processed/atlas_dataset` (zero hardcoded numbers inside the Explorer UI). For historical reference, the initial full-dataset pass indexed across lower-res Archive.org/Voynichese baseline exports measured:
+
+| Corpus Property (Historical Baseline Snapshot) | Voynich Manuscript (Beinecke MS 408) | Codex Seraphinianus (Luigi Serafini, 1981) |
 | :--- | :--- | :--- |
-| **Processed Folios / Pages** | **225 / 225 folios (100%)** | **371 / 371 pages (100%)** |
+| **Indexed Folios / Pages** | **225 / 225 folios** | **371 / 371 pages** |
 | **Disjoint Lexical Words (0 Overlaps)** | **37,212 words** (Voronoi disjoint partitions) | **68,430 words** (Spatial word containers) |
-| **Total Segmented Corpus Glyphs** | **162,333 canonical glyphs** (>200,000 raw components) | **456,943 full-corpus glyphs** (5,258 benchmark medoids) |
-| **Induced Canonical Alphabet** | **49 Canonical Archetypes (`G01`–`G49`)** | **57 Graphical Symbol Archetypes (`G01`–`G57`)** |
-| **Dominant Archetype Frequency** | `Type G01`: **25,468 occurrences** (15.69%) | `Type G01`: **31,732 occurrences** |
+| **Baseline Segmented Corpus Glyphs** | **162,333 glyphs** | **456,943 glyphs** |
+| **Live Explorer Synchronization** | Recomputed live from processed Yale Beinecke HD folios (`width >= 2000 px`) on every build | Recomputed live from processed HD plates (`serafini_p002`..`p030`, etc.) on every build |
 
 ### B. Information-Theoretic Benchmark (`scripts/run_comprehensive_diagnostics.py`)
 
@@ -364,6 +363,18 @@ Evaluating standardized 1,387-token streams across emergent ductus corpora, hist
 > 2. **Rejection of Uncorrelated Gibberish**: Both Voynich and Seraphinianus exhibit sharp conditional entropy drops ($H_1 \to H_2$) and structured transition graphs compared to uniform noise ($H_1 = 4.70 \to H_2 = 4.63$).
 > 3. **Zero Translation Claims**: In strict adherence to our core principles, `VoynichDuctus` makes **no translation or decipherment claims**. It provides an objective, reproducible physical measurement baseline.
 
+### C. High-Resolution Execution & Throughput Benchmarks
+
+All Voynich folios are processed strictly on **Yale Beinecke HD scans** (`2400–2500 × 3168–3390 px`, `~14–15 px/mm`, fetched on demand via IIIF—never stored in git) with **all 3 word decompositions (A, B, C)** and **both vector ductus engines (Quill 40° + Euler-Bernoulli skeleton)** per glyph:
+
+| Execution Profile | Resolution & Scope | Observed / Estimated Runtime | Notes |
+| :--- | :--- | :---: | :--- |
+| **Single Dense Folio (`f1r` + DINOv2 Catalogue)** | `2500 × 3168 px` (`210` words, `979` A / `838` B / `949` C glyphs) | **~23 min** (1 CPU thread) | Includes `serafini_p030`, SIFT/RANSAC registration, 3-model vectorization, DINOv2 catalogue induction, and HTML explorer build. |
+| **Standard Folio (`f1v`, `f2r`) — Gentle Local 2-Worker** | `2400 × 3250–3362 px` (`~375–400` glyphs per model) | **~6.5 – 10.5 min / worker** *(~4–5 min/folio wall-clock)* | `BELOW_NORMAL_PRIORITY_CLASS` (`2` workers on a 4-core CPU, single-threaded BLAS/OpenCV, consensus ductus reuse enabled). |
+| **Full Voynich HD Corpus (225 Folios)** | Local gentle (`2` workers on 4-core PC) | **~16 – 20 hours** *(estimated)* | Non-blocking background mode leaves 50% CPU free for concurrent workloads. |
+| **Full Voynich HD Corpus (225 Folios)** | GCP Spot VM (`c2d-standard-16`, `16` vCPUs) | **~1.5 – 2.5 hours** *(estimated)* | Parallelized via `scripts/gcp/cloud_batch_runner.py` with on-demand IIIF fetch & GCS checkpoint sync. |
+| **Both Codices Full HD (225 Voynich + 371 Seraphinianus)** | Local gentle (`2` workers) / GCP `16` vCPUs | **~35 – 45 h** (local) / **~4 – 6 h** (GCP) *(estimated)* | Consensus ductus reuse skips redundant ridge tracking whenever Models B/C match Model A within `1 px`. |
+
 ---
 
 ## 10. Extending the Laboratory to New Manuscripts & Writing Systems
@@ -379,12 +390,12 @@ Because `VoynichDuctus` is architected as a **script-agnostic paleography engine
    Pass the extracted glyphs through `DINOv2EmbeddingEngine` + `GlyphClusterer` to induce canonical archetypes (`G01`..`G_K`), export the interactive explorer, and benchmark the resulting token stream in `BenchmarkSuite`.
 
 ```python
-from voynich_ductus.ingestion.metric_calibration import MetricScaleCalibration
+from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
 from voynich_ductus.vectorizer.calligraphic_vectorizer import CalligraphicVectorizer
 from voynich_ductus.clustering.glyph_clusterer import GlyphClusterer
 
 # 1. Calibrate physical resolution for any custom manuscript (e.g., 260 mm folio height at 3000 px)
-calib = MetricScaleCalibration.from_page_height(image_height_px=3000, physical_height_mm=260.0)
+calib = MetricScaleCalibration(image_height_px=3000, physical_height_mm=260.0)
 
 # 2. Reconstruct scribal ductus trajectories (x, y, t, width)
 vectorizer = CalligraphicVectorizer(nib_angle_deg=40.0, single_stroke_mode=False, max_strokes=4)
@@ -463,13 +474,13 @@ VoynichDuctus/
 ├── scripts/
 │   ├── build_dynamic_grand_explorer.py         # Compiles the 4-panel interactive HTML workbench
 │   ├── batch_extract_voynich_and_seraphinianus.py
-│   ├── reprocess_all_voynich_models.py         # Runs Quill Ductus, AI Neural PCA & Hybrid Consensus
+│   ├── reprocess_all_voynich_models.py         # Runs A Topological & Valleys, B Spatial PCA & C Hybrid Consensus
 │   ├── run_comprehensive_diagnostics.py        # Computes H1, H2, Hurst DFA, LZMA & Markov benchmarks
 │   └── gcp/                                    # Serverless Google Cloud Run / Spot VM batch infrastructure
 ├── src/voynich_ductus/
 │   ├── ingestion/                   # MetricScaleCalibration, IIIFClient, Binarizer, SpatialWordPartitioner
 │   ├── vectorizer/                  # CalligraphicVectorizer (40° nib & 1-stroke ribbon), JunctionResolver
-│   ├── embeddings/                  # GeometricFeatureExtractor (16-D), DINOv2Adapter, NeuralWordDecomposer
+│   ├── embeddings/                  # GeometricFeatureExtractor (16-D), DINOv2Adapter, NeuralWordDecomposition
 │   ├── clustering/                  # GlyphClusterer, topological loop & scale stratification, StrokeTokenizer
 │   ├── diagnostics/                 # ShannonEntropy, LongRangeMemory (DFA), Compressibility, MarkovAutomaton
 │   ├── generators/                  # TimmSelfCitationGenerator, RuggCardanGenerator, BaselineGenerator
@@ -491,7 +502,7 @@ VoynichDuctus/
   - **Archive.org Reference Copy for Local Testing**: [Luigi Serafini — Codex Seraphinianus on Archive.org](https://archive.org/details/Luigi.Serafini..Codex.Seraphinianus_201608/page/n315/mode/2up)
 - **BnF Gallica Medieval Calibration Codices**:
   - **Status**: Public Domain (Digitized by Bibliothèque nationale de France).
-  - Codices: [*BnF Latin 6823* (`Liber de herbis`)](https://gallica.bnf.fr/ark:/12148/btv1b52501620s), [*BnF Latin 17868* (`Medical Compendium`)](https://gallica.bnf.fr/ark:/12148/btv1b10544226x), [*BnF Latin 10533304x* (`Apocalypse de Chadewe Colin`)](https://gallica.bnf.fr/ark:/12148/btv1b10533304x).
+  - Codices: [*BnF Latin 6823* (`Liber de herbis`)](https://gallica.bnf.fr/ark:/12148/btv1b6000517p), [*BnF Latin 6862* (`Herbarius illustratus`, Pseudo-Apuleius)](https://gallica.bnf.fr/ark:/12148/btv1b84262821), [*BnF Français 12322* (`Le Livre des simples medecines`, Platearius)](https://gallica.bnf.fr/ark:/12148/btv1b90610505).
 - **The Voynichese Project**:
   - Curated word-level reference coordinates used strictly for SIFT/RANSAC registration and downstream Proposition 4 falsification checks (Apache-2.0).
 

@@ -59,9 +59,10 @@ class MarkovAutomatonAnalyzer:
     @classmethod
     def analyze_grammar_type(cls, tokens: List[str]) -> Dict[str, Any]:
         """
-        Runs order-1, order-2, and order-3 Markov evaluations on the token stream.
+        Runs order-1, order-2, and order-3 Markov evaluations on the atomic symbol/glyph stream.
         """
-        chars = list("".join(tokens))
+        from voynich_ductus.diagnostics.entropy import ShannonEntropyAnalyzer
+        chars = ShannonEntropyAnalyzer.extract_atomic_symbols(tokens)
         res_order1 = cls.evaluate_transition_predictability(chars, order=1)
         res_order2 = cls.evaluate_transition_predictability(chars, order=2)
         res_order3 = cls.evaluate_transition_predictability(chars, order=3)

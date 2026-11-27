@@ -11,12 +11,14 @@ from scipy.ndimage import distance_transform_edt
 class Skeletonizer:
     """
     Computes 1D medial skeletons from 2D ink shapes and samples the local stroke thickness (plein/délié).
+    Defaults to Cython homotopy-preserving `skeletonize` + exact Euclidean distance transform
+    (orders of magnitude faster and cleaner at 90° corners than per-pixel `medial_axis`).
     """
 
-    def __init__(self, method: str = "medial_axis"):
+    def __init__(self, method: str = "skeletonize"):
         """
         Args:
-            method: 'medial_axis', 'skeletonize', or 'thin' (Zhang-Suen)
+            method: 'skeletonize', 'medial_axis', or 'thin' (Zhang-Suen)
         """
         self.method = method
 
@@ -34,16 +36,15 @@ class Skeletonizer:
         if not np.any(binary_ink):
             return np.zeros_like(binary_ink, dtype=bool), np.zeros_like(binary_ink, dtype=float)
 
-        # Distance transform provides distance to nearest background pixel (radius)
-        dist_map = distance_transform_edt(binary_ink)
-
         if self.method == "medial_axis":
             skel, dist = medial_axis(binary_ink, return_distance=True)
             stroke_diameter = dist * 2.0
         elif self.method == "skeletonize":
+            dist_map = distance_transform_edt(binary_ink)
             skel = skeletonize(binary_ink)
             stroke_diameter = dist_map * 2.0 * skel
         elif self.method == "thin":
+            dist_map = distance_transform_edt(binary_ink)
             skel = thin(binary_ink)
             stroke_diameter = dist_map * 2.0 * skel
         else:

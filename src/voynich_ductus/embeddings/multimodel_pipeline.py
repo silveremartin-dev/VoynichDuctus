@@ -14,17 +14,16 @@ import cv2
 import numpy as np
 
 from voynich_ductus.clustering.glyph_catalogue import GlyphCatalogue
-from voynich_ductus.embeddings.word_decomposition import (
-    HybridConsensusWordDecomposition,
-    NeuralWordDecomposition,
-    cross_evaluate_options_consensus,
-)
+from voynich_ductus.embeddings.word_decomposition import GenerativeTypewriterDecomposer
 from voynich_ductus.ingestion.binarization import Binarizer
 from voynich_ductus.ingestion.glyph_segmenter import GlyphSegmenter
 from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
 from voynich_ductus.ingestion.spatial_partitioner import SpatialWordPartitioner
 from voynich_ductus.vectorizer.calligraphic_tracker import CalligraphicVectorizer
 from voynich_ductus.vectorizer.export_format import VectorExporter
+from voynich_ductus.vectorizer.junction_resolver import JunctionResolver
+from voynich_ductus.vectorizer.skeleton import Skeletonizer
+from voynich_ductus.vectorizer.stroke_graph import StrokeGraphExtractor
 
 
 def configure_gentle_worker_environment(low_priority: bool = True) -> None:
@@ -122,6 +121,105 @@ def _find_matching_option_a_glyph(
     return best_overlap_g, False
 
 
+def _extract_euler_bernoulli_ductus(
+    g_mask: np.ndarray,
+    skel_eng: Skeletonizer,
+    graph_ext: StrokeGraphExtractor,
+    resolver: JunctionResolver,
+    max_strokes: int = 6,
+    scale_calib: Optional[MetricScaleCalibration] = None,
+) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Extracts the comparative Euler-Bernoulli Topological Skeleton Ductus with
+    metric-calibrated pinhole filling, lateral spur pruning, and smooth RDP trajectories.
+    """
+    gh, gw = g_mask.shape[:2]
+    px_per_mm = float(scale_calib.px_per_mm) if scale_calib is not None else max(4.5, max(gh, gw) / 4.5)
+    try:
+        from scipy.ndimage import binary_fill_holes, gaussian_filter1d, label as nd_label
+        pinhole_max = max(2, int(round(0.025 * (px_per_mm ** 2))))
+        padded = np.pad(g_mask.astype(bool), 2, mode="constant", constant_values=False)
+        holes = binary_fill_holes(padded) & (~padded)
+        lbl_h, num_h = nd_label(holes)
+        clean_mask = g_mask.astype(bool).copy()
+        for hid in range(1, num_h + 1):
+            hm = (lbl_h == hid)[2:-2, 2:-2]
+            if int(np.sum(hm)) <= pinhole_max:
+                clean_mask |= hm
+
+        skel, widths = skel_eng.extract_skeleton(clean_mask)
+        spur_min = max(3, int(round(0.40 * px_per_mm)))
+        skel = CalligraphicVectorizer.prune_skeleton_spurs(skel, widths * 0.5, min_spur_len=spur_min)
+        graph = graph_ext.build_pixel_graph(skel, widths)
+        raw = graph_ext.decompose_into_strokes(graph)
+        # Filter tiny stray skeleton fragments before junction chaining
+        min_seg_pts = max(3, int(round(0.35 * px_per_mm)))
+        if raw and len(raw) > 1:
+            non_tiny = [s for s in raw if len(s.get("points", [])) >= min_seg_pts]
+            if non_tiny:
+                raw = non_tiny
+        eb_strokes = (
+            resolver.resolve_and_order_strokes(
+                raw,
+                max_gap=max(6.0, 0.78 * px_per_mm),
+                min_cos=-0.35,
+                max_strokes=max_strokes,
+            )
+            if raw
+            else []
+        )
+
+        # Metric smoothing & RDP simplification preserving curved ovals and arcs
+        rdp_eps = max(0.45, 0.055 * px_per_mm)
+        for s in eb_strokes:
+            pts = s.get("points", [])
+            if len(pts) >= 4:
+                cy = np.array([float(p[0]) for p in pts], dtype=np.float64)
+                cx = np.array([float(p[1]) for p in pts], dtype=np.float64)
+                ws = [float(p[2]) if len(p) > 2 else 1.8 for p in pts]
+                sy0, sx0, sy1, sx1 = cy[0], cx[0], cy[-1], cx[-1]
+                closed = np.hypot(sy0 - sy1, sx0 - sx1) <= max(2.8, 0.35 * px_per_mm)
+                step_ds = float(np.median(np.hypot(np.diff(cy), np.diff(cx)))) if len(pts) >= 3 else 1.2
+                step_ds = max(0.8, step_ds)
+                sig_pts = max(1.0, min(4.2, (0.22 * px_per_mm) / step_ds))
+                if closed and len(cy) >= 6:
+                    cy = gaussian_filter1d(cy[:-1], sigma=sig_pts, mode="wrap")
+                    cx = gaussian_filter1d(cx[:-1], sigma=sig_pts, mode="wrap")
+                    cy = np.append(cy, cy[0])
+                    cx = np.append(cx, cx[0])
+                else:
+                    cy = gaussian_filter1d(cy, sigma=sig_pts, mode="nearest")
+                    cx = gaussian_filter1d(cx, sigma=sig_pts, mode="nearest")
+                    cy[0], cx[0], cy[-1], cx[-1] = sy0, sx0, sy1, sx1
+                sm_pts = [(float(cy[i]), float(cx[i]), ws[i]) for i in range(len(pts))]
+                simp = CalligraphicVectorizer._rdp_simplify_with_width(sm_pts, epsilon=rdp_eps)
+                s["points"] = [(round(p[0], 2), round(p[1], 2), round(p[2], 2)) for p in simp]
+                s["start"] = (s["points"][0][0], s["points"][0][1])
+                s["end"] = (s["points"][-1][0], s["points"][-1][1])
+                s["length"] = float(len(s["points"]))
+        if len(eb_strokes) > 1:
+            long_eb = [
+                s for s in eb_strokes
+                if len(s.get("points", [])) >= 3 or np.hypot(s["start"][0] - s["end"][0], s["start"][1] - s["end"][1]) >= max(5.0, 0.5 * px_per_mm)
+            ]
+            if long_eb:
+                eb_strokes = long_eb
+    except Exception:
+        eb_strokes = []
+
+    if not eb_strokes:
+        eb_strokes = [{
+            "stroke_id": "eb_s00",
+            "order_index": 0,
+            "points": [(float(gh * 0.25), float(gw * 0.5), 1.8), (float(gh * 0.75), float(gw * 0.5), 1.8)],
+            "length": 2.0,
+            "start": (float(gh * 0.25), float(gw * 0.5)),
+            "end": (float(gh * 0.75), float(gw * 0.5)),
+        }]
+    eb_svg = VectorExporter.to_svg(eb_strokes, max(10, gw), max(10, gh))
+    return eb_strokes, eb_svg
+
+
 def _vectorize_glyph_mask(
     g_mask: np.ndarray,
     gy0: int,
@@ -132,8 +230,11 @@ def _vectorize_glyph_mask(
     scale_calib: MetricScaleCalibration,
     tracker: CalligraphicVectorizer,
     segmenter: GlyphSegmenter,
-) -> Tuple[List[Dict[str, Any]], str, List[List[int]]]:
-    """Extracts 40° quill ductus strokes, SVG, and tight ink polygon for a glyph mask."""
+    skel_eng: Skeletonizer,
+    graph_ext: StrokeGraphExtractor,
+    resolver: JunctionResolver,
+) -> Tuple[List[Dict[str, Any]], str, List[Dict[str, Any]], str, List[List[int]]]:
+    """Extracts 40° quill ductus strokes, Euler-Bernoulli skeleton ductus, SVGs, and tight ink polygon."""
     max_strokes = 1 if is_serafini else 4
     strokes = tracker.extract_calligraphic_ductus(
         g_mask, single_stroke_mode=is_serafini, max_strokes=max_strokes, scale_calib=scale_calib
@@ -155,6 +256,9 @@ def _vectorize_glyph_mask(
         s["page_points"] = [[float(p[0] + gy0), float(p[1] + gx0), float(p[2])] for p in s.get("points", [])]
 
     svg = VectorExporter.to_svg(strokes, max(10, gw), max(10, gh))
+    eb_strokes, eb_svg = _extract_euler_bernoulli_ductus(
+        g_mask, skel_eng, graph_ext, resolver, max_strokes=max_strokes, scale_calib=scale_calib
+    )
     poly: List[List[int]] = [[gx0, gy0], [gx0 + gw, gy0], [gx0 + gw, gy0 + gh], [gx0, gy0 + gh]]
     if gh >= 4 and gw >= 4:
         try:
@@ -163,7 +267,7 @@ def _vectorize_glyph_mask(
                 poly = computed_poly
         except Exception:
             pass
-    return strokes, svg, poly
+    return strokes, svg, eb_strokes, eb_svg, poly
 
 
 def enrich_page_multimodel(
@@ -193,17 +297,22 @@ def enrich_page_multimodel(
     )
     binarizer = Binarizer(method="sauvola")
     segmenter = GlyphSegmenter(scale_calib=scale_calib)
-    tracker = CalligraphicVectorizer(nib_angle_deg=40.0)
-    neural_decomposer = NeuralWordDecomposition()
-    hybrid_decomposer = HybridConsensusWordDecomposition()
+    tracker = CalligraphicVectorizer(
+        nib_angle_deg=40.0,
+        min_nib_width=max(1.2, scale_calib.mm_to_px(0.18)),
+        max_nib_width=max(3.5, scale_calib.mm_to_px(0.58)),
+        smoothing_sigma=max(0.85, scale_calib.mm_to_px(0.14)),
+    )
+    skel_eng = Skeletonizer()
+    graph_ext = StrokeGraphExtractor()
+    resolver = JunctionResolver()
+    typewriter_decomposer = GenerativeTypewriterDecomposer(is_serafini=is_serafini)
 
     if not is_serafini and restore_rosetta_boxes:
         try:
-            from PIL import Image
             from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader
             rosetta_loader = VoynicheseRosettaLoader()
-            pil_img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
-            r_words = rosetta_loader.extract_aligned_words(page_id, scan_image=pil_img, prefer_js=True)
+            _, _, r_words = rosetta_loader.get_yale_hd_scan_and_words(page_id)
             valid_r_words = [rw for rw in r_words if rw.bbox_scan is not None]
             if len(valid_r_words) == len(raw_words):
                 line_clusters: List[List[Any]] = []
@@ -228,6 +337,21 @@ def enrich_page_multimodel(
                     rx0, ry0 = max(0, min(W_img - 1, rx0)), max(0, min(H_img - 1, ry0))
                     rx1, ry1 = max(rx0 + 1, min(W_img, rx1)), max(ry0 + 1, min(H_img, ry1))
                     w_dict["bbox"] = [ry0, rx0, ry1, rx1]
+                new_lines = []
+                for l_idx, lc in enumerate(line_clusters):
+                    l_id = f"L{l_idx:02d}"
+                    ly0 = min(max(0, rw.bbox_scan[1]) for rw in lc)
+                    lx0 = min(max(0, rw.bbox_scan[0]) for rw in lc)
+                    ly1 = max(min(H_img, rw.bbox_scan[3]) for rw in lc)
+                    lx1 = max(min(W_img, rw.bbox_scan[2]) for rw in lc)
+                    new_lines.append({"line_id": l_id, "bbox": [int(ly0), int(lx0), int(ly1), int(lx1)]})
+                for li in range(len(new_lines) - 1):
+                    if new_lines[li]["bbox"][2] > new_lines[li + 1]["bbox"][0]:
+                        mid_y = int(round((new_lines[li]["bbox"][2] + new_lines[li + 1]["bbox"][0]) / 2.0))
+                        new_lines[li]["bbox"][2] = mid_y
+                        new_lines[li + 1]["bbox"][0] = mid_y
+                page_data["lines"] = new_lines
+                page_data["line_count"] = len(new_lines)
         except Exception:
             pass
 
@@ -240,20 +364,24 @@ def enrich_page_multimodel(
     for g in page_data.get("glyphs", []):
         old_by_word.setdefault(g.get("word_id", ""), []).append(g)
 
-    word_patches = []
-    for w in words[:35]:
-        wb = w.get("bbox", [])
-        if len(wb) == 4:
-            y0, x0, y1, x1 = [int(v) for v in wb]
-            if y1 > y0 + 4 and x1 > x0 + 4:
-                word_patches.append(img_bgr[y0:y1, x0:x1])
-    if word_patches:
-        neural_decomposer.fit_on_word_corpus(word_patches)
+    gray_full: Optional[np.ndarray] = None
+    t_sauv_full: Optional[np.ndarray] = None
+    if not is_serafini:
+        gray_full = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        win_s = max(15, int(round(scale_calib.mm_to_px(4.1))) | 1)
+        win_s = max(3, min(win_s, (min(H_img, W_img) - 1) | 1))
+        try:
+            g64 = gray_full.astype(np.float64)
+            mean_g = cv2.boxFilter(g64, cv2.CV_64F, (win_s, win_s), normalize=True, borderType=cv2.BORDER_REFLECT)
+            mean_sq = cv2.boxFilter(g64 * g64, cv2.CV_64F, (win_s, win_s), normalize=True, borderType=cv2.BORDER_REFLECT)
+            std_g = np.sqrt(np.maximum(0.0, mean_sq - mean_g * mean_g))
+            t_sauv_full = (mean_g * (1.0 + 0.16 * ((std_g / 128.0) - 1.0))).astype(np.float32)
+        except Exception:
+            t_sauv_full = None
 
-    quill_glyphs: List[Dict[str, Any]] = []
-    neural_glyphs: List[Dict[str, Any]] = []
-    hybrid_glyphs: List[Dict[str, Any]] = []
-
+    # First pass: binarize all word envelopes on the page and induce the folio's Visual Sprite Dictionary
+    word_entries: List[Tuple[Dict[str, Any], Tuple[int, int, int, int], np.ndarray]] = []
+    word_patches_bgr: List[np.ndarray] = []
     for w in words:
         w_bbox = w.get("bbox")
         if not w_bbox or len(w_bbox) != 4:
@@ -265,12 +393,20 @@ def enrich_page_multimodel(
             continue
 
         w_patch = img_bgr[wy0:wy1, wx0:wx1]
+        if len(word_patches_bgr) < 35 and (wy1 - wy0) > 4 and (wx1 - wx0) > 4:
+            word_patches_bgr.append(w_patch)
         w_patch_rgb = cv2.cvtColor(w_patch, cv2.COLOR_BGR2RGB)
         try:
             if is_serafini:
                 w_mask = binarizer.binarize(cv2.cvtColor(w_patch, cv2.COLOR_BGR2GRAY)).astype(bool)
             else:
-                w_mask = segmenter.binarize_word_crop_hysteresis(w_patch_rgb).astype(bool)
+                w_mask = segmenter.binarize_word_crop_hysteresis(
+                    w_patch_rgb,
+                    scale_calib=scale_calib,
+                    full_image_gray=gray_full,
+                    crop_box=(wy0, wx0, wy1, wx1),
+                    precomputed_sauvola=t_sauv_full,
+                ).astype(bool)
             if np.sum(w_mask) < 12:
                 gray_w = cv2.cvtColor(w_patch, cv2.COLOR_BGR2GRAY)
                 w_mask = (gray_w < 128).astype(bool)
@@ -281,18 +417,26 @@ def enrich_page_multimodel(
         w_poly = segmenter.compute_ink_polygon(w_mask, offset=(wy0, wx0), scale_calib=scale_calib)
         if w_poly:
             w["polygon"] = w_poly
+        word_entries.append((w, (wy0, wx0, wy1, wx1), w_mask))
 
+    if word_entries:
+        typewriter_decomposer.fit_on_word_masks(
+            [wm for _, _, wm in word_entries],
+            scale_calib=scale_calib,
+            word_patches=word_patches_bgr,
+        )
+
+    # Second pass: Viterbi MDL word-to-glyph segmentation + Bézier silhouette ductus vectorization
+    unified_glyphs: List[Dict[str, Any]] = []
+    for w, (wy0, wx0, wy1, wx1), w_mask in word_entries:
         line_id = w.get("line_id", "L00")
         word_id = w.get("word_id", f"{line_id}_W00")
         eva_text = w.get("eva_text", "")
         old_w_glyphs = old_by_word.get(word_id, [])
 
-        # Option A: Topological & Valley (40° Quill)
-        opt_a_local: List[Dict[str, Any]] = []
-        opt_a_records: List[Dict[str, Any]] = []
         if recompute_option_a or not old_w_glyphs:
-            assembled = segmenter.assemble_word_into_glyphs(w_mask, expected_glyph_count=None, scale_calib=scale_calib)
-            a_idx = 0
+            assembled = typewriter_decomposer.decompose_word(w_mask, scale_calib=scale_calib)
+            g_idx = 0
             for comp in assembled:
                 g_mask = comp["mask"].astype(bool)
                 by0, bx0, by1, bx1 = comp["bbox_local"]
@@ -315,19 +459,21 @@ def enrich_page_multimodel(
                     )
                     c_type = best_old.get("canonical_type", "G01")
 
-                a_strokes, svg, poly = _vectorize_glyph_mask(
-                    g_mask, gy0, gx0, gh, gw, is_serafini, scale_calib, tracker, segmenter
+                strokes, svg, eb_strokes, eb_svg, poly = _vectorize_glyph_mask(
+                    g_mask, gy0, gx0, gh, gw, is_serafini, scale_calib, tracker, segmenter, skel_eng, graph_ext, resolver
                 )
-                g_id = f"{page_id}_{word_id}_G{a_idx:02d}" if line_id in word_id else f"{page_id}_{line_id}_{word_id}_G{a_idx:02d}"
+                hole_polys = segmenter.compute_hole_polygons(g_mask, offset=(gy0, gx0), scale_calib=scale_calib)
+                g_id = f"{page_id}_{word_id}_G{g_idx:02d}" if line_id in word_id else f"{page_id}_{line_id}_{word_id}_G{g_idx:02d}"
                 g_rec = {
                     "glyph_id": g_id,
                     "page_id": page_id,
                     "line_id": line_id,
                     "word_id": word_id,
                     "word_bbox": [wy0, wx0, wy1, wx1],
-                    "glyph_index_in_word": a_idx,
+                    "glyph_index_in_word": g_idx,
                     "bbox": [gy0, gx0, gy1, gx1],
                     "polygon": poly,
+                    "hole_polygons": hole_polys,
                     "height": int(gh),
                     "width": int(gw),
                     "height_mm": round(h_mm, 2),
@@ -337,173 +483,42 @@ def enrich_page_multimodel(
                     "area": area,
                     "area_mm2": round(area_mm2, 2),
                     "fill_factor": round(float(area / max(1, gh * gw)), 3),
-                    "stroke_count": len(a_strokes),
-                    "strokes": a_strokes,
+                    "stroke_count": len(strokes),
+                    "strokes": strokes,
                     "ductus_svg": svg,
                     "svg_content": svg,
-                    "euler_stroke_count": len(a_strokes),
-                    "euler_svg_content": svg,
+                    "euler_stroke_count": len(eb_strokes),
+                    "euler_strokes": eb_strokes,
+                    "euler_svg_content": eb_svg,
                     "png_rel": "",
                     "svg_rel": "",
                     "crop_uri": "",
                     "canonical_type": c_type,
                     "eva_char": "",
                     "ref_eva_text": eva_text,
-                    "segmentation_mode": "heuristic_calligraphic",
+                    "segmentation_mode": "generative_typewriter",
+                    "typewriter_proto_id": comp.get("typewriter_proto_id", "TW_00"),
                     "diacritics": comp.get("diacritics", []),
                     "is_dot": comp.get("is_dot", False),
+                    "mask": g_mask,
                 }
                 GlyphCatalogue.count_glyph_loops(g_rec)
-                quill_glyphs.append(g_rec)
-                opt_a_records.append(g_rec)
-                opt_a_local.append({"bbox_local": (int(by0), int(bx0), int(by1), int(bx1)), "quill_glyph": g_rec})
-                a_idx += 1
+                g_rec.pop("mask", None)
+                unified_glyphs.append(g_rec)
+                g_idx += 1
         else:
-            for og in old_w_glyphs:
-                gb = og.get("bbox", [wy0, wx0, wy1, wx1])
-                opt_a_records.append(og)
-                quill_glyphs.append(og)
-                opt_a_local.append({
-                    "bbox_local": (max(0, gb[0] - wy0), max(0, gb[1] - wx0), min(wy1 - wy0, gb[2] - wy0), min(wx1 - wx0, gb[3] - wx0)),
-                    "quill_glyph": og,
-                })
+            unified_glyphs.extend(old_w_glyphs)
 
-        # Option B: Spatial PCA Word Decomposition
-        neural_comps = neural_decomposer.decompose_word(w_mask, scale_calib=scale_calib)
-        n_idx = 0
-        for comp in neural_comps:
-            ng_mask = comp["mask"].astype(bool)
-            by0, bx0, by1, bx1 = comp["bbox_local"]
-            gy0, gx0 = wy0 + int(by0), wx0 + int(bx0)
-            gy1, gx1 = wy0 + int(by1), wx0 + int(bx1)
-            gh, gw = ng_mask.shape[:2]
-            area = int(np.sum(ng_mask))
-            h_mm = scale_calib.px_to_mm(gh)
-            w_mm = scale_calib.px_to_mm(gw)
-            area_mm2 = scale_calib.area_px2_to_mm2(area)
-            if area < scale_calib.min_glyph_area_px or (h_mm < 0.65 and w_mm < 0.65):
-                continue
-
-            matched_g, is_exact = _find_matching_option_a_glyph((gy0, gx0, gy1, gx1), opt_a_records)
-            c_type = matched_g.get("canonical_type", "G01") if matched_g else "G01"
-            if is_exact and matched_g and matched_g.get("strokes"):
-                n_strokes = matched_g["strokes"]
-                svg = matched_g.get("svg_content", matched_g.get("ductus_svg", ""))
-                poly = matched_g.get("polygon", [[gx0, gy0], [gx1, gy0], [gx1, gy1], [gx0, gy1]])
-            else:
-                n_strokes, svg, poly = _vectorize_glyph_mask(
-                    ng_mask, gy0, gx0, gh, gw, is_serafini, scale_calib, tracker, segmenter
-                )
-
-            ng_rec = {
-                "glyph_id": f"{page_id}_{word_id}_N{n_idx:02d}" if line_id in word_id else f"{page_id}_{line_id}_{word_id}_N{n_idx:02d}",
-                "page_id": page_id,
-                "line_id": line_id,
-                "word_id": word_id,
-                "word_bbox": [wy0, wx0, wy1, wx1],
-                "glyph_index_in_word": n_idx,
-                "bbox": [gy0, gx0, gy1, gx1],
-                "polygon": poly,
-                "height": int(gh),
-                "width": int(gw),
-                "height_mm": round(h_mm, 2),
-                "width_mm": round(w_mm, 2),
-                "height_dmm": round(h_mm * 10.0, 1),
-                "width_dmm": round(w_mm * 10.0, 1),
-                "area": area,
-                "area_mm2": round(area_mm2, 2),
-                "stroke_count": min(4, len(n_strokes)),
-                "strokes": n_strokes,
-                "ductus_svg": svg,
-                "svg_content": svg,
-                "euler_stroke_count": len(n_strokes),
-                "euler_svg_content": svg,
-                "png_rel": "",
-                "svg_rel": "",
-                "crop_uri": "",
-                "canonical_type": c_type,
-                "segmentation_mode": "neural_word_pca",
-                "neural_basis_id": comp.get("neural_basis_id", "PHI_00"),
-            }
-            GlyphCatalogue.count_glyph_loops(ng_rec)
-            neural_glyphs.append(ng_rec)
-            n_idx += 1
-
-        # Option C: Hybrid Neuro-Kinematic Consensus
-        hybrid_comps = hybrid_decomposer.decompose_word_hybrid(
-            w_mask, opt_a_local, neural_comps, scale_calib=scale_calib
-        )
-        h_idx = 0
-        for comp in hybrid_comps:
-            hg_mask = comp["mask"].astype(bool)
-            by0, bx0, by1, bx1 = comp["bbox_local"]
-            gy0, gx0 = wy0 + int(by0), wx0 + int(bx0)
-            gy1, gx1 = wy0 + int(by1), wx0 + int(bx1)
-            gh, gw = hg_mask.shape[:2]
-            area = int(np.sum(hg_mask))
-            h_mm = scale_calib.px_to_mm(gh)
-            w_mm = scale_calib.px_to_mm(gw)
-            area_mm2 = scale_calib.area_px2_to_mm2(area)
-            if area < scale_calib.min_glyph_area_px or (h_mm < 0.65 and w_mm < 0.65):
-                continue
-
-            matched_g, is_exact = _find_matching_option_a_glyph((gy0, gx0, gy1, gx1), opt_a_records)
-            c_type = matched_g.get("canonical_type", "G01") if matched_g else "G01"
-            if is_exact and matched_g and matched_g.get("strokes"):
-                h_strokes = matched_g["strokes"]
-                svg = matched_g.get("svg_content", matched_g.get("ductus_svg", ""))
-                poly = matched_g.get("polygon", [[gx0, gy0], [gx1, gy0], [gx1, gy1], [gx0, gy1]])
-            else:
-                h_strokes, svg, poly = _vectorize_glyph_mask(
-                    hg_mask, gy0, gx0, gh, gw, is_serafini, scale_calib, tracker, segmenter
-                )
-
-            hg_rec = {
-                "glyph_id": f"{page_id}_{word_id}_H{h_idx:02d}" if line_id in word_id else f"{page_id}_{line_id}_{word_id}_H{h_idx:02d}",
-                "page_id": page_id,
-                "line_id": line_id,
-                "word_id": word_id,
-                "word_bbox": [wy0, wx0, wy1, wx1],
-                "glyph_index_in_word": h_idx,
-                "bbox": [gy0, gx0, gy1, gx1],
-                "polygon": poly,
-                "height": int(gh),
-                "width": int(gw),
-                "height_mm": round(h_mm, 2),
-                "width_mm": round(w_mm, 2),
-                "height_dmm": round(h_mm * 10.0, 1),
-                "width_dmm": round(w_mm * 10.0, 1),
-                "area": area,
-                "area_mm2": round(area_mm2, 2),
-                "stroke_count": min(4, len(h_strokes)),
-                "strokes": h_strokes,
-                "ductus_svg": svg,
-                "svg_content": svg,
-                "euler_stroke_count": len(h_strokes),
-                "euler_svg_content": svg,
-                "png_rel": "",
-                "svg_rel": "",
-                "crop_uri": "",
-                "canonical_type": c_type,
-                "segmentation_mode": "hybrid_consensus",
-                "hybrid_basis_id": comp.get("hybrid_basis_id", "HYB_00"),
-            }
-            GlyphCatalogue.count_glyph_loops(hg_rec)
-            hybrid_glyphs.append(hg_rec)
-            h_idx += 1
-
-    cross_evaluate_options_consensus(quill_glyphs, neural_glyphs, hybrid_glyphs)
     if not is_serafini:
-        realign_voynich_word_eva_tokens(words, quill_glyphs)
-        realign_voynich_word_eva_tokens(words, neural_glyphs)
-        realign_voynich_word_eva_tokens(words, hybrid_glyphs)
+        realign_voynich_word_eva_tokens(words, unified_glyphs)
 
-    page_data["glyphs"] = quill_glyphs
-    page_data["glyphs_neural_pca"] = neural_glyphs
-    page_data["glyphs_hybrid_consensus"] = hybrid_glyphs
-    page_data["glyph_count"] = len(quill_glyphs)
-    page_data["glyph_count_neural_pca"] = len(neural_glyphs)
-    page_data["glyph_count_hybrid_consensus"] = len(hybrid_glyphs)
-    page_data["segmentation_modes"] = ["heuristic_calligraphic", "neural_word_pca", "hybrid_consensus"]
+    # Clean up obsolete multi-model arrays so page JSONs stay 3x smaller and faster
+    page_data.pop("glyphs_neural_pca", None)
+    page_data.pop("glyphs_hybrid_consensus", None)
+    page_data.pop("glyph_count_neural_pca", None)
+    page_data.pop("glyph_count_hybrid_consensus", None)
+    page_data["glyphs"] = unified_glyphs
+    page_data["glyph_count"] = len(unified_glyphs)
+    page_data["segmentation_modes"] = ["generative_typewriter"]
 
-    return len(quill_glyphs), len(neural_glyphs), len(hybrid_glyphs)
+    return len(unified_glyphs), 0, 0

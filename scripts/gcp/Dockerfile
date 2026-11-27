@@ -34,11 +34,9 @@ COPY scripts/ /app/scripts/
 COPY pyproject.toml /app/
 RUN pip install -e .
 
-# Copy data assets
+# Copy data assets (raw Voynich HD scans are fetched on demand from Yale IIIF)
 COPY data/raw/annotations/ /app/data/raw/annotations/
 COPY data/raw/scans/seraphinianus/ /app/data/raw/scans/seraphinianus/
-COPY data/raw/scans/voynich/voynichese_scans/ /app/data/raw/scans/voynich/voynichese_scans/
-COPY data/raw/scans/voynich/yale/ /app/data/raw/scans/voynich/yale/
 COPY data/intermediate/registration/ /app/data/intermediate/registration/
 
 # Create runtime scratch and output directories

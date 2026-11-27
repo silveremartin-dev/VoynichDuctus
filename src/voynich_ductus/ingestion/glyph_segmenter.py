@@ -288,17 +288,111 @@ class GlyphSegmenter:
         return seam
 
     @staticmethod
+    def _clean_word_mask_border_bleed(
+        mask: np.ndarray,
+        scale_calib: Optional[MetricScaleCalibration] = None
+    ) -> np.ndarray:
+        """
+        Strips microscopic parchment-grain specks (< 0.08 mm^2) and edge-clipped
+        adjacent-line ascenders/descenders touching y=0 or y=H-1 when isolated
+        vertically from the main word core.
+        """
+        if mask is None or mask.size == 0 or not np.any(mask):
+            return np.zeros_like(mask, dtype=bool)
+        H_c, W_c = mask.shape[:2]
+        if scale_calib is not None:
+            min_speck = max(4, int(round(scale_calib.area_mm2_to_px2(0.08))))
+            v_gap_thresh = max(4.0, scale_calib.mm_to_px(0.42))
+            core_margin = max(4.0, scale_calib.mm_to_px(0.55))
+            max_intrusion_area = max(40.0, scale_calib.area_mm2_to_px2(6.5))
+            thin_lr_w = max(3.0, scale_calib.mm_to_px(0.50))
+            thin_lr_area = max(12.0, scale_calib.area_mm2_to_px2(0.45))
+        else:
+            est_px_per_mm = max(3.5, H_c / 4.8)
+            min_speck = max(4, int(round(0.08 * (est_px_per_mm ** 2))))
+            v_gap_thresh = max(4.0, 0.42 * est_px_per_mm)
+            core_margin = max(4.0, 0.55 * est_px_per_mm)
+            max_intrusion_area = max(40.0, 6.5 * (est_px_per_mm ** 2))
+            thin_lr_w = max(3.0, 0.50 * est_px_per_mm)
+            thin_lr_area = max(12.0, 0.45 * (est_px_per_mm ** 2))
+
+        lbl, n = label(mask, structure=np.ones((3, 3), dtype=bool))
+        if n == 0:
+            return np.zeros_like(mask, dtype=bool)
+
+        counts_sp = np.bincount(lbl.ravel())
+        counts_sp[0] = 0
+        clean = (counts_sp >= min_speck)[lbl]
+        if not np.any(clean):
+            return mask.astype(bool)
+
+        lbl2, n2 = label(clean, structure=np.ones((3, 3), dtype=bool))
+        if n2 < 2:
+            return clean
+
+        comps = []
+        for cid in range(1, n2 + 1):
+            pts = np.argwhere(lbl2 == cid)
+            r0, c0 = pts.min(axis=0)
+            r1, c1 = pts.max(axis=0) + 1
+            comps.append((cid, len(pts), int(r0), int(r1), int(c0), int(c1)))
+
+        row_ink = np.sum(clean, axis=1)
+        ys_w = np.repeat(np.arange(H_c), row_ink.astype(int))
+        if len(ys_w) == 0:
+            return clean
+
+        q25, q75 = np.percentile(ys_w, [25, 75])
+        core_y0 = q25 - core_margin
+        core_y1 = q75 + core_margin
+
+        # Precompute non-border core mask for exact vertical gap checking in shared columns
+        interior_mask = np.zeros_like(clean)
+        for cid, area, r0, r1, c0, c1 in comps:
+            if not (r0 <= 1 or r1 >= H_c - 1) or (r1 - r0) >= H_c * 0.45 or area >= max_intrusion_area:
+                interior_mask |= (lbl2 == cid)
+
+        keep_mask = np.zeros_like(clean)
+        for cid, area, r0, r1, c0, c1 in comps:
+            touches_tb = (r0 <= 1) or (r1 >= H_c - 1)
+            touches_lr = (c0 <= 0) or (c1 >= W_c)
+            outside_tb = (r1 < core_y0) or (r0 > core_y1)
+            if touches_tb and outside_tb and area < max_intrusion_area:
+                # Verify there is a true vertical blank parchment gap to nearest body ink
+                c_pad0 = max(0, c0 - 4)
+                c_pad1 = min(W_c, c1 + 4)
+                col_slice = interior_mask[:, c_pad0:c_pad1]
+                body_rows = np.where(np.any(col_slice, axis=1))[0]
+                if len(body_rows) == 0:
+                    continue
+                if r1 < core_y0:
+                    gap = int(body_rows.min()) - r1
+                else:
+                    gap = r0 - int(body_rows.max()) - 1
+                if gap >= v_gap_thresh:
+                    continue
+            if touches_lr and (c1 - c0) < thin_lr_w and area < thin_lr_area:
+                continue
+            keep_mask |= (lbl2 == cid)
+
+        return keep_mask if np.any(keep_mask) else clean
+
+    @staticmethod
     def binarize_word_crop_hysteresis(
         crop_rgb: np.ndarray,
         high_thresh: float = 16.0,
-        low_thresh: float = 6.0
+        low_thresh: float = 6.0,
+        scale_calib: Optional[MetricScaleCalibration] = None,
+        full_image_gray: Optional[np.ndarray] = None,
+        crop_box: Optional[Tuple[int, int, int, int]] = None,
+        precomputed_sauvola: Optional[np.ndarray] = None
     ) -> np.ndarray:
         """
-        Two-tier Sauvola + color-distance hysteresis binarization from local parchment background.
-        Overcomes iron-gall ink fading and preserves 100% of authentic faint strokes/tails
-        while preventing vellum shadowing from fusing adjacent characters into solid blobs.
+        Metric-calibrated two-tier Sauvola + local parchment contrast binarization.
+        Uses physical mm-scaled Sauvola windows (~4.0 mm) over padded context,
+        eliminating grain speck noise and edge-clipped neighboring line bleed.
         """
-        if crop_rgb.size == 0:
+        if crop_rgb is None or crop_rgb.size == 0:
             return np.zeros((0, 0), dtype=bool)
         if crop_rgb.ndim == 2:
             gray = crop_rgb.astype(np.float32)
@@ -308,40 +402,90 @@ class GlyphSegmenter:
         if gray.max() <= 1.0 and gray.max() > 0.0:
             gray = gray * 255.0
 
-        bg = float(np.percentile(gray, 82))
-        darkness = np.maximum(0.0, bg - gray)
-        max_d = float(np.max(darkness)) if darkness.size > 0 else 0.0
-        p96 = float(np.percentile(darkness, 96)) if darkness.size > 0 else 0.0
+        H_c, W_c = gray.shape[:2]
+        if H_c < 2 or W_c < 2:
+            return np.zeros((H_c, W_c), dtype=bool)
+
+        if scale_calib is not None:
+            px_per_mm = scale_calib.px_per_mm
+        else:
+            px_per_mm = max(3.5, float(H_c) / 4.8)
 
         from skimage.filters import threshold_sauvola
-        H_c, W_c = gray.shape[:2]
-        win = min(25, max(7, (min(H_c, W_c) // 2) * 2 + 1))
-        try:
-            t_sauv = threshold_sauvola(gray, window_size=win, k=0.10, r=128.0)
-        except Exception:
-            t_sauv = np.full_like(gray, bg - max(8.0, p96 * 0.45))
+        win_s = max(11, int(round(4.1 * px_per_mm)) | 1)
+        pad_px = max(6, int(round(2.0 * px_per_mm)))
 
-        if max_d < 60.0:
-            h_th = max(6.0, p96 * 0.50)
-            l_th = max(3.0, p96 * 0.25)
+        if (
+            precomputed_sauvola is not None
+            and full_image_gray is not None
+            and crop_box is not None
+        ):
+            y0, x0, y1, x1 = crop_box
+            t_sauv = precomputed_sauvola[y0:y1, x0:x1]
+            py0 = max(0, y0 - pad_px)
+            px0 = max(0, x0 - pad_px)
+            py1 = min(full_image_gray.shape[0], y1 + pad_px)
+            px1 = min(full_image_gray.shape[1], x1 + pad_px)
+            bg = float(np.percentile(full_image_gray[py0:py1, px0:px1], 76))
+        elif full_image_gray is not None and crop_box is not None:
+            y0, x0, y1, x1 = crop_box
+            py0 = max(0, y0 - pad_px)
+            px0 = max(0, x0 - pad_px)
+            py1 = min(full_image_gray.shape[0], y1 + pad_px)
+            px1 = min(full_image_gray.shape[1], x1 + pad_px)
+            gpad = full_image_gray[py0:py1, px0:px1].astype(np.float32)
+            w_eff = min(win_s, (min(gpad.shape) - 1) | 1)
+            w_eff = max(3, w_eff)
+            try:
+                ts_pad = threshold_sauvola(gpad, window_size=w_eff, k=0.16, r=128.0)
+                t_sauv = ts_pad[(y0 - py0):(y1 - py0), (x0 - px0):(x1 - px0)]
+            except Exception:
+                t_sauv = np.full_like(gray, float(np.percentile(gpad, 76)) - 14.0)
+            bg = float(np.percentile(gpad, 76))
         else:
-            h_th = max(11.0, p96 * 0.52)
-            l_th = max(5.5, p96 * 0.28)
+            gpad = np.pad(gray, pad_width=pad_px, mode="reflect")
+            w_eff = min(win_s, (min(gpad.shape) - 1) | 1)
+            w_eff = max(3, w_eff)
+            try:
+                ts_pad = threshold_sauvola(gpad, window_size=w_eff, k=0.16, r=128.0)
+                t_sauv = ts_pad[pad_px:pad_px + H_c, pad_px:pad_px + W_c]
+            except Exception:
+                t_sauv = np.full_like(gray, float(np.percentile(gray, 78)) - 14.0)
+            bg = float(np.percentile(gray, 78))
 
-        core_ink = ((gray < t_sauv) & (darkness > l_th)) | (darkness > h_th)
-        relaxed_ink = (darkness > l_th) & (gray < t_sauv * 1.04)
+        darkness = np.maximum(0.0, bg - gray)
+        p95_d = float(np.percentile(darkness, 95)) if darkness.size > 0 else 0.0
+        p98_d = float(np.percentile(darkness, 98)) if darkness.size > 0 else 0.0
+        max_d = float(np.max(darkness)) if darkness.size > 0 else 0.0
 
-        lbl, num = label(relaxed_ink)
+        # Physical darkness contrast floor so parchment texture does not salt-and-pepper
+        if max_d < 35.0:
+            dark_floor = max(4.5, p95_d * 0.42)
+            h_th = max(9.0, p98_d * 0.55)
+        else:
+            dark_floor = max(11.0, min(19.0, p95_d * 0.23))
+            h_th = max(23.0, p98_d * 0.56)
+
+        from scipy.ndimage import binary_dilation, binary_fill_holes
+        core_ink = ((gray < t_sauv) & (darkness > dark_floor)) | (darkness > h_th)
+        # Protect interior closed loop holes already present in core_ink so hysteresis halo never plugs 'o'/'a'/'d' bowls
+        padded_core = np.pad(core_ink, 1, mode="constant", constant_values=False)
+        core_holes = (binary_fill_holes(padded_core) & (~padded_core))[1:-1, 1:-1]
+        # Bounded faint hairline / loop-tail continuation (~0.45 mm halo 8-connected to strong ink, strictly outside core holes)
+        tail_floor = max(5.5, dark_floor * 0.48)
+        halo_r = max(2, int(round(0.45 * px_per_mm)))
+        halo = binary_dilation(core_ink, structure=np.ones((3, 3), dtype=bool), iterations=halo_r)
+        relaxed_ink = core_ink | (halo & (~core_holes) & (darkness > tail_floor) & (gray < t_sauv * 1.045))
+
+        lbl, num = label(relaxed_ink, structure=np.ones((3, 3), dtype=bool))
         if num == 0:
-            return core_ink.astype(bool)
+            reconstructed = core_ink.astype(bool)
+        else:
+            valid_ids = np.unique(lbl[core_ink])
+            valid_ids = valid_ids[valid_ids > 0]
+            reconstructed = np.isin(lbl, valid_ids)
 
-        reconstructed = np.zeros_like(core_ink, dtype=bool)
-        for i in range(1, num + 1):
-            comp = (lbl == i)
-            if np.any(comp & core_ink):
-                reconstructed |= comp
-
-        return reconstructed
+        return GlyphSegmenter._clean_word_mask_border_bleed(reconstructed, scale_calib=scale_calib)
 
     def assemble_word_into_glyphs(
         self,
@@ -384,8 +528,20 @@ class GlyphSegmenter:
 
         # Find connected components and sort horizontally
         props = sorted(regionprops(labeled_w), key=lambda p: (p.bbox[1] + p.bbox[3]) / 2.0)
-        min_body_area = max(14, int(total_ink * 0.012))
-        min_body_h = max(8, int(H * 0.25))
+        if active_calib is not None:
+            min_body_area = max(14, int(round(active_calib.min_glyph_area_px * 0.80)))
+            min_body_h = max(8, int(round(active_calib.min_glyph_height_px * 0.65)))
+            max_v_merge = max(6.0, active_calib.diacritic_max_dist_px)
+            max_h_merge = max(6.0, active_calib.mm_to_px(0.85))
+            min_frag_area = max(12, int(round(active_calib.area_mm2_to_px2(0.16))))
+        else:
+            est_px_per_mm_loc = max(3.5, H / 4.8)
+            min_body_area = max(14, int(total_ink * 0.012))
+            min_body_h = max(8, min(int(H * 0.25), int(round(0.80 * est_px_per_mm_loc))))
+            max_v_merge = max(6.0, 1.1 * est_px_per_mm_loc)
+            max_h_merge = max(6, int(H * 0.18))
+            min_frag_area = max(12, int(round(0.16 * (est_px_per_mm_loc ** 2))))
+
         valid_props = [
             p for p in props
             if p.area >= min_body_area and (p.bbox[2] - p.bbox[0]) >= min_body_h
@@ -440,6 +596,7 @@ class GlyphSegmenter:
             sp_m = (labeled_w[sp.bbox[0]:sp.bbox[2], sp.bbox[1]:sp.bbox[3]] == sp.label)
             closest = min(comp_records, key=lambda c: min(abs(c["cmin"] - sp.bbox[3]), abs(sp.bbox[1] - c["cmax"]), abs(c["c_center"] - sp_cx)))
             h_dist = max(0, max(closest["cmin"] - sp.bbox[3], sp.bbox[1] - closest["cmax"]))
+            v_dist = max(0, max(closest["cmin_y"] - sp.bbox[2], sp.bbox[0] - closest["cmax_y"]))
 
             # Scale-adaptive supralinear diacritic discrimination
             is_supralinear = (sp_cy < H * 0.40) and (sp.bbox[2] <= closest["cmin_y"] + int(round(2.5 * scale_ref)))
@@ -451,10 +608,13 @@ class GlyphSegmenter:
                     "bbox": (int(sp.bbox[0]), int(sp.bbox[1]), int(sp.bbox[2]), int(sp.bbox[3])),
                     "area": int(sp.area)
                 })
-            elif h_dist <= max(6, int(H * 0.18)) or sp.area >= 12:
-                # Genuine broken body stroke: merge into base mask
-                closest["mask"][sp.bbox[0]:sp.bbox[2], sp.bbox[1]:sp.bbox[3]] |= sp_m
-                closest["area"] += int(sp.area)
+            elif v_dist <= max_v_merge and (h_dist <= max_h_merge or sp.area >= min_frag_area):
+                # Skip tiny border-clipped edge specks that lie far above/below the nearest letter body
+                touches_tb = (sp.bbox[0] <= 1 or sp.bbox[2] >= H - 1)
+                if not (touches_tb and v_dist > max_v_merge * 0.6 and sp.area < min_frag_area * 2):
+                    # Genuine broken body stroke: merge into base mask
+                    closest["mask"][sp.bbox[0]:sp.bbox[2], sp.bbox[1]:sp.bbox[3]] |= sp_m
+                    closest["area"] += int(sp.area)
 
         # Recalculate component extents and centers
         main_comps = sorted(comp_records, key=lambda c: c["cmin"])
@@ -464,8 +624,10 @@ class GlyphSegmenter:
             if len(cols) > 0 and len(rows) > 0:
                 c["cmin"] = int(cols.min())
                 c["cmax"] = int(cols.max())
+                c["cmin_y"] = int(rows.min())
+                c["cmax_y"] = int(rows.max())
                 c["w"] = c["cmax"] - c["cmin"] + 1
-                c["h"] = int(rows.max() - rows.min() + 1)
+                c["h"] = c["cmax_y"] - c["cmin_y"] + 1
                 c["c_center"] = float(np.mean(cols))
 
         # Merge vertically stacked / overlapping components (e.g. broken stems, bench plumes, or diacritics)
@@ -476,6 +638,7 @@ class GlyphSegmenter:
             min_hole_area = active_calib.min_loop_hole_area_px
             min_hole_h = active_calib.min_loop_hole_height_px
             min_hole_w = active_calib.min_loop_hole_width_px
+            max_stack_vgap = active_calib.mm_to_px(1.25)
         else:
             # Estimate physical scale from word line height (~3.8 mm core line height)
             est_px_per_mm = max(3.0, H / 4.2)
@@ -485,23 +648,27 @@ class GlyphSegmenter:
             min_hole_area = max(6, int(round(0.18 * (est_px_per_mm ** 2))))
             min_hole_h = max(3, int(round(0.50 * est_px_per_mm)))
             min_hole_w = max(2, int(round(0.38 * est_px_per_mm)))
+            max_stack_vgap = 1.25 * est_px_per_mm
 
         idx_m = 0
         while idx_m < len(main_comps) - 1:
             c1 = main_comps[idx_m]
             c2 = main_comps[idx_m + 1]
             overlap_x = min(c1["cmax"], c2["cmax"]) - max(c1["cmin"], c2["cmin"])
+            v_gap_12 = max(0, max(c1["cmin_y"] - c2["cmax_y"], c2["cmin_y"] - c1["cmax_y"]))
             min_w_pair = max(1, min(c1["w"], c2["w"]))
             comb_w = max(c1["cmax"], c2["cmax"]) - min(c1["cmin"], c2["cmin"]) + 1
-            if overlap_x >= 0.35 * min_w_pair or (min_w_pair < max(9, int(round(min_glyph_w * 0.75))) and overlap_x >= -2 and comb_w <= single_glyph_max_w):
+            if v_gap_12 <= max_stack_vgap and (overlap_x >= 0.35 * min_w_pair or (min_w_pair < max(9, int(round(min_glyph_w * 0.75))) and overlap_x >= -2 and comb_w <= single_glyph_max_w)):
                 c1["mask"] |= c2["mask"]
                 c1["area"] += c2["area"]
                 cols = np.where(np.any(c1["mask"], axis=0))[0]
                 rows = np.where(np.any(c1["mask"], axis=1))[0]
                 c1["cmin"] = int(cols.min())
                 c1["cmax"] = int(cols.max())
+                c1["cmin_y"] = int(rows.min())
+                c1["cmax_y"] = int(rows.max())
                 c1["w"] = c1["cmax"] - c1["cmin"] + 1
-                c1["h"] = int(rows.max() - rows.min() + 1)
+                c1["h"] = c1["cmax_y"] - c1["cmin_y"] + 1
                 c1["c_center"] = float(np.mean(cols))
                 main_comps.pop(idx_m + 1)
             else:
@@ -695,53 +862,149 @@ class GlyphSegmenter:
         scale_calib: Optional[MetricScaleCalibration] = None
     ) -> List[List[int]]:
         """
-        Computes a simplified polygonal boundary contour hugging the ink tightly.
-        Uses physical metric scale calibration (mm / tenths of mm) to bridge gaps between
-        multi-stroke parts of a glyph (<= 1.10 mm) or letters of a word (<= 2.10 mm),
-        finds the external contour, and simplifies with Douglas-Peucker.
+        Computes a tight polygonal boundary contour hugging actual word/glyph ink.
+        Uses physical metric scale calibration (mm) with elliptical morphology and
+        avoids clamping contours flat against outer bounding box walls.
         Returns list of [x, y] coordinates in absolute space.
         """
         if mask is None or np.sum(mask) == 0:
             return []
+        import cv2
         from scipy.ndimage import binary_dilation, binary_closing
         from skimage.measure import find_contours, approximate_polygon
 
         H, W = mask.shape
+        work_mask = mask.astype(bool)
         if scale_calib is not None:
-            word_thresh_w = scale_calib.mm_to_px(5.0)
-            close_w = scale_calib.intra_word_bridge_px if W > word_thresh_w else scale_calib.intra_glyph_bridge_px
-            close_h = max(5, int(round(scale_calib.mm_to_px(0.85)))) | 1
+            px_per_mm = scale_calib.px_per_mm
+            is_word = W > scale_calib.mm_to_px(5.0)
+            close_w = max(5, int(round(scale_calib.mm_to_px(1.25 if is_word else 0.70))) | 1)
+            close_h = max(3, int(round(scale_calib.mm_to_px(0.65))) | 1)
+            eff_pad = max(1, int(round(scale_calib.mm_to_px(0.16))))
+            eff_tol = max(1.2, scale_calib.mm_to_px(0.14))
+            min_cc_area = max(4, int(round(scale_calib.area_mm2_to_px2(0.08))))
         else:
-            est_px_per_mm = max(3.0, H / 4.2)
-            close_w = (int(round(2.10 * est_px_per_mm)) | 1) if W > (5.0 * est_px_per_mm) else (int(round(1.10 * est_px_per_mm)) | 1)
-            close_h = max(5, int(round(0.85 * est_px_per_mm))) | 1
+            est_px_per_mm = max(3.5, H / 4.2)
+            is_word = W > (5.0 * est_px_per_mm)
+            close_w = max(5, int(round((1.25 if is_word else 0.70) * est_px_per_mm)) | 1)
+            close_h = max(3, int(round(0.65 * est_px_per_mm)) | 1)
+            eff_pad = max(1, min(pad, int(round(0.16 * est_px_per_mm))))
+            eff_tol = max(tolerance, 0.14 * est_px_per_mm)
+            min_cc_area = max(4, int(round(0.08 * (est_px_per_mm ** 2))))
 
-        pad_w = pad + close_w + 2
-        padded_m = np.pad(mask, pad_width=pad_w, mode="constant", constant_values=False)
-        closed_m = binary_closing(padded_m, structure=np.ones((close_h, close_w), dtype=bool))
-        struct = np.ones((pad * 2 + 1, pad * 2 + 1), dtype=bool)
-        dilated = binary_dilation(closed_m, structure=struct)
-        contours = find_contours(dilated.astype(float), level=0.5)
+        # Remove tiny isolated dust specks before contouring so contours hug real ink
+        lbl_p, num_p = label(work_mask, structure=np.ones((3, 3), dtype=bool))
+        if num_p > 1:
+            cnt_p = np.bincount(lbl_p.ravel())
+            cnt_p[0] = 0
+            filtered = (cnt_p >= min_cc_area)[lbl_p]
+            if np.any(filtered):
+                work_mask = filtered
+
+        pad_w = eff_pad + close_w + 3
+        padded_u8 = np.pad(work_mask.astype(np.uint8), pad_width=pad_w, mode="constant", constant_values=0)
+        k_close_u8 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close_w, close_h))
+        closed_u8 = cv2.morphologyEx(padded_u8, cv2.MORPH_CLOSE, k_close_u8)
+        k_dil_u8 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (eff_pad * 2 + 1, eff_pad * 2 + 1))
+        dilated = cv2.dilate(closed_u8, k_dil_u8) > 0
+        contours = find_contours(dilated.astype(np.float32), level=0.5)
         if not contours:
             return []
         if len(contours) > 1:
-            rows, cols = np.where(dilated)
-            if len(cols) > 0:
-                c_min, c_max = int(cols.min()), int(cols.max())
-                r_med = int(np.median(rows))
+            # Minimum-distance MST bridging across all disconnected ink islands (including overhead
+            # 'sh' loops, 'c' plumes, and supralinear marks) so none are ever discarded.
+            lbl_d, n_d = label(dilated, structure=np.ones((3, 3), dtype=bool))
+            if n_d > 1:
                 bridged = dilated.copy()
-                bridged[max(0, r_med - 2):min(bridged.shape[0], r_med + 3), c_min:c_max + 1] = True
-                bridged = binary_closing(bridged, structure=np.ones((5, 9), dtype=bool))
+                comp_pts = [np.argwhere(lbl_d == cid) for cid in range(1, n_d + 1)]
+                # Sort components left-to-right; connect each island to nearest already-connected island
+                order = sorted(range(n_d), key=lambda idx: float(np.mean(comp_pts[idx][:, 1])))
+                connected_ids = [order[0]]
+                remaining_ids = order[1:]
+                while remaining_ids:
+                    best_d = 1e18
+                    best_pair = None
+                    best_rem_idx = -1
+                    for r_i, rid in enumerate(remaining_ids):
+                        pts_r = comp_pts[rid]
+                        # Subsample large components for fast exact closest-pair lookup
+                        if len(pts_r) > 64:
+                            pts_r = pts_r[::max(1, len(pts_r) // 64)]
+                        for cid in connected_ids:
+                            pts_c = comp_pts[cid]
+                            if len(pts_c) > 64:
+                                pts_c = pts_c[::max(1, len(pts_c) // 64)]
+                            dists = np.sum((pts_r[:, None, :] - pts_c[None, :, :]) ** 2, axis=2)
+                            flat_i = int(np.argmin(dists))
+                            d2 = float(dists.flat[flat_i])
+                            if d2 < best_d:
+                                best_d = d2
+                                pr_i, pc_i = divmod(flat_i, len(pts_c))
+                                best_pair = (pts_r[pr_i], pts_c[pc_i])
+                                best_rem_idx = r_i
+                    if best_pair is not None:
+                        p0, p1 = best_pair
+                        n_st = max(2, int(np.ceil(np.hypot(p1[0] - p0[0], p1[1] - p0[1]))) + 1)
+                        ys = np.round(np.linspace(p0[0], p1[0], n_st)).astype(int)
+                        xs = np.round(np.linspace(p0[1], p1[1], n_st)).astype(int)
+                        for py_i, px_i in zip(ys, xs):
+                            y_lo, y_hi = max(0, py_i - 1), min(bridged.shape[0], py_i + 2)
+                            x_lo, x_hi = max(0, px_i - 1), min(bridged.shape[1], px_i + 2)
+                            bridged[y_lo:y_hi, x_lo:x_hi] = True
+                    connected_ids.append(remaining_ids.pop(best_rem_idx))
                 contours = find_contours(bridged.astype(float), level=0.5)
         c = max(contours, key=len)
-        approx = approximate_polygon(c, tolerance=tolerance)
+        approx = approximate_polygon(c, tolerance=eff_tol)
         y_off, x_off = offset
         poly = []
         for pt in approx:
-            px = int(round(np.clip(pt[1] - pad_w, 0, W))) + x_off
-            py = int(round(np.clip(pt[0] - pad_w, 0, H))) + y_off
+            px = max(0, int(round(pt[1] - pad_w)) + x_off)
+            py = max(0, int(round(pt[0] - pad_w)) + y_off)
             poly.append([px, py])
         return poly
+
+    @staticmethod
+    def compute_hole_polygons(
+        mask: np.ndarray,
+        offset: Tuple[int, int] = (0, 0),
+        scale_calib: Optional[MetricScaleCalibration] = None,
+    ) -> List[List[List[int]]]:
+        """
+        Extracts inner contour polygons of genuine inkless interior holes inside a glyph mask
+        so isolated glyph cutouts (evenodd clipping) and canvas inspectors punch out enclosed bowls.
+        """
+        if mask is None or mask.size < 16 or not np.any(mask):
+            return []
+        from scipy.ndimage import binary_fill_holes
+        from skimage.measure import find_contours, approximate_polygon
+
+        gh, gw = mask.shape[:2]
+        px_per_mm = float(scale_calib.px_per_mm) if scale_calib is not None else max(4.5, max(gh, gw) / 4.5)
+        min_hole_px = max(4, int(round(0.065 * (px_per_mm ** 2))))
+
+        padded = np.pad((mask > 0).astype(bool), 2, mode="constant", constant_values=False)
+        holes = binary_fill_holes(padded) & (~padded)
+        if not np.any(holes):
+            return []
+        lbl_h, num_h = label(holes)
+        y_off, x_off = offset
+        hole_polys: List[List[List[int]]] = []
+        for hid in range(1, num_h + 1):
+            hm = (lbl_h == hid)
+            if int(np.sum(hm)) < min_hole_px:
+                continue
+            cs = find_contours(hm.astype(np.float32), level=0.5)
+            if not cs:
+                continue
+            c = max(cs, key=len)
+            approx = approximate_polygon(c, tolerance=0.65)
+            if len(approx) >= 4:
+                hp = [
+                    [max(0, int(round(pt[1] - 2)) + x_off), max(0, int(round(pt[0] - 2)) + y_off)]
+                    for pt in approx
+                ]
+                hole_polys.append(hp)
+        return hole_polys
 
     def build_glyph_record(
         self,
@@ -835,10 +1098,12 @@ class GlyphSegmenter:
         # Vectorize glyph ductus using Our Model (Kinematic Quill Tracker)
         try:
             is_seraphini = (subfolder == "seraphinianus")
+            max_allowed_strokes = 1 if is_seraphini else 4
             ordered_strokes = self.calligraphic_vectorizer.extract_calligraphic_ductus(
                 g_mask,
                 single_stroke_mode=is_seraphini,
-                max_strokes=1 if is_seraphini else 6
+                max_strokes=max_allowed_strokes,
+                scale_calib=self.scale_calib,
             )
             
             # Coverage audit: verify strokes cover the full glyph extent
@@ -869,10 +1134,9 @@ class GlyphSegmenter:
 
         if not ordered_strokes:
             return None
-        # Absolute paleographic safeguard: a single glyph cannot have more than 6 pen strokes.
-        # Any component with > 6 strokes (e.g. 112 or 25 strokes) is an illustration drawing or texture!
-        if len(ordered_strokes) > 6:
-            return None
+        # Absolute paleographic safeguard: a single glyph cannot exceed the physical stroke ceiling (4 for Voynich, 1 for Seraphinianus).
+        if len(ordered_strokes) > (1 if is_seraphini else 4):
+            ordered_strokes = ordered_strokes[:(1 if is_seraphini else 4)]
         if strict:
             if sum(len(s.get("points", [])) for s in ordered_strokes) < 8:
                 return None
@@ -926,7 +1190,7 @@ class GlyphSegmenter:
             "word_bbox": tuple(int(v) for v in word_bbox),
             "word_png_rel": word_png_rel,
             "bbox": (gy0, gx0, gy1, gx1),
-            "polygon": self.compute_ink_polygon(g_mask, offset=(gy0, gx0)),
+            "polygon": self.compute_ink_polygon(g_mask, offset=(gy0, gx0), scale_calib=self.scale_calib),
             "height": int(gh),
             "width": int(gw),
             "area": area,

@@ -469,16 +469,16 @@ def reprocess_voynich(base_dir: Path):
     page_id = page_data.get("page_id", "f1r")
     raw_words = page_data.get("words", [])
 
-    # Ensure standard corpus resolution (1272x1800) matching f1r.json coordinate space
-    img = cv2.imread(str(page_img_path))
-    if img is None:
-        raise FileNotFoundError(f"Page image not found: {page_img_path}")
-    if img.shape[0] != 1800 or img.shape[1] != 1272:
-        img = cv2.resize(img, (1272, 1800), interpolation=cv2.INTER_LANCZOS4)
-        cv2.imwrite(str(page_img_path), img)
+    # Load canonical Yale Beinecke HD scan (on-the-fly IIIF download if not yet cached) and aligned Rosetta boxes
+    from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader
+    rosetta_loader = VoynicheseRosettaLoader()
+    yale_path, pil_img, r_words = rosetta_loader.get_yale_hd_scan_and_words(page_id)
+    img = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
+    cv2.imwrite(str(page_img_path), img, [cv2.IMWRITE_JPEG_QUALITY, 92])
     H_img, W_img = img.shape[:2]
     page_data["image_width"] = int(W_img)
     page_data["image_height"] = int(H_img)
+    print(f"  [+] Using Yale Beinecke HD scan for {page_id}: {W_img}x{H_img} px ({yale_path.name})")
 
     scale_calib = MetricScaleCalibration(manuscript_type="voynich", image_height_px=H_img, image_width_px=W_img)
     binarizer = Binarizer()
@@ -488,13 +488,8 @@ def reprocess_voynich(base_dir: Path):
     graph_ext = StrokeGraphExtractor()
     resolver = JunctionResolver()
 
-    # 1. Restore canonical Voynichese Rosetta word bounding boxes so zero words are truncated horizontally
+    # 1. Project canonical Voynichese Rosetta word bounding boxes onto Yale HD scan
     try:
-        from PIL import Image
-        from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader
-        rosetta_loader = VoynicheseRosettaLoader()
-        pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        r_words = rosetta_loader.extract_aligned_words("f1r", scan_image=pil_img, prefer_js=True)
         valid_r_words = [rw for rw in r_words if rw.bbox_scan is not None]
         if len(valid_r_words) == len(raw_words):
             line_clusters = []
@@ -520,9 +515,23 @@ def reprocess_voynich(base_dir: Path):
                 rx1, ry1 = max(rx0 + 1, min(W_img, rx1)), max(ry0 + 1, min(H_img, ry1))
                 w_dict["rosetta_bbox"] = [ry0, rx0, ry1, rx1]
                 w_dict["bbox"] = [ry0, rx0, ry1, rx1]
-            print(f"  [+] Restored {len(raw_words)} canonical Voynichese Rosetta bounding boxes on f1r.")
+            new_lines = []
+            for l_idx, lc in enumerate(line_clusters):
+                ly0 = min(max(0, rw.bbox_scan[1]) for rw in lc)
+                lx0 = min(max(0, rw.bbox_scan[0]) for rw in lc)
+                ly1 = max(min(H_img, rw.bbox_scan[3]) for rw in lc)
+                lx1 = max(min(W_img, rw.bbox_scan[2]) for rw in lc)
+                new_lines.append({"line_id": f"L{l_idx:02d}", "bbox": [int(ly0), int(lx0), int(ly1), int(lx1)]})
+            for li in range(len(new_lines) - 1):
+                if new_lines[li]["bbox"][2] > new_lines[li + 1]["bbox"][0]:
+                    mid_y = int(round((new_lines[li]["bbox"][2] + new_lines[li + 1]["bbox"][0]) / 2.0))
+                    new_lines[li]["bbox"][2] = mid_y
+                    new_lines[li + 1]["bbox"][0] = mid_y
+            page_data["lines"] = new_lines
+            page_data["line_count"] = len(new_lines)
+            print(f"  [+] Projected {len(raw_words)} canonical Voynichese Rosetta bounding boxes onto Yale HD ({W_img}x{H_img}).")
     except Exception as e_ros:
-        print(f"  [!] Notice: could not reload Rosetta boxes: {e_ros}")
+        print(f"  [!] Notice: could not project Rosetta boxes onto Yale HD: {e_ros}")
 
     # Enforce strict disjoint spatial partitioning on Voynich words (0 overlaps, line-aware)
     words = SpatialWordPartitioner.resolve_disjoint_word_partitions(raw_words, (H_img, W_img))

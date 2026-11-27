@@ -33,49 +33,77 @@ class StrokeGraphExtractor:
             w = float(stroke_widths[y, x])
             graph.add_node((int(y), int(x)), y=int(y), x=int(x), width=w)
 
-            # Check 8 neighbors
+            # Check 8 neighbors, skipping redundant diagonal shortcut inside a 2x2 L-corner
+            # so 8-connected thin curves do not spawn spurious degree-3 triangle junctions.
             for dy, dx in self.NEIGHBORS_8:
                 ny, nx_ = y + dy, x + dx
                 if 0 <= ny < H and 0 <= nx_ < W and skeleton[ny, nx_]:
-                    # Add edge with euclidean length
+                    if abs(dy) == 1 and abs(dx) == 1:
+                        if skeleton[y + dy, x] or skeleton[y, x + dx]:
+                            continue
                     dist = np.sqrt(dy * dy + dx * dx)
                     graph.add_edge((int(y), int(x)), (int(ny), int(nx_)), weight=float(dist))
 
         return graph
 
+    @staticmethod
+    def _trace_ordered_cycle(sub_g: nx.Graph) -> List[Tuple[int, int]]:
+        """Traces a connected 2-regular cycle sequentially and closes it back at start."""
+        nodes = list(sub_g.nodes())
+        if not nodes:
+            return []
+        start_node = min(nodes, key=lambda n: (n[0] * 1.5 + n[1] * 2.0))
+        cycle = [start_node]
+        visited = {start_node}
+        curr = start_node
+        while True:
+            nbs = [n for n in sub_g.neighbors(curr) if n not in visited]
+            if not nbs:
+                break
+            nxt = nbs[0]
+            visited.add(nxt)
+            cycle.append(nxt)
+            curr = nxt
+        if len(cycle) >= 3 and start_node in sub_g.neighbors(cycle[-1]):
+            cycle.append(start_node)
+        return cycle
+
     def decompose_into_strokes(self, graph: nx.Graph) -> List[Dict[str, Any]]:
         """
-        Decomposes graph into linear stroke segments between critical nodes (endpoints and junctions).
+        Decomposes graph into linear stroke segments between critical nodes (endpoints and junctions),
+        preserving closed topological cycles (e.g. bowls/ovals like 'o') as sequential closed loops.
         """
         if graph.number_of_nodes() == 0:
             return []
 
-        # Find critical nodes (degree != 2)
-        critical_nodes = [n for n, deg in graph.degree() if deg != 2]
-
         strokes = []
         visited_edges = set()
+        stroke_counter = 0
 
-        # Handle cycles/loops without critical nodes (e.g. clean closed loops 'o')
-        if len(critical_nodes) == 0 and graph.number_of_nodes() > 0:
-            # Pick arbitrary start node (top-left)
-            start_node = min(graph.nodes(), key=lambda n: (n[0], n[1]))
-            # Trace cycle
-            cycle = list(nx.dfs_preorder_nodes(graph, source=start_node))
-            if len(cycle) > 1:
-                coords = [(n[0], n[1], graph.nodes[n].get("width", 1.0)) for n in cycle]
-                strokes.append({
-                    "stroke_id": "S000",
-                    "type": "loop",
-                    "points": coords,
-                    "length": float(len(coords)),
-                    "start": cycle[0],
-                    "end": cycle[-1]
-                })
+        # 1. Extract pure degree-2 connected components first (even if another component has junctions!)
+        for comp_nodes in nx.connected_components(graph):
+            sub_g = graph.subgraph(comp_nodes)
+            if all(deg == 2 for _, deg in sub_g.degree()):
+                cycle = self._trace_ordered_cycle(sub_g)
+                if len(cycle) > 1:
+                    for k in range(len(cycle) - 1):
+                        visited_edges.add(tuple(sorted([cycle[k], cycle[k + 1]])))
+                    coords = [(n[0], n[1], graph.nodes[n].get("width", 1.0)) for n in cycle]
+                    strokes.append({
+                        "stroke_id": f"S{stroke_counter:03d}",
+                        "type": "loop",
+                        "points": coords,
+                        "length": float(len(coords)),
+                        "start": cycle[0],
+                        "end": cycle[-1]
+                    })
+                    stroke_counter += 1
+
+        # 2. Find critical nodes (degree != 2) for branched/open paths
+        critical_nodes = [n for n, deg in graph.degree() if deg != 2]
+        if not critical_nodes:
             return strokes
 
-        # Trace from every critical node along its incident edges
-        stroke_counter = 0
         for crit in critical_nodes:
             for neighbor in graph.neighbors(crit):
                 edge_key = tuple(sorted([crit, neighbor]))

@@ -580,14 +580,8 @@ class CorpusCorrespondenceMatcher:
 
         archetype_has_loop = False
         if cluster_glyphs:
-            loop_scores = []
-            for g in cluster_glyphs[:12]:
-                ff = g.get("fill_factor", 0.25)
-                if 0.18 <= ff <= 0.48 and len(g.get("strokes", [])) <= 3:
-                    loop_scores.append(True)
-                else:
-                    loop_scores.append(False)
-            archetype_has_loop = np.mean(loop_scores) >= 0.50 if loop_scores else False
+            loop_scores = [int(g.get("loop_count", 0)) >= 1 for g in cluster_glyphs]
+            archetype_has_loop = float(np.mean(loop_scores)) >= 0.50 if loop_scores else False
 
         # Compute topological and morphological distance to profiles
         profile_scores = {}
@@ -714,14 +708,8 @@ class CorpusCorrespondenceMatcher:
 
         archetype_has_loop = False
         if cluster_glyphs:
-            loop_scores = []
-            for g in cluster_glyphs[:12]:
-                ff = g.get("fill_factor", 0.25)
-                if 0.18 <= ff <= 0.48 and len(g.get("strokes", [])) <= 2:
-                    loop_scores.append(True)
-                else:
-                    loop_scores.append(False)
-            archetype_has_loop = np.mean(loop_scores) >= 0.50 if loop_scores else False
+            loop_scores = [int(g.get("loop_count", 0)) >= 1 for g in cluster_glyphs]
+            archetype_has_loop = float(np.mean(loop_scores)) >= 0.50 if loop_scores else False
 
         best_match = None
         best_distance = float("inf")
@@ -816,10 +804,26 @@ class CorpusCorrespondenceMatcher:
                 a_diff = abs(prof["aspect_ratio"] - aspect_ratio) * 1.6
                 profile_scores[prof["eva"]] = (s_pen + a_diff, prof)
 
-            # 1. EVA Scheme
-            eva_prof = next((p for p in cls.VOYNICH_STANDARD_PROFILES if p["eva"] == eva_char), None)
+            # Empirical ground-truth token agreement from Voynichese XML alignments under each scheme's granularity
+            eva_to_currier = {p["eva"]: p["currier"] for p in cls.VOYNICH_STANDARD_PROFILES if p.get("currier") and p["currier"] != "—"}
+            eva_to_v101 = {p["eva"]: p.get("v101", p["eva"]) for p in cls.VOYNICH_STANDARD_PROFILES}
+            annotated = [g for g in (cluster_glyphs or []) if (g.get("eva_char") or "").strip()]
+            v_ratio = None
+            c_ratio = None
+            v101_ratio = None
+            if annotated:
+                n_ann = float(len(annotated))
+                v_votes = sum(1 for g in annotated if (g.get("eva_char") or "").strip().lower() == str(voynichese_char).lower())
+                c_votes = sum(1 for g in annotated if eva_to_currier.get((g.get("eva_char") or "").strip().lower(), "") == str(currier_char))
+                v101_votes = sum(1 for g in annotated if str(eva_to_v101.get((g.get("eva_char") or "").strip().lower(), "")) == str(v101_char))
+                v_ratio = float(v_votes) / n_ann
+                c_ratio = float(c_votes) / n_ann
+                v101_ratio = float(v101_votes) / n_ann
+
+            # 1. EVA Scheme (Morphological fit + empirical token consensus)
             eva_dist = profile_scores[eva_char][0] if eva_char in profile_scores else 2.5
-            eva_conf = round(max(35.0, min(95.0, (1.0 - eva_dist * 0.16) * 100.0)), 1)
+            eva_morph = max(0.25, min(0.96, 1.0 - eva_dist * 0.16))
+            eva_conf = round(100.0 * ((0.50 * v_ratio + 0.50 * eva_morph) if v_ratio is not None else eva_morph), 1)
             matches["eva"] = {
                 "scheme": "EVA",
                 "label": f"EVA: '{eva_char}'",
@@ -831,13 +835,14 @@ class CorpusCorrespondenceMatcher:
                 "reference_svg": cls.EVA_REFERENCE_SVGS.get(eva_char, "")
             }
 
-            # 2. Currier Scheme: match closest Currier profile based on Currier grapheme topology
+            # 2. Currier Scheme (1976): uppercase collapsed-ligature table mapped from EVA profile
             currier_prof = next((p for p in cls.VOYNICH_STANDARD_PROFILES if p["currier"] == currier_char and p["currier"] != "—"), None)
             if currier_prof and currier_prof["eva"] in profile_scores:
                 c_dist = profile_scores[currier_prof["eva"]][0]
-                currier_conf = round(max(30.0, min(94.0, (1.0 - c_dist * 0.17) * 100.0)), 1)
+                currier_morph = max(0.25, min(0.96, 1.0 - c_dist * 0.16))
+                currier_conf = round(100.0 * ((0.50 * c_ratio + 0.50 * currier_morph) if c_ratio is not None else currier_morph), 1)
             else:
-                currier_conf = round(max(25.0, eva_conf - 12.0), 1)
+                currier_conf = round(100.0 * c_ratio, 1) if c_ratio is not None else eva_conf
             matches["currier"] = {
                 "scheme": "Currier",
                 "label": f"Currier: '{currier_char}'",
@@ -845,33 +850,32 @@ class CorpusCorrespondenceMatcher:
                 "confidence_pct": currier_conf,
                 "category": f"Currier {base.get('category', 'Type')}",
                 "name": f"Currier Form '{currier_char}'",
-                "description": f"Currier transliteration standard equivalent for scribal form.",
+                "description": "Currier (1976) uppercase character-table mapping (collapses digraphs like ch->C, sh->H).",
                 "reference_svg": cls.EVA_REFERENCE_SVGS.get(eva_char, "")
             }
 
-            # 3. v101 Standard Scheme: independent phonetic/typographic confidence
+            # 3. v101 Standard Scheme (Claston character table mapped from EVA profile)
             v101_prof = next((p for p in cls.VOYNICH_STANDARD_PROFILES if p.get("v101") == v101_char), None)
             if v101_prof and v101_prof["eva"] in profile_scores:
                 v_dist = profile_scores[v101_prof["eva"]][0]
-                v101_conf = round(max(30.0, min(93.0, (1.0 - v_dist * 0.18) * 100.0)), 1)
+                v101_morph = max(0.25, min(0.96, 1.0 - v_dist * 0.16))
+                v101_conf = round(100.0 * ((0.50 * v101_ratio + 0.50 * v101_morph) if v101_ratio is not None else v101_morph), 1)
             else:
-                v101_conf = round(max(25.0, eva_conf - 10.0), 1)
+                v101_conf = round(100.0 * v101_ratio, 1) if v101_ratio is not None else eva_conf
             matches["v101"] = {
                 "scheme": "v101",
                 "label": f"v101: '{v101_char}'",
                 "symbol": v101_char,
                 "confidence_pct": v101_conf,
-                "category": f"v101 Standard",
+                "category": "v101 Table",
                 "name": f"v101 Glyph '{v101_char}'",
-                "description": f"v101 extended transcription standard equivalent.",
+                "description": "v101 character-table mapping of this grapheme class.",
                 "reference_svg": cls.EVA_REFERENCE_SVGS.get(eva_char, "")
             }
 
-            # 4. Voynichese Ground Truth: based on XML transcription voting consistency
-            if cluster_glyphs:
-                v_votes = sum(1 for g in cluster_glyphs if (g.get("eva_char") or "").strip().lower() == voynichese_char.lower())
-                v_ratio = v_votes / max(1, len(cluster_glyphs))
-                voynichese_conf = round(max(35.0, min(96.0, (0.60 * v_ratio + 0.40 * (eva_conf / 100.0)) * 100.0)), 1)
+            # 4. Voynichese Ground Truth XML: pure empirical vote purity inside cluster (unblended)
+            if v_ratio is not None:
+                voynichese_conf = round(v_ratio * 100.0, 1)
             else:
                 voynichese_conf = eva_conf
             matches["voynichese"] = {
@@ -879,9 +883,9 @@ class CorpusCorrespondenceMatcher:
                 "label": f"Voynichese: '{voynichese_char}'",
                 "symbol": voynichese_char,
                 "confidence_pct": voynichese_conf,
-                "category": "Voynichese Ground Truth",
+                "category": "Voynichese XML Ground Truth",
                 "name": f"Voynichese Token '{voynichese_char}'",
-                "description": "Certified Beinecke high-resolution annotation token.",
+                "description": "Pure empirical Voynichese XML word-alignment vote purity inside cluster.",
                 "reference_svg": cls.EVA_REFERENCE_SVGS.get(eva_char, "")
             }
         else:
@@ -908,28 +912,24 @@ class CorpusCorrespondenceMatcher:
                 "description": base.get("description", ""),
                 "reference_svg": cls.SERAFINI_REFERENCE_SVGS.get(code, "")
             }
-            # Deri (2015) structural cursive grapheme matching
-            deri_conf = round(min(97.0, max(42.0, base_conf - (8.0 if "EMERGENT" in deri_code else 3.0))), 1)
             matches["deri"] = {
                 "scheme": "Deri (2015)",
                 "label": f"Deri: {deri_code}",
                 "symbol": deri_code,
-                "confidence_pct": deri_conf,
+                "confidence_pct": base_conf,
                 "category": "Deri Cursive Topology",
                 "name": f"Deri Class {deri_code}",
-                "description": "Deri & Knight (2015) cursive decipherment grapheme representation.",
+                "description": "Deri & Knight (2015) structural class equivalent.",
                 "reference_svg": cls.SERAFINI_REFERENCE_SVGS.get(code, "")
             }
-            # Bulik & Betti (2011) information-theoretic structural classes
-            bulik_conf = round(min(96.0, max(40.0, base_conf - (10.0 if "ω" in bulik_code else 4.0))), 1)
             matches["bulik"] = {
                 "scheme": "Bulik (2011)",
                 "label": f"Bulik: {bulik_code}",
                 "symbol": bulik_code,
-                "confidence_pct": bulik_conf,
+                "confidence_pct": base_conf,
                 "category": "Bulik Structural Cluster",
                 "name": f"Bulik Typology {bulik_code}",
-                "description": "Bulik & Betti (2011) structural glyph cluster representation.",
+                "description": "Bulik & Betti (2011) structural glyph cluster equivalent.",
                 "reference_svg": cls.SERAFINI_REFERENCE_SVGS.get(code, "")
             }
 

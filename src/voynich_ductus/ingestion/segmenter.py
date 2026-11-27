@@ -159,7 +159,7 @@ class LineSegmenter:
             abs_y0 = off_y + ly0
             abs_y1 = off_y + ly1
             abs_x0 = max(0, off_x + lx0 - 6)
-            abs_x1 = min(work_img.shape[1], off_x + lx1 + 6)
+            abs_x1 = min(binary_ink.shape[1], off_x + lx1 + 6)
 
             results.append({
                 "line_id": f"L{line_idx:03d}",

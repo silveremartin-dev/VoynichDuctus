@@ -19,7 +19,7 @@ class MultimodalFolioAligner:
     and robust RANSAC affine consensus.
     """
 
-    def __init__(self, cache_dir: Optional[Union[str, Path]] = "data/intermediate/registration_cache"):
+    def __init__(self, cache_dir: Optional[Union[str, Path]] = "data/intermediate/registration"):
         self.cache_dir = Path(cache_dir) if cache_dir else None
         if self.cache_dir:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -45,17 +45,21 @@ class MultimodalFolioAligner:
         - 'inliers', 'matches', 'inlier_ratio'
         - 'status': 'success' or 'failed'
         """
-        # Check cache if folio_id provided
+        # Check cache (plus legacy registration_cache fallback) if folio_id provided
         if folio_id and self.cache_dir and not force_recompute:
-            cache_file = self.cache_dir / f"{folio_id.lower()}_affine.json"
-            if cache_file.exists():
-                try:
-                    with open(cache_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    data["matrix_2x3"] = np.array(data["matrix_2x3"], dtype=np.float32)
-                    return data
-                except Exception:
-                    pass
+            candidate_files = [
+                self.cache_dir / f"{folio_id.lower()}_affine.json",
+                self.cache_dir.parent / "registration_cache" / f"{folio_id.lower()}_affine.json",
+            ]
+            for cache_file in candidate_files:
+                if cache_file.exists():
+                    try:
+                        with open(cache_file, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        data["matrix_2x3"] = np.array(data["matrix_2x3"], dtype=np.float32)
+                        return data
+                    except Exception:
+                        pass
 
         # Convert to numpy uint8 grayscale
         ref_gray = self._to_gray(reference_img)

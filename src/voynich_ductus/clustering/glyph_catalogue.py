@@ -44,9 +44,10 @@ class GlyphCatalogue:
         self.feature_extractor = GeometricFeatureExtractor()
         self.projector = StrokeLatentProjector(latent_dim=8)
         self.dinov2_engine = DINOv2EmbeddingEngine()
+        self._dino_patch_cache: Dict[bytes, np.ndarray] = {}
 
     @staticmethod
-    def count_glyph_loops(g: Dict[str, Any]) -> int:
+    def count_glyph_loops(g: Dict[str, Any], stroke_key: str = "strokes") -> int:
         """
         Deterministically counts the exact number of closed topological loops (0, 1, 2+)
         in a glyph using both its binary image mask (Euler holes) and stroke trajectory
@@ -54,23 +55,31 @@ class GlyphCatalogue:
         """
         from scipy.ndimage import binary_fill_holes, binary_closing, label as nd_label
 
-        # If pre-verified from high-resolution isolated scan mask, use it as lower bound
-        pre_loops = int(g.get("loop_count", -1))
-
+        # Estimate scan pixel density from metric height when available so grain pinholes on HD scans
+        # (~4 px = 0.02 mm^2 at 14 px/mm) are never mistaken for genuine scribal loops (>= 0.065 mm^2)
         gw = max(4, int(round(float(g.get("width", 20)))))
         gh = max(4, int(round(float(g.get("height", 20)))))
-        strokes = g.get("strokes", [])
+        h_mm_val = float(g.get("height_mm", 0.0))
+        est_ppm = (gh / h_mm_val) if h_mm_val > 0.15 else 7.5
+        min_mask_hole_px = max(4, int(round(0.065 * (est_ppm ** 2))))
+        min_closed_hole_px = max(8, int(round(0.11 * (est_ppm ** 2))))
+        min_vec_hole_px = max(5, int(round(0.075 * (est_ppm ** 2))))
+
+        strokes = g.get(stroke_key) or g.get("strokes", [])
 
         mask_loops = 0
         g_mask = g.get("mask")
-        if g_mask is not None and isinstance(g_mask, np.ndarray) and g_mask.size >= 16:
+        has_live_mask = (g_mask is not None and isinstance(g_mask, np.ndarray) and g_mask.size >= 16)
+        pre_loops = -1 if has_live_mask else int(g.get("loop_count", -1))
+
+        if has_live_mask:
             bin_m = (g_mask > 0).astype(bool)
             padded = np.pad(bin_m, 3, mode="constant", constant_values=False)
             filled = binary_fill_holes(padded)
             holes = filled & (~padded)
             labeled_h, n_h = nd_label(holes)
             for h_id in range(1, n_h + 1):
-                if int(np.sum(labeled_h == h_id)) >= 4:
+                if int(np.sum(labeled_h == h_id)) >= min_mask_hole_px:
                     mask_loops += 1
             if mask_loops == 0:
                 # Bridge 1px quantization gap in scan binarization
@@ -79,7 +88,7 @@ class GlyphCatalogue:
                 holes_c = filled_c & (~closed_m)
                 labeled_hc, n_hc = nd_label(holes_c)
                 for h_id in range(1, n_hc + 1):
-                    if int(np.sum(labeled_hc == h_id)) >= 8:
+                    if int(np.sum(labeled_hc == h_id)) >= min_closed_hole_px:
                         mask_loops += 1
 
         # Also check rasterized strokes & trajectory self-crossings
@@ -110,7 +119,7 @@ class GlyphCatalogue:
             holes_v = filled_v & (~(canvas > 0))
             labeled_v, n_v = nd_label(holes_v)
             for h_id in range(1, n_v + 1):
-                if int(np.sum(labeled_v == h_id)) >= 5:
+                if int(np.sum(labeled_v == h_id)) >= min_vec_hole_px:
                     vec_loops += 1
 
             # Check explicit trajectory self-intersection along longest stroke
@@ -129,10 +138,13 @@ class GlyphCatalogue:
         g["loop_count"] = int(total_loops)
         return int(total_loops)
 
-    def extract_glyph_features(self, glyphs: List[Dict[str, Any]]) -> np.ndarray:
+    def extract_glyph_features(self, glyphs: List[Dict[str, Any]], stroke_key: str = "strokes") -> np.ndarray:
         """
         Extracts hybrid topological + 2D image morphological + deep visual (DINOv2)
-        descriptors for 100% of glyphs (zero truncation).
+        descriptors for 100% of glyphs (zero truncation). Applies StandardScaler
+        normalization first and THEN weights paleographic subspaces so loops, physical
+        scale, ductus kinematics, and 16-D DINOv2 embeddings are never drowned out by
+        raw 8x8 grid pixel counts.
         """
         from sklearn.preprocessing import StandardScaler
         from scipy.ndimage import binary_fill_holes
@@ -142,7 +154,7 @@ class GlyphCatalogue:
         patch_dim = 32
 
         for g in glyphs:
-            strokes = g.get("strokes", [])
+            strokes = g.get(stroke_key) or g.get("strokes", [])
             gw = max(1.0, float(g.get("width", 20)))
             gh = max(1.0, float(g.get("height", 20)))
             area = float(g.get("area", gw * gh))
@@ -150,10 +162,14 @@ class GlyphCatalogue:
 
             aspect = float(np.log(gw / gh))
             fill_factor = float(g.get("fill_factor", area / max(1.0, gw * gh)))
-            loops = float(self.count_glyph_loops(g))
-            log_h = float(np.log(max(2.0, gh)))
-            log_w = float(np.log(max(2.0, gw)))
-            log_area = float(np.log(max(4.0, area)))
+            loops = float(self.count_glyph_loops(g, stroke_key=stroke_key))
+            # Prefer physical metric scale (mm) when available so scan resolution stays invariant
+            h_mm = float(g.get("height_mm", 0.0))
+            w_mm = float(g.get("width_mm", 0.0))
+            a_mm2 = float(g.get("area_mm2", 0.0))
+            log_h = float(np.log(max(0.2, h_mm if h_mm > 0 else gh)))
+            log_w = float(np.log(max(0.2, w_mm if w_mm > 0 else gw)))
+            log_area = float(np.log(max(0.05, a_mm2 if a_mm2 > 0 else area)))
 
             all_pts = []
             for s in strokes:
@@ -243,37 +259,71 @@ class GlyphCatalogue:
                 mean_f = np.zeros(16, dtype=np.float32)
 
             partial_vec = [
-                loops * 8.0,               # Dominant topological loop invariant
-                log_h * 4.5,               # Physical height scale invariant
-                log_w * 4.0,               # Physical width scale invariant
-                log_area * 3.0,            # Physical area scale invariant
-                hole_ratio * 4.0,          # Interior hole ratio invariant
-                aspect * 3.5,              # Log aspect ratio (tall vs core vs wide)
-                fill_factor * 2.0,         # Ink density
-                stroke_count * 3.5,        # Kinematic pen-lift count (1 vs 2 vs 3-4 strokes)
-                np.sin(entry_angle) * 2.5, # Pen touchdown entry tangent sin
-                np.cos(entry_angle) * 2.5, # Pen touchdown entry tangent cos
-                np.sin(exit_angle) * 2.5,  # Pen-lift exit tangent sin
-                np.cos(exit_angle) * 2.5,  # Pen-lift exit tangent cos
-                float(mean_f[0]) * 2.5,    # Log kinematic arc length
-                float(mean_f[2]) * 3.0,    # Stroke tortuosity / bending curvature (straight minim vs crescent)
-                float(mean_f[7]) * 2.0,    # Mean nib thickness (plein/délié)
-                float(mean_f[8]) * 2.0,    # Nib thickness variance (bevel contrast)
-                float(mean_f[11]) * 2.2,   # Orientation histogram bin 1
-                float(mean_f[12]) * 2.2,   # Orientation histogram bin 2
-                float(mean_f[13]) * 2.2,   # Orientation histogram bin 3
-                float(mean_f[14]) * 2.2,   # Orientation histogram bin 4
-                float(mean_f[15]) * 2.2,   # Orientation histogram bin 5
+                loops,                     # [0] Dominant topological loop invariant
+                log_h,                     # [1] Physical height scale invariant
+                log_w,                     # [2] Physical width scale invariant
+                log_area,                  # [3] Physical area scale invariant
+                hole_ratio,                # [4] Interior hole ratio invariant
+                aspect,                    # [5] Log aspect ratio (tall vs core vs wide)
+                fill_factor,               # [6] Ink density
+                stroke_count,              # [7] Kinematic pen-lift count (1 vs 2 vs 3-4 strokes)
+                np.sin(entry_angle),       # [8] Pen touchdown entry tangent sin
+                np.cos(entry_angle),       # [9] Pen touchdown entry tangent cos
+                np.sin(exit_angle),        # [10] Pen-lift exit tangent sin
+                np.cos(exit_angle),        # [11] Pen-lift exit tangent cos
+                float(mean_f[0]),          # [12] Log kinematic arc length
+                float(mean_f[2]),          # [13] Stroke tortuosity / bending curvature
+                float(mean_f[7]),          # [14] Mean nib thickness (plein/délié)
+                float(mean_f[8]),          # [15] Nib thickness variance (bevel contrast)
+                float(mean_f[11]),         # [16] Orientation histogram bin 1
+                float(mean_f[12]),         # [17] Orientation histogram bin 2
+                float(mean_f[13]),         # [18] Orientation histogram bin 3
+                float(mean_f[14]),         # [19] Orientation histogram bin 4
+                float(mean_f[15]),         # [20] Orientation histogram bin 5
             ]
-            partial_vec.extend((grid_8x8 * 2.5).tolist())
-            partial_vec.extend((h_proj * 2.0).tolist())
-            partial_vec.extend((v_proj * 2.0).tolist())
+            partial_vec.extend(grid_8x8.tolist())
+            partial_vec.extend(h_proj.tolist())
+            partial_vec.extend(v_proj.tolist())
             precomputed_partials.append(partial_vec)
 
-        # Full DINOv2 batch inference for 100% of glyphs (no 500-glyph truncation)
+        # Full DINOv2 batch inference with exact SHA-1 pixel-hash deduplication + persistent disk cache
         # Project the 384/768-D DINOv2 ViT embeddings down to their top 16 principal components (PCA)
-        # rather than slicing the arbitrary first 16 raw neurons!
-        dino_batch_embs = self.dinov2_engine.extract_batch_embeddings(mini_patches, batch_size=64)
+        import hashlib
+        import pickle
+        cache_path = Path("data/intermediate/dinov2_patch_cache.pkl")
+        if not getattr(self, "_dino_disk_loaded", False):
+            self._dino_disk_loaded = True
+            if cache_path.exists():
+                try:
+                    with open(cache_path, "rb") as f_dc:
+                        loaded_dc = pickle.load(f_dc)
+                    if isinstance(loaded_dc, dict):
+                        self._dino_patch_cache.update(loaded_dc)
+                except Exception:
+                    pass
+
+        patch_keys = [hashlib.sha1(p.tobytes()).digest() for p in mini_patches]
+        missing_idx = [i for i, k in enumerate(patch_keys) if k not in self._dino_patch_cache]
+        if missing_idx:
+            # Deduplicate identical missing patches before running ViT forward passes
+            unique_missing = {}
+            for i in missing_idx:
+                k = patch_keys[i]
+                if k not in unique_missing:
+                    unique_missing[k] = mini_patches[i]
+            u_keys = list(unique_missing.keys())
+            u_patches = list(unique_missing.values())
+            u_embs = self.dinov2_engine.extract_batch_embeddings(u_patches, batch_size=128)
+            for k, emb in zip(u_keys, u_embs):
+                self._dino_patch_cache[k] = np.asarray(emb, dtype=np.float32)
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(cache_path, "wb") as f_dc:
+                    pickle.dump(self._dino_patch_cache, f_dc, protocol=pickle.HIGHEST_PROTOCOL)
+            except Exception:
+                pass
+
+        dino_batch_embs = np.vstack([self._dino_patch_cache[k] for k in patch_keys]) if patch_keys else np.zeros((0, 16), dtype=np.float32)
         if len(dino_batch_embs) > 0 and dino_batch_embs.shape[1] > 16:
             from sklearn.decomposition import PCA
             n_comp = min(16, dino_batch_embs.shape[0], dino_batch_embs.shape[1])
@@ -299,16 +349,37 @@ class GlyphCatalogue:
             if norm_d > 1e-5:
                 dino_top = dino_top / norm_d
             vec = list(partial)
-            vec.extend((dino_top * 2.5).tolist())
+            vec.extend(dino_top.tolist())
             glyph_feature_vectors.append(np.array(vec, dtype=np.float32))
 
         X_raw = np.array(glyph_feature_vectors, dtype=np.float32)
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X_raw)
-        return X_scaled
+
+        # Apply domain subspace weights AFTER unit-variance scaling so 64 raw grid bins
+        # never drown out loop topology, metric dimensions, kinematics, or DINOv2.
+        w = np.ones(X_scaled.shape[1], dtype=np.float32)
+        w[0] = 4.0
+        w[1:4] = 2.6
+        w[4:6] = 2.4
+        w[6] = 1.2
+        w[7] = 2.4
+        w[8:12] = 1.8
+        w[12:14] = 2.0
+        w[14:16] = 1.4
+        w[16:21] = 1.5
+        w[21:85] = 0.35
+        w[85:101] = 0.55
+        if X_scaled.shape[1] >= 117:
+            w[101:117] = 1.5
+        return X_scaled * w
 
     @staticmethod
-    def classify_glyph_topology(g: Dict[str, Any], scale_calib: Optional[MetricScaleCalibration] = None) -> str:
+    def classify_glyph_topology(
+        g: Dict[str, Any],
+        scale_calib: Optional[MetricScaleCalibration] = None,
+        stroke_key: str = "strokes"
+    ) -> str:
         """
         Deterministically classifies a glyph into a strictly loop-disjoint topological family
         using physical metric scale calibration (millimeters & tenths of mm):
@@ -328,7 +399,7 @@ class GlyphCatalogue:
           - TALL_GALLOWS_MULTILOOP
           - MULTI_LOOP_COMPLEX
         """
-        strokes = g.get("strokes", [])
+        strokes = g.get(stroke_key) or g.get("strokes", [])
         gw = max(1.0, float(g.get("width", 20)))
         gh = max(1.0, float(g.get("height", 20)))
         aspect = gw / gh
@@ -341,10 +412,10 @@ class GlyphCatalogue:
             c_type = g.get("corpus_type") or ("seraphinianus" if "serafini" in str(g.get("page_id", "")) else "voynich")
             scale_calib = MetricScaleCalibration(manuscript_type=c_type)
 
-        # Compute and persist exact metric dimensions (mm and tenths of mm)
-        h_mm = scale_calib.px_to_mm(gh)
-        w_mm = scale_calib.px_to_mm(gw)
-        area_mm2 = scale_calib.area_px2_to_mm2(area)
+        # Preserve pre-calibrated metric mm dimensions when already computed on HD scans
+        h_mm = float(g.get("height_mm", 0.0)) or scale_calib.px_to_mm(gh)
+        w_mm = float(g.get("width_mm", 0.0)) or scale_calib.px_to_mm(gw)
+        area_mm2 = float(g.get("area_mm2", 0.0)) or scale_calib.area_px2_to_mm2(area)
         g["height_mm"] = round(h_mm, 2)
         g["width_mm"] = round(w_mm, 2)
         g["area_mm2"] = round(area_mm2, 2)
@@ -356,7 +427,7 @@ class GlyphCatalogue:
             g["loop_count"] = 0
             return "PUNCTUATION_OR_SPECK"
 
-        loops = GlyphCatalogue.count_glyph_loops(g)
+        loops = GlyphCatalogue.count_glyph_loops(g, stroke_key=stroke_key)
 
         # 0b. Macro drawing / illustration debris (area >= 25 mm^2 or height/width >= 14 mm)
         if area_mm2 >= 25.0 or h_mm >= 14.0 or w_mm >= 14.0:
@@ -425,12 +496,19 @@ class GlyphCatalogue:
 
         return f"VERTICAL_MINIM__{scale_band}"
 
-    def build_catalogue(self, glyphs: List[Dict[str, Any]], corpus_type: str = "voynich", scale_calib: Optional[MetricScaleCalibration] = None) -> Dict[str, Any]:
+    def build_catalogue(
+        self,
+        glyphs: List[Dict[str, Any]],
+        corpus_type: str = "voynich",
+        scale_calib: Optional[MetricScaleCalibration] = None,
+        stroke_key: str = "strokes",
+        tag_field: str = "canonical_type"
+    ) -> Dict[str, Any]:
         """
-        Clusters glyphs into canonical alphabet types using Option C (Tripartite Hybrid):
+        Clusters glyphs into canonical alphabet types using Tripartite Hybrid Clustering:
         1. Strict Topological Partitioning (0-loop, 1-loop, 2+-loop, tall ascenders, core, bench never mix).
-        2. 2D Image Morphological + Full DINOv2 Clustering within each topological compartment.
-        3. Consensus Medoid & Kinematic Ductus Verification + Historical Corpus Cross-Referencing.
+        2. Metric-Weighted Kinematic + Morphological + 16-D DINOv2 Clustering within each topological family.
+        3. Consensus Medoid Verification + Historical Corpus Cross-Referencing, using true observed counts.
         """
         if not glyphs:
             return {"total_glyphs": 0, "canonical_alphabet_size": 0, "alphabet": []}
@@ -438,11 +516,11 @@ class GlyphCatalogue:
         if scale_calib is None:
             scale_calib = MetricScaleCalibration(manuscript_type=corpus_type)
 
-        X_scaled = self.extract_glyph_features(glyphs)
+        X_scaled = self.extract_glyph_features(glyphs, stroke_key=stroke_key)
 
         # 1. Strict Topological Partitioning across ALL manuscripts (Voynich & Seraphinianus)
         for g in glyphs:
-            g["topology_group"] = self.classify_glyph_topology(g, scale_calib=scale_calib)
+            g["topology_group"] = self.classify_glyph_topology(g, scale_calib=scale_calib, stroke_key=stroke_key)
 
         topo_groups: Dict[str, List[int]] = {}
         for idx, g in enumerate(glyphs):
@@ -618,9 +696,9 @@ class GlyphCatalogue:
 
             type_name = f"G{rank:02d}"
 
-            # Tag all members with canonical type
+            # Tag all members with canonical type on requested field
             for g in cluster_glyphs:
-                g["canonical_type"] = type_name
+                g[tag_field] = type_name
 
             # Match with standard historical corpora (preserving reference_svg even for allographs)
             if corpus_type.lower() == "seraphinianus":
@@ -642,7 +720,7 @@ class GlyphCatalogue:
                         "bulik_equivalent": f"ω_{rank}",
                         "name": f"{corpus_match.get('name', 'Cursive Archetype')} (Allograph {type_name})",
                         "category": f"{corpus_match.get('category', 'Cursive')} [{cluster_loops} loop(s)]",
-                        "confidence_pct": round(max(62.0, 94.0 - rank * 0.8), 1),
+                        "confidence_pct": corpus_match.get("confidence_pct", 75.0),
                         "description": f"Morphologically homogeneous allograph ({cluster_topology}, {cluster_loops} topological loop(s)).",
                         "reference_svg": ref_svg_keep
                     }
@@ -668,7 +746,7 @@ class GlyphCatalogue:
                         "voynichese_equivalent": corpus_match.get("voynichese_equivalent", "—"),
                         "name": f"{corpus_match.get('name', 'Scribal Grapheme')} ({type_name})",
                         "category": f"{corpus_match.get('category', 'Grapheme')} [{cluster_loops} loop(s)]",
-                        "confidence_pct": round(max(65.0, 94.0 - rank * 0.8), 1),
+                        "confidence_pct": corpus_match.get("confidence_pct", 75.0),
                         "description": f"Topologically locked allograph of '{eva_eq}' ({cluster_topology}, {cluster_loops} loop(s)).",
                         "reference_svg": ref_svg_keep
                     }
@@ -686,14 +764,14 @@ class GlyphCatalogue:
                 cluster_glyphs=cluster_glyphs
             )
 
-            # Collect strictly conformant representative instances (same loop count, within scale limits)
-            sample_instances = []
+            # Collect strictly conformant representative instances interleaved across pages (up to 36)
+            conformant_by_page: Dict[str, List[Dict[str, Any]]] = {}
             for g in cluster_glyphs:
                 if g.get("is_outlier", False):
                     continue
                 if int(g.get("loop_count", 0)) != cluster_loops:
                     continue
-                sample_instances.append({
+                inst_rec = {
                     "glyph_id": g.get("glyph_id", ""),
                     "page_id": g.get("page_id", ""),
                     "line_id": g.get("line_id", ""),
@@ -702,17 +780,17 @@ class GlyphCatalogue:
                     "polygon": g.get("polygon", []),
                     "width": int(g.get("width", 0)),
                     "height": int(g.get("height", 0)),
-                    "height_mm": round(scale_calib.px_to_mm(float(g.get("height", 0))), 2),
-                    "width_mm": round(scale_calib.px_to_mm(float(g.get("width", 0))), 2),
-                    "height_dmm": round(scale_calib.px_to_tenths_mm(float(g.get("height", 0))), 1),
-                    "width_dmm": round(scale_calib.px_to_tenths_mm(float(g.get("width", 0))), 1),
-                    "area_mm2": round(scale_calib.area_px2_to_mm2(float(g.get("area", 0))), 2),
-                    "stroke_count": int(g.get("stroke_count", len(g.get("strokes", [])))),
+                    "height_mm": float(g.get("height_mm", 0.0)) or round(scale_calib.px_to_mm(float(g.get("height", 0))), 2),
+                    "width_mm": float(g.get("width_mm", 0.0)) or round(scale_calib.px_to_mm(float(g.get("width", 0))), 2),
+                    "height_dmm": float(g.get("height_dmm", 0.0)) or round(scale_calib.px_to_tenths_mm(float(g.get("height", 0))), 1),
+                    "width_dmm": float(g.get("width_dmm", 0.0)) or round(scale_calib.px_to_tenths_mm(float(g.get("width", 0))), 1),
+                    "area_mm2": float(g.get("area_mm2", 0.0)) or round(scale_calib.area_px2_to_mm2(float(g.get("area", 0))), 2),
+                    "stroke_count": int(len(g.get(stroke_key) or g.get("strokes", []))),
                     "loop_count": int(g.get("loop_count", 0)),
                     "topology_group": g.get("topology_group", ""),
                     "eva_char": g.get("eva_char", ""),
                     "crop_uri": g.get("crop_uri", ""),
-                    "svg_content": g.get("svg_content", g.get("ductus_svg", "")),
+                    "svg_content": g.get("euler_svg_content", "") if stroke_key == "euler_strokes" else g.get("svg_content", g.get("ductus_svg", "")),
                     "euler_svg_content": g.get("euler_svg_content", ""),
                     "euler_stroke_count": int(g.get("euler_stroke_count", len(g.get("euler_strokes", [])))),
                     "png_rel": g.get("png_rel", ""),
@@ -720,8 +798,18 @@ class GlyphCatalogue:
                     "is_outlier": False,
                     "outlier_bin": "INLIER_CONFORMANT",
                     "medoid_distance": g.get("medoid_distance", 0.0)
-                })
-                if len(sample_instances) >= 36:
+                }
+                conformant_by_page.setdefault(inst_rec["page_id"], []).append(inst_rec)
+
+            # Round-robin across pages while keeping medoid-distance order within each page
+            sample_instances = []
+            page_queues = list(conformant_by_page.values())
+            q_idx = 0
+            while len(sample_instances) < 36 and any(page_queues):
+                if page_queues[q_idx]:
+                    sample_instances.append(page_queues[q_idx].pop(0))
+                q_idx = (q_idx + 1) % len(page_queues)
+                if all(len(q) == 0 for q in page_queues):
                     break
 
             # Fallback: if all strictly conformant instances were filtered out, preserve medoid exemplar
@@ -736,17 +824,17 @@ class GlyphCatalogue:
                     "polygon": eg.get("polygon", []),
                     "width": int(eg.get("width", 0)),
                     "height": int(eg.get("height", 0)),
-                    "height_mm": round(scale_calib.px_to_mm(float(eg.get("height", 0))), 2),
-                    "width_mm": round(scale_calib.px_to_mm(float(eg.get("width", 0))), 2),
-                    "height_dmm": round(scale_calib.px_to_tenths_mm(float(eg.get("height", 0))), 1),
-                    "width_dmm": round(scale_calib.px_to_tenths_mm(float(eg.get("width", 0))), 1),
-                    "area_mm2": round(scale_calib.area_px2_to_mm2(float(eg.get("area", 0))), 2),
-                    "stroke_count": int(eg.get("stroke_count", len(eg.get("strokes", [])))),
+                    "height_mm": float(eg.get("height_mm", 0.0)) or round(scale_calib.px_to_mm(float(eg.get("height", 0))), 2),
+                    "width_mm": float(eg.get("width_mm", 0.0)) or round(scale_calib.px_to_mm(float(eg.get("width", 0))), 2),
+                    "height_dmm": float(eg.get("height_dmm", 0.0)) or round(scale_calib.px_to_tenths_mm(float(eg.get("height", 0))), 1),
+                    "width_dmm": float(eg.get("width_dmm", 0.0)) or round(scale_calib.px_to_tenths_mm(float(eg.get("width", 0))), 1),
+                    "area_mm2": float(eg.get("area_mm2", 0.0)) or round(scale_calib.area_px2_to_mm2(float(eg.get("area", 0))), 2),
+                    "stroke_count": int(len(eg.get(stroke_key) or eg.get("strokes", []))),
                     "loop_count": int(eg.get("loop_count", 0)),
                     "topology_group": eg.get("topology_group", ""),
                     "eva_char": eg.get("eva_char", ""),
                     "crop_uri": eg.get("crop_uri", ""),
-                    "svg_content": eg.get("svg_content", eg.get("ductus_svg", "")),
+                    "svg_content": eg.get("euler_svg_content", "") if stroke_key == "euler_strokes" else eg.get("svg_content", eg.get("ductus_svg", "")),
                     "euler_svg_content": eg.get("euler_svg_content", ""),
                     "euler_stroke_count": int(eg.get("euler_stroke_count", len(eg.get("euler_strokes", [])))),
                     "png_rel": eg.get("png_rel", ""),
@@ -756,48 +844,21 @@ class GlyphCatalogue:
                     "medoid_distance": 0.0
                 })
 
-            # Calculate true full-corpus occurrences
-            if corpus_type.lower() == "seraphinianus":
-                total_corpus_glyphs = TOTAL_SERAPHINIANUS_CORPUS_GLYPHS
-                prop = len(cluster_glyphs) / float(max(1, len(glyphs)))
-                corpus_freq = max(350, int(round(prop * total_corpus_glyphs)))
-                corpus_pct = round(corpus_freq / total_corpus_glyphs * 100, 2)
-            else:
-                total_corpus_glyphs = TOTAL_VOYNICH_CORPUS_GLYPHS
-                eva_key = ""
-                if corpus_match:
-                    eva_raw = str(corpus_match.get("eva_equivalent", "")).split()[0].replace("(allo)", "").strip()
-                    if eva_raw in VOYNICH_CORPUS_CENSUS:
-                        eva_key = eva_raw
-                if not eva_key:
-                    eva_chars = [g.get("eva_char") for g in cluster_glyphs if g.get("eva_char") and g.get("eva_char") in VOYNICH_CORPUS_CENSUS]
-                    if eva_chars:
-                        from collections import Counter
-                        eva_key = Counter(eva_chars).most_common(1)[0][0]
-
-                if eva_key and eva_key in VOYNICH_CORPUS_CENSUS:
-                    base_c = VOYNICH_CORPUS_CENSUS[eva_key]
-                    if "(allo)" in str(corpus_match.get("eva_equivalent", "")) or "-v" in type_name:
-                        corpus_freq = max(180, int(round(base_c * 0.32)))
-                    else:
-                        corpus_freq = max(350, int(round(base_c * 0.68))) if "allo" in str(corpus_match.get("name", "")).lower() else base_c
-                else:
-                    prop = len(cluster_glyphs) / float(max(1, len(glyphs)))
-                    corpus_freq = max(180, int(round(prop * total_corpus_glyphs)))
-
-                corpus_pct = round(corpus_freq / total_corpus_glyphs * 100, 2)
-
-            if len(glyphs) <= 10:
-                corpus_freq = len(sample_instances) if sample_instances else len(cluster_glyphs)
-                corpus_pct = round(corpus_freq / len(glyphs) * 100, 2)
+            # Real empirical occurrence count across the processed glyphs (zero hardcoded multipliers)
+            corpus_freq = len(cluster_glyphs)
+            corpus_pct = round(corpus_freq / float(max(1, len(glyphs))) * 100.0, 2)
+            indexed_pages = sorted({str(g.get("page_id", "")) for g in cluster_glyphs if g.get("page_id")})
 
             alphabet_entries.append({
                 "type_id": type_name,
                 "rank": rank,
                 "cluster_index": int(cluster_id),
+                "ductus_engine": "euler_bernoulli" if stroke_key == "euler_strokes" else "quill_40",
                 "frequency": corpus_freq,
                 "folio_frequency": len(cluster_glyphs),
                 "percentage": corpus_pct,
+                "indexed_pages": indexed_pages,
+                "page_count": len(indexed_pages),
                 "topology_group": cluster_topology,
                 "loop_count": cluster_loops,
                 "exemplar_id": exemplar_glyph.get("glyph_id", ""),
@@ -808,13 +869,13 @@ class GlyphCatalogue:
                 "exemplar_svg": exemplar_glyph.get("svg_rel", ""),
                 "exemplar_svg_content": exemplar_glyph.get("svg_content", exemplar_glyph.get("ductus_svg", "")),
                 "exemplar_euler_svg_content": exemplar_glyph.get("euler_svg_content", ""),
-                "mean_strokes": mean_strokes,
+                "mean_strokes": round(float(np.mean([len(g.get(stroke_key) or g.get("strokes", [])) for g in cluster_glyphs])), 2),
                 "mean_height": mean_height,
                 "mean_width": mean_width,
-                "mean_height_mm": round(scale_calib.px_to_mm(mean_height), 2),
-                "mean_width_mm": round(scale_calib.px_to_mm(mean_width), 2),
-                "mean_height_dmm": round(scale_calib.px_to_tenths_mm(mean_height), 1),
-                "mean_width_dmm": round(scale_calib.px_to_tenths_mm(mean_width), 1),
+                "mean_height_mm": float(exemplar_glyph.get("height_mm", 0.0)) or round(scale_calib.px_to_mm(mean_height), 2),
+                "mean_width_mm": float(exemplar_glyph.get("width_mm", 0.0)) or round(scale_calib.px_to_mm(mean_width), 2),
+                "mean_height_dmm": float(exemplar_glyph.get("height_dmm", 0.0)) or round(scale_calib.px_to_tenths_mm(mean_height), 1),
+                "mean_width_dmm": float(exemplar_glyph.get("width_dmm", 0.0)) or round(scale_calib.px_to_tenths_mm(mean_width), 1),
                 "inliers_count": inlier_count,
                 "outliers_count": outlier_count,
                 "outlier_ratio": round(outlier_count / max(1, len(cluster_glyphs)), 3),
@@ -832,6 +893,29 @@ class GlyphCatalogue:
             "canonical_alphabet_size": len(alphabet_entries),
             "alphabet": alphabet_entries
         }
+
+    def build_dual_catalogues(
+        self,
+        glyphs: List[Dict[str, Any]],
+        corpus_type: str = "voynich",
+        scale_calib: Optional[MetricScaleCalibration] = None
+    ) -> Dict[str, Any]:
+        """
+        Builds two independent Canonical Alphabets on the exact same glyphs:
+        1. `alphabet`: clustered using Quill 40° / Ribbon kinematics + DINOv2 + topology.
+        2. `euler_alphabet`: clustered using Euler-Bernoulli skeleton graph kinematics + DINOv2 + topology.
+        """
+        quill_cat = self.build_catalogue(
+            glyphs, corpus_type=corpus_type, scale_calib=scale_calib,
+            stroke_key="strokes", tag_field="canonical_type"
+        )
+        euler_cat = self.build_catalogue(
+            glyphs, corpus_type=corpus_type, scale_calib=scale_calib,
+            stroke_key="euler_strokes", tag_field="euler_canonical_type"
+        )
+        quill_cat["euler_alphabet"] = euler_cat.get("alphabet", [])
+        quill_cat["euler_alphabet_size"] = len(quill_cat["euler_alphabet"])
+        return quill_cat
 
     def export_catalogue_json(self, catalogue: Dict[str, Any], output_path: Path):
         """Exports the canonical alphabet catalogue as a clean JSON file."""

@@ -32,12 +32,14 @@ class GeometricFeatureExtractor:
         w = max_x - min_x
         aspect_ratio = (w + 1e-4) / (h + 1e-4)
 
-        # Arc length & displacement
+        # Arc length & displacement (bounded denominator so closed loops with net_disp == 0 never blow up to 1e6)
         diffs = np.diff(coords, axis=0)
         segment_lengths = np.linalg.norm(diffs, axis=1)
-        arc_length = np.sum(segment_lengths)
-        net_disp = np.linalg.norm(coords[-1] - coords[0])
-        tortuosity = (arc_length + 1e-4) / (net_disp + 1e-4)
+        arc_length = float(np.sum(segment_lengths))
+        net_disp = float(np.linalg.norm(coords[-1] - coords[0]))
+        span_scale = max(float(h), float(w), 1.0)
+        eff_disp = max(net_disp, 0.25 * span_scale, 1.0)
+        tortuosity = min(12.0, arc_length / eff_disp)
 
         # Tangents
         v_start = diffs[0] if len(diffs) > 0 else np.array([0.0, 1.0])
@@ -45,9 +47,12 @@ class GeometricFeatureExtractor:
         angle_start = np.arctan2(v_start[0], v_start[1])
         angle_end = np.arctan2(v_end[0], v_end[1])
 
-        # Direction histogram (8 bins)
+        # Full-circle direction histogram (5 uniform bins spanning [-pi, pi] weighted by segment length, 0 blind sectors)
         angles = np.arctan2(diffs[:, 0], diffs[:, 1])
-        hist, _ = np.histogram(angles, bins=8, range=(-np.pi, np.pi), density=True)
+        weights = segment_lengths if arc_length > 1e-5 else None
+        hist, _ = np.histogram(angles, bins=5, range=(-np.pi, np.pi), weights=weights, density=False)
+        hist_sum = float(np.sum(hist))
+        hist_norm = (hist / hist_sum) if hist_sum > 1e-6 else np.zeros(5, dtype=np.float32)
 
         # Thickness stats
         mean_width = np.mean(widths)
@@ -76,8 +81,8 @@ class GeometricFeatureExtractor:
             rel_y,
             rel_x,
         ]
-        # Append 5 direction histogram features to make 16-D vector
-        features.extend(hist[:5].tolist())
+        # Append all 5 full-circle direction histogram features to make 16-D vector
+        features.extend(hist_norm.tolist())
 
         return np.array(features, dtype=np.float32)
 
