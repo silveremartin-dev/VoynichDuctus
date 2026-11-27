@@ -46,8 +46,10 @@ class JunctionResolver:
 
         y0, x0 = pts[0][0], pts[0][1]
         y1, x1 = pts[-1][0], pts[-1][1]
+        med_w = float(np.median([p[2] if len(p) > 2 else 2.0 for p in pts]))
+        close_tol = max(1.0, med_w * 0.85)
 
-        if len(pts) >= 6 and np.hypot(y1 - y0, x1 - x0) <= 3.5:
+        if len(pts) >= 6 and np.hypot(y1 - y0, x1 - x0) <= close_tol:
             stroke["reversed_by_prior"] = False
             return stroke
 
@@ -108,11 +110,14 @@ class JunctionResolver:
         if len(strokes) <= 1:
             return strokes
 
-        # Filter out micro-spur artifacts (< 5 points or < 5px length when substantial strokes exist)
+        # Filter micro-spur artifacts shorter than ~1.1x local physical nib width when substantial strokes exist
+        all_ws = [p[2] for s in strokes for p in s.get("points", []) if len(p) > 2]
+        med_nib_w = float(np.median(all_ws)) if all_ws else 2.0
+        min_phys_len = max(2.0, med_nib_w * 1.15)
         valid = []
         for s in strokes:
             s_len = s.get("length", len(s.get("points", [])))
-            if s_len >= 5.0 or len(s.get("points", [])) >= 5 or len(strokes) <= 2:
+            if s_len >= min_phys_len or len(s.get("points", [])) >= min_phys_len or len(strokes) <= 2:
                 valid.append(s)
 
         if not valid:

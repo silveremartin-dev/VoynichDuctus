@@ -705,6 +705,13 @@ def generate_explorer_html(
             min-height: 0;
             padding-right: 2px;
         }}
+        .inspector-panel svg {{
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: 100%;
+            display: block;
+        }}
         .inspector-trio {{
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -1024,7 +1031,7 @@ def generate_explorer_html(
             <div class="nav-tabs" title="Switch workspace view for the active codex">
                 <span class="control-group-label">Workspace</span>
                 <button id="tab-pages" class="tab-btn active" onclick="setTab('pages')" title="Interactive high-resolution folio canvas and word/glyph bounding boxes">Canvas &amp; Word Boxes</button>
-                <button id="tab-catalogue" class="tab-btn" onclick="setTab('catalogue')" title="Canonical Alphabet Corpora across Word Decomposition Models A, B, and C">Canonical Alphabet</button>
+                <button id="tab-catalogue" class="tab-btn" onclick="setTab('catalogue')" title="Induced Canonical Alphabet &amp; Emergent Graphical Archetypes">Canonical Alphabet</button>
             </div>
             <div class="help-group" title="Documentation, user commands, word decomposition, and calibration protocols">
                 <button id="tab-methodology" class="tab-btn" onclick="setTab('methodology')" title="User commands, scientific methodology, Word Decomposition, Sources, and corpus statistics">📖 Methodology &amp; Guide</button>
@@ -1112,9 +1119,6 @@ def generate_explorer_html(
                             <option value="pure" title="Pure binarized ink threshold">📜 Pure Ink</option>
                             <option value="raw" title="Raw uncalibrated scan">📷 Natural</option>
                         </select>
-                        <div style="display:flex; align-items:center; gap:4px;">
-                            <span style="font-size:0.66rem; color:#38bdf8; background:#0f172a; border:1px solid #0284c7; border-radius:4px; padding:2px 6px; font-weight:600;" title="Unified closed-loop word-to-glyph segmentation: 24x24 visual sprite dictionary + Viterbi MDL decoding + Direct Calligraphic Bezier Silhouette Ductus">🧬 Typewriter Viterbi + Bézier Ductus</span>
-                        </div>
                     </div>
                     <!-- Clean Modern Layer Control Pills -->
                     <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
@@ -1184,11 +1188,8 @@ def generate_explorer_html(
                 <div>
                     <h2 id="catalogue-title" style="font-size:1.25rem; color:var(--accent);">Canonical Alphabet Archetypes &amp; Emergent Graphical Symbols</h2>
                     <p id="catalogue-subtitle" style="color:var(--text-muted); font-size:0.82rem; margin-top:2px;">
-                        4-way side-by-side prototype comparison (<strong>Scan | Quill Bézier Ductus 40° | Euler-Bernoulli | Canonical Font / Symbol</strong>) for the unified Generative Typewriter + Viterbi MDL decomposer. Counts reflect real observed instances across processed pages; up to 36 conformant samples sorted by ascending Euclidean distance to cluster medoid (interleaved across processed folios) are shown per card.
+                        4-way side-by-side prototype comparison (<strong>Scan | Quill Ductus 40° | Euler-Bernoulli | Canonical Font / Symbol</strong>). Counts reflect real observed instances across processed pages; up to 36 conformant samples sorted by ascending Euclidean distance to cluster medoid (interleaved across processed folios) are shown per card.
                     </p>
-                </div>
-                <div style="display:flex; align-items:center; gap:6px; background:#0b1120; padding:5px 10px; border-radius:8px; border:1px solid #0284c7;">
-                    <span style="font-size:0.70rem; color:#38bdf8; font-weight:700;">🧬 Generative Typewriter + Viterbi MDL</span>
                 </div>
             </div>
             <div class="catalogue-grid" id="catalogue-grid"></div>
@@ -1324,18 +1325,20 @@ def generate_explorer_html(
                             </div>
                         </div>
 
-                        <h3>📜 Primary Digitized Manuscript Sources</h3>
+                        <h3>📜 Primary Digitized Manuscript Sources (Live Database Scope)</h3>
                         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(290px, 1fr)); gap:12px; margin-bottom:16px;">
                             <div class="stat-card" style="border-left:4px solid #38bdf8; padding:12px;">
                                 <h4 style="color:#38bdf8; margin:0 0 6px 0;">Voynich Manuscript (Yale Beinecke MS 408)</h4>
                                 <div style="font-size:0.76rem; color:var(--text-muted); line-height:1.5;">
-                                    Single-tier native full-resolution IIIF master scans (<code>~2400–2500 &times; 3168–3390 px</code>, calibrated against <code>225 mm</code> folio height) fetched on demand via <code>IIIFClient</code> and aligned to Voynichese XML word boxes via SIFT/RANSAC.
+                                    Native full-resolution IIIF master plates calibrated strictly in physical millimeters (<code>160 &times; 225 mm</code> folio standard) via <code>MetricScaleCalibration</code> and aligned to Voynichese XML word boxes via sub-millimeter SIFT/RANSAC.<br>
+                                    <span id="help-live-voynich-summary" style="color:#38bdf8; font-weight:600;"></span>
                                 </div>
                             </div>
                             <div class="stat-card" style="border-left:4px solid #c084fc; padding:12px;">
                                 <h4 style="color:#c084fc; margin:0 0 6px 0;">Codex Seraphinianus (Luigi Serafini, 1981)</h4>
                                 <div style="font-size:0.76rem; color:var(--text-muted); line-height:1.5;">
-                                    High-resolution text plates (<code>~1600 &times; 2206 px</code>, calibrated against <code>350 mm</code> height) extracted via <code>PDFScanLoader</code> with strictly 1-stroke continuous monoline ribbon physics.
+                                    High-resolution plates calibrated against the physical <code>235 &times; 350 mm</code> folio edition via <code>PDFScanLoader</code>, derendered with strictly 1-stroke continuous cursive ribbon physics and emergent manuscript medoids.<br>
+                                    <span id="help-live-serafini-summary" style="color:#c084fc; font-weight:600;"></span>
                                 </div>
                             </div>
                         </div>
@@ -1390,22 +1393,22 @@ def generate_explorer_html(
                             </thead>
                             <tbody>
                                 <tr>
-                                    <td><strong style="color:#38bdf8;">1. Candidate Cut Lattice</strong></td>
+                                    <td><strong style="color:#38bdf8;">1. Metric Candidate Cut Lattice</strong></td>
                                     <td><code>GenerativeTypewriterDecomposer._build_word_lattice</code></td>
-                                    <td>Constructs a strictly disjoint 2D ink-pixel lattice from topological components, supralinear diacritic decoupling (&le; 0.55 mm), EDT ink valleys, and 1D latent velocity peaks <code>||dZ/dx||</code>.</td>
-                                    <td>Zero Euler closed-loop slicing; 100% of word ink pixels are assigned with zero overlap.</td>
+                                    <td>Constructs a strictly disjoint 2D ink lattice from topological components, supralinear diacritic decoupling (&le; 0.55 mm), EDT ink valleys, and 1D latent velocity peaks <code>||dZ/dx||</code>.</td>
+                                    <td>Zero Euler closed-loop slicing; 100% of word ink area is assigned with zero overlap.</td>
                                 </tr>
                                 <tr>
                                     <td><strong style="color:#c084fc;">2. Unsupervised Sprite Dictionary &amp; Viterbi MDL</strong></td>
                                     <td><code>GenerativeTypewriterDecomposer</code></td>
-                                    <td>Induces a stratified <code>24&times;24</code> visual sprite dictionary (<code>0L / 1L / 2+L</code>) across the codex via Ward clustering, then solves dynamic programming for the minimum-description-length path balancing template reconstruction MSE, physical width priors, and open-prefix coalescence (e.g. <code>ch</code>, <code>cth</code>).</td>
+                                    <td>Induces a scale-normalized visual sprite dictionary per topological loop stratum (<code>0L / 1L / 2+L</code>) via Ward clustering, then solves Viterbi dynamic programming balancing template reconstruction MSE, physical millimeter width priors, and open-prefix coalescence (e.g. <code>ch</code>, <code>cth</code>).</td>
                                     <td>Resolves multi-stroke compound gallows and cursive ligatures globally without human labels.</td>
                                 </tr>
                                 <tr>
-                                    <td><strong style="color:#10b981;">3. Direct Calligraphic Bézier Silhouette Fit</strong></td>
+                                    <td><strong style="color:#10b981;">3. Cusp- &amp; Loop-Preserving Calligraphic Bézier Fit</strong></td>
                                     <td><code>CalligraphicVectorizer</code></td>
-                                    <td>Replaces greedy pixel-walking with crossing-preserving topological centerline extraction, 11-o'clock loop rings, normal-axis silhouette centering, uncovered-ink residual recovery, and <code>IoU</code>-optimal 40° quill width calibration.</td>
-                                    <td>High silhouette fidelity alongside the comparative <strong>Euler-Bernoulli</strong> bending-energy skeleton (1–4 strokes max).</td>
+                                    <td>Crossing-preserving centerline graph, 11-o'clock 360° medial loop rings, bounce-back <code>'3'</code>-cusp tongue splicing, 2-pass geodesic cone tip completion, and differentiable/IoU-calibrated 40° quill width profiling.</td>
+                                    <td>Sharp inflections and complete stroke tips alongside the comparative <strong>Euler-Bernoulli</strong> skeleton (1–4 strokes max in Voynich; 1 continuous ribbon in Seraphinianus).</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -1481,8 +1484,8 @@ def generate_explorer_html(
                             <tbody>
                                 <tr>
                                     <td><strong style="color:#38bdf8;">1. Feature Space (Post-Scaled)</strong></td>
-                                    <td>Combines kinematic ductus descriptors (stroke count, entry/exit tangents, tortuosity, 5-bin orientation histogram, width variance), metric dimensions (mm), and <strong>16-D PCA of DINOv2 ViT</strong> embeddings on 32&times;32 ink masks. Subspace weights apply <em>after</em> <code>StandardScaler</code>.</td>
-                                    <td>Computed independently for <strong>Quill 40° / Ribbon</strong> and <strong>Euler-Bernoulli</strong> engines so both Canonical Alphabets can be audited side by side.</td>
+                                    <td>Combines kinematic ductus descriptors (stroke count, entry/exit tangents, tortuosity, 5-bin orientation histogram, width variance), physical millimeter dimensions (<code>mm</code>), and <strong>16-D PCA of DINOv2 ViT</strong> embeddings on scale-normalized ink masks. Subspace weights apply <em>after</em> <code>StandardScaler</code>.</td>
+                                    <td>Computed across all active processed pages with zero hardcoded pixel thresholds.</td>
                                 </tr>
                                 <tr>
                                     <td><strong style="color:#c084fc;">2. Partitioned Ward Clustering</strong></td>
@@ -1864,7 +1867,27 @@ def generate_explorer_html(
                 <div style="background:#0c1222; border:1px solid #1e293b; border-radius:6px; padding:10px; margin-top:10px; font-size:0.75rem; color:var(--text-muted); line-height:1.5;">
                     <strong style="color:var(--accent);">Note on Live Metrics:</strong> Unlike static textbook averages, all Voynich and Seraphinianus rows above reflect the exact processed pages currently indexed in this explorer. Adding more HD folios and rebuilding automatically updates every count, archetype cluster, and diagnostic curve.
                 </div>
+
+                <h3 style="margin-top:16px;">🗺️ Scientific Roadmap</h3>
+                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:10px;">
+                    <div class="stat-card" style="border-left:4px solid #10b981; padding:10px;">
+                        <h4 style="color:#10b981; margin:0 0 4px 0;">1. Full-Page Emergent Retro-Transcription</h4>
+                        <div style="font-size:0.74rem; color:var(--text-muted); line-height:1.45;">
+                            Reconstruct entire manuscript folios in-place by stamping each extracted glyph's canonical medoid <code>Gxx</code> at its exact physical millimeter coordinates <code>(x_mm, y_mm, w_mm, h_mm)</code> for visual generative verification against the raw vellum scan.
+                        </div>
+                    </div>
+                    <div class="stat-card" style="border-left:4px solid #38bdf8; padding:10px;">
+                        <h4 style="color:#38bdf8; margin:0 0 4px 0;">2. Unified Biomechanical Quill-Bernoulli Ductus (mm)</h4>
+                        <div style="font-size:0.74rem; color:var(--text-muted); line-height:1.45;">
+                            Fuse Euler-Bernoulli minimum-bending topology with fixed-millimeter nib mechanics (<code>0.45 mm</code> at 40°), air-lift motion economy, and variable-width pressure ribbons in SVG.
+                        </div>
+                    </div>
+                </div>
             `;
+            const vSum = document.getElementById('help-live-voynich-summary');
+            if (vSum) vSum.textContent = `Live DB: ${{fmt(v.indexed_pages_total)}} indexed folios (${{fmt(v.indexed_words_total)}} words) · ${{v.processed_pages_count || 0}} HD processed (${{fmt(v.processed_words)}} words, ${{fmt(v.processed_glyphs_a)}} glyphs, ${{v.alphabet_a_size ?? 0}} archetypes).`;
+            const sSum = document.getElementById('help-live-serafini-summary');
+            if (sSum) sSum.textContent = `Live DB: ${{fmt(s.indexed_pages_total)}} indexed pages (${{fmt(s.indexed_words_total)}} words) · ${{s.processed_pages_count || 0}} HD processed (${{fmt(s.processed_words)}} words, ${{fmt(s.processed_glyphs_a)}} glyphs, ${{s.alphabet_a_size ?? 0}} archetypes).`;
         }}
 
         function setGridMode(mode) {{
@@ -1938,6 +1961,7 @@ def generate_explorer_html(
             populateAlphabetSchemeOptions();
             updateSegmentationUI();
             updateLayerButtonStates();
+            renderLiveStatsTab();
 
             if (currentTab === 'pages') {{
                 renderPagesTab();
@@ -3472,7 +3496,7 @@ def generate_explorer_html(
                 <div style="background:#050914; border:1px solid #1e293b; border-radius:6px; padding:7px 8px; margin-bottom:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
                         <span style="font-size:0.63rem; color:#fbbf24; font-weight:bold; text-transform:uppercase; letter-spacing:0.03em;">
-                            🔬 Word Binarization &amp; Envelope (Typewriter Viterbi Input)
+                            🔬 Word Binarization &amp; Envelope
                         </span>
                         <span style="font-size:0.55rem; color:var(--text-muted);">Natural grayscale backend</span>
                     </div>
@@ -3493,33 +3517,6 @@ def generate_explorer_html(
                     </div>
                 </div>
             `;
-
-            // Seraphinianus Vector Letterforms Bar
-            let serafiniBarHtml = '';
-            if (currentMs === 'seraphinianus') {{
-                serafiniBarHtml = `
-                    <div style="background:#111827; border:1px solid #c084fc; border-radius:6px; padding:6px 10px; margin-bottom:8px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                            <span style="font-size:0.62rem; color:#c084fc; font-weight:bold; text-transform:uppercase; letter-spacing:0.04em;">SERAPHINIANUS VECTOR LETTERFORMS:</span>
-                            <span style="font-size:0.58rem; color:var(--text-muted); font-family:monospace;">${{childGlyphs.map((g, idx) => getSerafiniGlyphCode(g, idx)).join(' · ')}}</span>
-                        </div>
-                        <div style="text-align:center; background:#000; border-radius:5px; padding:6px; border:1px solid #334155; min-height:48px; display:flex; align-items:center; justify-content:center; gap:5px; overflow-x:auto;">
-                            ${{childGlyphs.map((g, idx) => {{
-                                const s = g.svg_content || getRenderableDuctusSvg(g, 3);
-                                const code = getSerafiniGlyphCode(g, idx);
-                                if (s) {{
-                                    return `<div style="display:inline-flex; flex-direction:column; align-items:center; background:#0a0e17; border:1px solid #334155; border-radius:4px; padding:3px 5px; min-width:34px;">
-                                        <div style="height:32px; width:auto; display:flex; align-items:center; justify-content:center;">${{s}}</div>
-                                        <span style="font-size:0.52rem; color:#c084fc; margin-top:1px; font-family:monospace;">${{code}}</span>
-                                    </div>`;
-                                }} else {{
-                                    return `<div style="display:inline-flex; align-items:center; justify-content:center; height:32px; padding:0 5px; background:#0f172a; border:1px solid #334155; border-radius:4px; color:#c084fc; font-size:0.60rem;">${{code}}</div>`;
-                                }}
-                            }}).join('')}}
-                        </div>
-                    </div>
-                `;
-            }}
 
             const currentWordIdx = (page.words || []).findIndex(w => w.word_id === word.word_id);
             const hasPrevWord = currentWordIdx > 0;
@@ -3616,10 +3613,9 @@ def generate_explorer_html(
                     ` : ''}}
 
                     ${{translitBarHtml}}
-                    ${{serafiniBarHtml}}
                     ${{wordHystPreviewHtml}}
-                    ${{retroTransBarHtml}}
                     ${{ductusChainHtml}}
+                    ${{retroTransBarHtml}}
 
                     <!-- Ductus Kinematic Color Legend -->
                     <div style="background:#0b1329; border:1px solid #1e293b; border-radius:6px; padding:5px 8px; font-size:0.65rem;">
@@ -3650,7 +3646,7 @@ def generate_explorer_html(
                         ${{checkExplanation}}
                     </div>
                     <div style="font-size:0.62rem; color:#10b981;">
-                        ✓ 100% ink assigned (${{childGlyphs.length}} Typewriter Viterbi glyphs, 0 px ignored)
+                        ✓ 100% ink assigned (${{childGlyphs.length}} isolated glyphs, 0 px ignored)
                     </div>
                 </div>
             `;
@@ -3819,8 +3815,9 @@ def generate_explorer_html(
                     <option value="voynichese" ${{activeAlphabetScheme === 'voynichese' ? 'selected' : ''}}>Voynichese (2014)</option>
                 `;
             }} else {{
+                const sCount = (data.seraphinianus && data.seraphinianus.catalogue && data.seraphinianus.catalogue.canonical_alphabet_size) ? data.seraphinianus.catalogue.canonical_alphabet_size : 45;
                 return `
-                    <option value="serafini" selected>Emergent Vector Alphabet (G01–G57)</option>
+                    <option value="serafini" selected>Emergent Vector Alphabet (G01–G${{String(sCount).padStart(2, '0')}})</option>
                 `;
             }}
         }}
@@ -3904,7 +3901,15 @@ def generate_explorer_html(
             const glyphShortLabel = getModelGlyphLabel(selectedGlyph);
 
             const cat = data[currentMs].catalogue;
-            const arch = getActiveAlphabetList(cat).find(a => a.type_id === selectedGlyph.canonical_type);
+            const activeArchList = getActiveAlphabetList(cat);
+            let arch = activeArchList.find(a => a.type_id === selectedGlyph.canonical_type);
+            if (!arch && activeArchList.length > 0) {{
+                const gLoops = selectedGlyph.loop_count || 0;
+                arch = activeArchList.find(a => (a.loop_count || 0) === gLoops) || activeArchList[0];
+            }}
+            const resolvedArchId = (selectedGlyph.canonical_type && selectedGlyph.canonical_type !== 'G??')
+                ? selectedGlyph.canonical_type
+                : (arch ? arch.type_id : 'G01');
             const multiMatches = arch ? (arch.corpus_matches || {{}}) : {{}};
 
             // Render EVA & Voynichese XML empirical purity side-by-side (Currier & v101 are displayed only at word transcription level)
@@ -3937,34 +3942,25 @@ def generate_explorer_html(
                     </div>
                 `;
             }} else {{
-                const cmSera = (arch && arch.corpus_match) ? arch.corpus_match : (multiMatches['serafini'] || {{}});
                 const archSvgSymbol = cleanSvgString((arch && arch.exemplar_svg_content) ? arch.exemplar_svg_content : getRenderableDuctusSvg(selectedGlyph, 6));
-                const archEulerSymbol = cleanSvgString((arch && arch.exemplar_euler_svg_content) ? arch.exemplar_euler_svg_content : (selectedGlyph.euler_svg_content || ''));
-                const familySvgSymbol = cmSera.reference_svg || archSvgSymbol;
-                const familyName = cmSera.name || 'Cursive Ribbon Grapheme';
-                const familyCat = cmSera.category || 'Continuous Ribbon';
                 const archLoops = (arch && arch.loop_count !== undefined) ? arch.loop_count : (selectedGlyph.loop_count || 0);
                 const archTopo = (arch && arch.topology_group) ? arch.topology_group : (selectedGlyph.topology_group || `${{archLoops}}L`);
+                const scaleMm = (arch && arch.mean_width_mm) ? `${{arch.mean_width_mm}}×${{arch.mean_height_mm}} mm` : (selectedGlyph.width_mm ? `${{selectedGlyph.width_mm}}×${{selectedGlyph.height_mm}} mm` : 'Metric');
                 multiCardsHtml = `
                     <div style="background:#0c1222; border:1px solid #1e293b; border-radius:8px; padding:8px 10px; margin:8px 0;">
                         <div style="font-size:0.70rem; color:var(--accent); font-weight:bold; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;">
-                            🏛️ Emergent Serafinian Graphical Symbol & Topology
+                            🏛️ Emergent Archetype Medoid &amp; Metric Topology
                         </div>
-                        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px;">
-                            <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center; display:flex; flex-direction:column; justify-content:space-between; align-items:center;">
-                                <div style="font-size:0.60rem; color:#38bdf8; font-weight:bold; border-bottom:1px solid #1f2937; padding-bottom:2px; margin-bottom:4px; width:100%;">Archetype Symbol (${{selectedGlyph.canonical_type || 'G??'}})</div>
-                                <div style="height:44px; width:100%; display:flex; align-items:center; justify-content:center; margin:2px 0;">${{archSvgSymbol}}</div>
-                                <div style="font-size:0.58rem; color:var(--text-muted); margin-top:2px;">1-Stroke Ribbon</div>
+                        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:6px;">
+                            <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center; display:flex; flex-direction:column; justify-content:space-between; align-items:center; overflow:hidden;">
+                                <div style="font-size:0.60rem; color:#38bdf8; font-weight:bold; border-bottom:1px solid #1f2937; padding-bottom:2px; margin-bottom:4px; width:100%;">Medoid Vector (${{resolvedArchId}})</div>
+                                <div style="height:44px; max-height:44px; width:100%; display:flex; align-items:center; justify-content:center; margin:2px 0; overflow:hidden;">${{archSvgSymbol}}</div>
+                                <div style="font-size:0.58rem; color:var(--text-muted); margin-top:2px;">1-Stroke Cursive Ribbon</div>
                             </div>
-                            <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center; display:flex; flex-direction:column; justify-content:space-between; align-items:center;">
-                                <div style="font-size:0.60rem; color:#c084fc; font-weight:bold; border-bottom:1px solid #1f2937; padding-bottom:2px; margin-bottom:4px; width:100%;">Euler-Bernoulli Graph</div>
-                                <div style="height:44px; width:100%; display:flex; align-items:center; justify-content:center; margin:2px 0;">${{archEulerSymbol || archSvgSymbol}}</div>
-                                <div style="font-size:0.58rem; color:#34d399; font-weight:bold; margin-top:2px;">🔒 ${{archLoops}} Loop(s) • ${{archTopo}}</div>
-                            </div>
-                            <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center; display:flex; flex-direction:column; justify-content:space-between; align-items:center;">
-                                <div style="font-size:0.60rem; color:#10b981; font-weight:bold; border-bottom:1px solid #1f2937; padding-bottom:2px; margin-bottom:4px; width:100%;">Morphological Family</div>
-                                <div style="height:44px; width:100%; display:flex; align-items:center; justify-content:center; margin:2px 0;">${{familySvgSymbol}}</div>
-                                <div style="font-size:0.56rem; color:#e2e8f0; font-weight:bold; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:100%;" title="${{familyName}} (${{familyCat}})">${{familyName}}</div>
+                            <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center; display:flex; flex-direction:column; justify-content:space-between; align-items:center; overflow:hidden;">
+                                <div style="font-size:0.60rem; color:#10b981; font-weight:bold; border-bottom:1px solid #1f2937; padding-bottom:2px; margin-bottom:4px; width:100%;">Topology &amp; Scale</div>
+                                <div style="font-size:0.95rem; font-family:monospace; font-weight:bold; color:#34d399; margin:6px 0;">🔒 ${{archLoops}} Loop(s) · ${{archTopo}}</div>
+                                <div style="font-size:0.60rem; color:#e2e8f0; font-family:monospace;">Mean: ${{scaleMm}}</div>
                             </div>
                         </div>
                     </div>
@@ -3973,39 +3969,28 @@ def generate_explorer_html(
 
             const cm = getTranslitMatch(arch);
             const evaChar = selectedGlyph.eva_char || (cm ? (cm.symbol || cm.eva_equivalent) : '') || (arch ? arch.corpus_match?.eva_equivalent : '') || '';
-            const archExemplarSvg = cleanSvgString((arch && arch.exemplar_svg_content) ? arch.exemplar_svg_content : '');
+            const archExemplarSvg = cleanSvgString((arch && arch.exemplar_svg_content) ? arch.exemplar_svg_content : getRenderableDuctusSvg(selectedGlyph, 6));
+            const archMedoidCrop = (arch && arch.exemplar_crop_uri) ? arch.exemplar_crop_uri : '';
             let refSvgBox = '';
             if (currentMs === 'voynich' && evaChar) {{
+                const evaFontSize = evaChar.length >= 4 ? '1.75rem' : (evaChar.length === 3 ? '2.15rem' : (evaChar.length === 2 ? '2.65rem' : '3.35rem'));
                 refSvgBox = `
-                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:120px; background:#0b0f19; border:1px solid #f59e0b; border-radius:6px; padding:8px;">
-                        <span style="font-size:0.65rem; color:#f59e0b; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase;">VOYNICH CANONICAL FONT</span>
-                        <div style="flex:1; display:flex; align-items:center; justify-content:center;">
-                            <span style="font-family:'VoynichEVA', monospace; font-size:3.6rem; color:#fbbf24; line-height:1.1; filter:drop-shadow(0 0 6px rgba(245,158,11,0.5));">${{evaChar}}</span>
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:145px; height:145px; background:#0b0f19; border:1px solid #f59e0b; border-radius:6px; padding:6px; overflow:hidden;">
+                        <span style="font-size:0.60rem; color:#f59e0b; font-weight:bold; letter-spacing:0.03em; text-transform:uppercase; flex-shrink:0;">VOYNICH CANONICAL FONT</span>
+                        <div style="flex:1; width:100%; max-height:94px; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+                            <span style="font-family:'VoynichEVA', monospace; font-size:${{evaFontSize}}; color:#fbbf24; line-height:1.1; filter:drop-shadow(0 0 6px rgba(245,158,11,0.5)); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${{evaChar}}</span>
                         </div>
-                        <span style="font-size:0.60rem; color:var(--text-muted); font-family:monospace;">Reference EVA: '${{evaChar}}'</span>
-                    </div>
-                `;
-            }} else if ((cm && cm.reference_svg) || archExemplarSvg) {{
-                const symbolSvg = archExemplarSvg || (cm ? cm.reference_svg : '');
-                const familySubtitle = (cm && cm.name) ? cm.name : `Archetype ${{selectedGlyph.canonical_type || 'G??'}}`;
-                refSvgBox = `
-                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:120px; background:#0b0f19; border:1px solid #10b981; border-radius:6px; padding:8px;">
-                        <span style="font-size:0.65rem; color:#10b981; font-weight:bold; letter-spacing:0.04em; text-transform:uppercase;">ARCHETYPE SYMBOL (${{selectedGlyph.canonical_type || 'G??'}})</span>
-                        <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; max-height:100px;">
-                            ${{symbolSvg}}
-                        </div>
-                        <span style="font-size:0.58rem; color:var(--text-muted); font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;">${{familySubtitle}}</span>
+                        <span style="font-size:0.56rem; color:var(--text-muted); font-family:monospace; flex-shrink:0;">Reference EVA: '${{evaChar}}'</span>
                     </div>
                 `;
             }} else {{
                 refSvgBox = `
-                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:120px; background:#0b0f19; border:1px solid #334155; border-radius:6px; padding:8px;">
-                        <span style="font-size:0.65rem; color:var(--text-muted); font-weight:bold; letter-spacing:0.04em; text-transform:uppercase;">CANONICAL EXEMPLAR</span>
-                        <div style="color:var(--text-muted); font-size:0.68rem; text-align:center; padding:6px; flex:1; display:flex; flex-direction:column; justify-content:center;">
-                            <div>✨ Emergent Ductus</div>
-                            <div style="font-size:0.58rem; opacity:0.7; margin-top:2px;">Archetype ${{selectedGlyph.canonical_type || 'G??'}}</div>
+                    <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:145px; height:145px; background:#0b0f19; border:1px solid #10b981; border-radius:6px; padding:6px; overflow:hidden;">
+                        <span style="font-size:0.60rem; color:#10b981; font-weight:bold; letter-spacing:0.03em; text-transform:uppercase; flex-shrink:0;">CLUSTER MEDOID (${{resolvedArchId}})</span>
+                        <div style="flex:1; width:100%; max-height:94px; padding:4px; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+                            ${{archMedoidCrop ? `<img src="${{archMedoidCrop}}" alt="${{resolvedArchId}}" style="max-height:88px; max-width:100%; object-fit:contain; border-radius:3px;">` : (archExemplarSvg || '<span style="color:var(--text-muted); font-size:0.65rem;">(Medoid)</span>')}}
                         </div>
-                        <span style="font-size:0.58rem; color:var(--text-muted);">(Autonomous Symbol)</span>
+                        <span style="font-size:0.56rem; color:var(--text-muted); font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; flex-shrink:0;">Manuscript Medoid ${{arch && arch.exemplar_page_id ? `(${{arch.exemplar_page_id}})` : ''}}</span>
                     </div>
                 `;
             }}
@@ -4104,7 +4089,7 @@ def generate_explorer_html(
             if (subEl) {{
                 const nPages = activeBundle.indexed_pages_count || cat.indexed_pages_count || 1;
                 const totG = activeBundle.total_glyphs || cat.total_glyphs || 0;
-                subEl.innerHTML = `<strong style="color:var(--accent);">Generative Typewriter + Viterbi MDL</strong> (${{archList.length}} archetypes across <strong>${{Number(totG).toLocaleString()}}</strong> observed glyphs on <strong>${{nPages}}</strong> processed page(s) — zero extrapolated counts). Each card shows Scan | Quill Bézier Fit | Euler-Bernoulli | Font; up to 36 conformant samples sorted by ascending Euclidean distance to cluster medoid (interleaved across processed folios).`;
+                subEl.innerHTML = `<strong style="color:var(--accent);">${{archList.length}} Canonical Archetypes</strong> across <strong>${{Number(totG).toLocaleString()}}</strong> observed glyphs on <strong>${{nPages}}</strong> processed page(s) (zero extrapolated counts). Each card compares Scan | Quill Ductus 40° | Euler-Bernoulli | Reference; up to 36 conformant samples sorted by ascending Euclidean distance to cluster medoid (interleaved across processed folios).`;
             }}
             grid.innerHTML = archList.map(a => {{
                 const cm = getTranslitMatch(a);
@@ -4123,22 +4108,9 @@ def generate_explorer_html(
                             <div style="font-family:'VoynichEVA', monospace; font-size:2.8rem; color:#fbbf24; line-height:1;">${{evaEq}}</div>
                         </div>
                     `;
-                }} else if (cm && cm.reference_svg && cm.confidence_pct >= 40) {{
-                    const familyLabel = cm.name || getTranslitLabel(a);
-                    matchHeader = `<div style="color:var(--accent); font-size:0.85rem; font-weight:bold;">${{familyLabel}} <span style="font-size:0.75rem; color:var(--success); font-weight:normal;">(${{cm.category || 'Cursive Ribbon'}})</span></div>`;
-                    refSvgElem = `
-                        <div class="c-box" style="border-color:rgba(16, 185, 129, 0.35);">
-                            ${{cm.reference_svg || cleanExSvg}}
-                        </div>
-                    `;
                 }} else {{
-                    const familyLabel = (cm && cm.name) ? cm.name : 'Emergent Vector Grapheme';
-                    matchHeader = `<div style="color:#38bdf8; font-size:0.85rem; font-weight:bold;">${{familyLabel}} <span style="font-size:0.75rem; color:#34d399; font-weight:normal;">(Induced Symbol)</span></div>`;
-                    refSvgElem = `
-                        <div class="c-box" style="border-color:rgba(16, 185, 129, 0.35);">
-                            ${{cleanExSvg || '<span style="font-size:0.65rem; color:var(--text-muted);">✨ Symbol</span>'}}
-                        </div>
-                    `;
+                    matchHeader = `<div style="color:#38bdf8; font-size:0.85rem; font-weight:bold;">Emergent Cursive Archetype <span style="font-size:0.75rem; color:#34d399; font-weight:normal;">(1-Stroke Medoid)</span></div>`;
+                    refSvgElem = '';
                 }}
 
                 // Display EVA & Voynichese alignment on the card (Voynich) or Morphological Graphical Profile (Seraphinianus)
@@ -4206,18 +4178,18 @@ def generate_explorer_html(
                         <span style="font-size:0.65rem; background:#0f172a; border:1px solid #334155; color:#38bdf8; padding:2px 6px; border-radius:4px; font-weight:600; white-space:nowrap;">🔒 ${{loopCountVal}} loop(s) • ${{topoLabel}}</span>
                     </div>
                     ${{schemesSummaryHtml}}
-                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:6px; font-size:0.54rem; color:var(--text-muted); font-weight:bold; text-align:center; margin-bottom:3px; letter-spacing:0.2px;">
-                        <span>SCAN</span>
-                        <span style="color:#38bdf8;">QUILL DUCTUS</span>
+                    <div style="display:grid; grid-template-columns:${{currentMs === 'voynich' ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr'}}; gap:6px; font-size:0.54rem; color:var(--text-muted); font-weight:bold; text-align:center; margin-bottom:3px; letter-spacing:0.2px;">
+                        <span>MEDOID SCAN</span>
+                        <span style="color:#38bdf8;">${{currentMs === 'voynich' ? 'QUILL DUCTUS' : 'RIBBON DUCTUS'}}</span>
                         <span style="color:#c084fc;">EULER-BERNOULLI</span>
-                        <span>${{currentMs === 'voynich' ? 'CANONICAL FONT' : 'REFERENCE'}}</span>
+                        ${{currentMs === 'voynich' ? '<span>CANONICAL FONT</span>' : ''}}
                     </div>
-                    <div class="catalogue-trio" style="grid-template-columns: repeat(4, 1fr);">
+                    <div class="catalogue-trio" style="grid-template-columns: repeat(${{currentMs === 'voynich' ? 4 : 3}}, 1fr);">
                         <div class="c-box">
                             ${{exCropHtml}}
                         </div>
                         <div class="c-box" style="border-color:rgba(56, 189, 248, 0.4);">
-                            ${{cleanSvgString(a.exemplar_svg_content || '') || '<div style="color:var(--text-muted); font-size:0.7rem; padding:10px;">(Quill)</div>'}}
+                            ${{cleanSvgString(a.exemplar_svg_content || '') || '<div style="color:var(--text-muted); font-size:0.7rem; padding:10px;">(Ductus)</div>'}}
                         </div>
                         <div class="c-box" style="border-color:rgba(168, 85, 247, 0.4); background:#040d1a;">
                             ${{cleanSvgString(a.exemplar_euler_svg_content || a.exemplar_svg_content || '') || '<div style="color:var(--text-muted); font-size:0.7rem; padding:10px;">(Euler)</div>'}}
@@ -4225,8 +4197,8 @@ def generate_explorer_html(
                         ${{refSvgElem}}
                     </div>
                     <div style="font-size:0.75rem; color:var(--text-muted); line-height:1.3;">
-                        <div>Mean Strokes: <strong>${{a.mean_strokes}}</strong> | Loops: <strong>${{loopCountVal}}</strong> | Dim: <strong>${{a.mean_width}}x${{a.mean_height}} px ${{a.mean_width_mm ? `<span style="color:#38bdf8;">(${{a.mean_width_mm}}×${{a.mean_height_mm}} mm · ${{a.mean_width_dmm}}×${{a.mean_height_dmm}} dmm)</span>` : ''}}</strong></div>
-                        <div style="margin-top:2px; font-size:0.70rem;">Exemplar ID: <code>${{a.exemplar_id}}</code></div>
+                        <div>Mean Strokes: <strong>${{a.mean_strokes}}</strong> | Loops: <strong>${{loopCountVal}}</strong> | Physical Scale: <strong style="color:#38bdf8;">${{a.mean_width_mm ? `${{a.mean_width_mm}}×${{a.mean_height_mm}} mm (${{a.mean_width_dmm}}×${{a.mean_height_dmm}} dmm)` : 'Metric'}}</strong></div>
+                        <div style="margin-top:2px; font-size:0.70rem;">Medoid ID: <code>${{a.exemplar_id}}</code></div>
                     </div>
                     <button class="btn-variations" onclick="event.stopPropagation(); openArchetypeVariations('${{a.type_id}}')" title="Displays top ${{a.sample_instances ? a.sample_instances.length : 0}} conformant samples (max 36) sorted by ascending Euclidean distance to cluster medoid across processed folios">
                         View Top ${{a.sample_instances ? a.sample_instances.length : 0}} Closest Samples (Euclidean Dist. to Medoid) ➔
@@ -4326,21 +4298,22 @@ def generate_explorer_html(
             let bannerHtml = `
                 <div style="display:flex; gap:8px; background:#000; padding:8px; border-radius:8px; border:1px solid var(--border); align-items:center; flex-shrink:0;">
                     <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:85px; height:95px; border-right:1px solid #1e293b; padding-right:4px;">
-                        <span style="font-size:0.54rem; color:var(--text-muted); margin-bottom:3px; font-weight:600;">SCAN</span>
+                        <span style="font-size:0.54rem; color:var(--text-muted); margin-bottom:3px; font-weight:600;">MEDOID SCAN</span>
                         ${{exCropSrc ? `<img src="${{exCropSrc}}" style="max-height:75px; max-width:80px; object-fit:contain; border-radius:4px;">` : `<div style="font-size:0.65rem; color:var(--text-muted);">(Scan)</div>`}}
                     </div>
                     <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:85px; height:95px; border-right:1px solid #1e293b; padding-right:4px;">
-                        <span style="font-size:0.54rem; color:#38bdf8; margin-bottom:3px; font-weight:600;">QUILL 40°</span>
-                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center;">${{cleanModalExSvg}}</div>
+                        <span style="font-size:0.54rem; color:#38bdf8; margin-bottom:3px; font-weight:600;">${{currentMs === 'voynich' ? 'QUILL 40°' : 'RIBBON'}}</span>
+                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center; overflow:hidden;">${{cleanModalExSvg}}</div>
                     </div>
-                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:85px; height:95px; border-right:1px solid #1e293b; padding-right:4px;">
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:85px; height:95px; ${{currentMs === 'voynich' ? 'border-right:1px solid #1e293b; padding-right:4px;' : ''}}">
                         <span style="font-size:0.54rem; color:#c084fc; margin-bottom:3px; font-weight:600;">EULER-BERN.</span>
-                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center;">${{cleanSvgString(arch.exemplar_euler_svg_content || arch.exemplar_svg_content || '')}}</div>
+                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center; overflow:hidden;">${{cleanSvgString(arch.exemplar_euler_svg_content || arch.exemplar_svg_content || '')}}</div>
                     </div>
+                    ${{currentMs === 'voynich' ? `
                     <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; width:85px; height:95px;">
-                        <span style="font-size:0.54rem; color:#10b981; margin-bottom:3px; font-weight:600;">SYMBOL</span>
-                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center;">${{cm?.reference_svg || cleanModalExSvg || '<span style="font-size:0.65rem; color:var(--text-muted);">Emergent</span>'}}</div>
-                    </div>
+                        <span style="font-size:0.54rem; color:#f59e0b; margin-bottom:3px; font-weight:600;">EVA FONT</span>
+                        <div style="max-height:75px; display:flex; align-items:center; justify-content:center; font-family:'VoynichEVA', monospace; font-size:2.4rem; color:#fbbf24;">${{(multi.eva && multi.eva.symbol) || '—'}}</div>
+                    </div>` : ''}}
                 </div>
                 <div style="display:flex; flex-direction:column; justify-content:center; gap:4px; flex:1; min-width:320px;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">

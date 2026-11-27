@@ -30,35 +30,30 @@ class GlyphSegmenter:
 
     def __init__(
         self,
-        min_glyph_height: int = 10,
-        max_glyph_height: int = 220,
-        min_glyph_width: int = 6,
-        max_glyph_width: int = 220,
-        min_glyph_area: int = 15,
-        max_drawing_area: int = 6000,
-        scale_calib: Optional[MetricScaleCalibration] = None
+        min_glyph_height_mm: float = 0.85,
+        max_glyph_height_mm: float = 22.0,
+        min_glyph_width_mm: float = 0.45,
+        max_glyph_width_mm: float = 22.0,
+        min_glyph_area_mm2: float = 0.12,
+        max_drawing_area_mm2: float = 60.0,
+        scale_calib: Optional[MetricScaleCalibration] = None,
+        **legacy_kwargs: Any,
     ):
         self.scale_calib = scale_calib
-        if scale_calib is not None:
-            self.min_glyph_height = max(6, int(round(scale_calib.min_glyph_height_px)))
-            self.max_glyph_height = max(100, int(round(scale_calib.mm_to_px(22.0))))
-            self.min_glyph_width = max(4, int(round(scale_calib.min_glyph_width_px)))
-            self.max_glyph_width = max(100, int(round(scale_calib.mm_to_px(22.0))))
-            self.min_glyph_area = max(8, int(round(scale_calib.min_glyph_area_px)))
-            self.max_drawing_area = max(2000, int(round(scale_calib.macro_drawing_area_px * 2.0)))
-        else:
-            self.min_glyph_height = min_glyph_height
-            self.max_glyph_height = max_glyph_height
-            self.min_glyph_width = min_glyph_width
-            self.max_glyph_width = max_glyph_width
-            self.min_glyph_area = min_glyph_area
-            self.max_drawing_area = max_drawing_area
+        active_c = scale_calib or MetricScaleCalibration(manuscript_type="voynich")
+        self.min_glyph_height = max(2, int(round(active_c.mm_to_px(min_glyph_height_mm))))
+        self.max_glyph_height = max(10, int(round(active_c.mm_to_px(max_glyph_height_mm))))
+        self.min_glyph_width = max(2, int(round(active_c.mm_to_px(min_glyph_width_mm))))
+        self.max_glyph_width = max(10, int(round(active_c.mm_to_px(max_glyph_width_mm))))
+        self.min_glyph_area = max(2, int(round(active_c.area_mm2_to_px2(min_glyph_area_mm2))))
+        self.max_drawing_area = max(50, int(round(active_c.area_mm2_to_px2(max_drawing_area_mm2))))
 
+        sauv_win = max(5, int(round(active_c.mm_to_px(4.1))) | 1)
         self.normalizer = ColorIlluminationNormalizer()
-        self.binarizer = Binarizer(method="sauvola", window_size=29, k=0.20)
-        self.line_segmenter = LineSegmenter(min_line_pitch=28, min_line_height=14, min_word_width=12, min_word_area=25, scale_calib=scale_calib)
+        self.binarizer = Binarizer(method="sauvola", window_size=sauv_win, k=0.20)
+        self.line_segmenter = LineSegmenter(scale_calib=active_c)
         self.calligraphic_vectorizer = CalligraphicVectorizer(nib_angle_deg=40.0)
-        self.skel_engine = Skeletonizer(method="medial_axis")
+        self.skel_engine = Skeletonizer()
         self.graph_extractor = StrokeGraphExtractor()
         self.resolver = JunctionResolver(right_handed_prior=True)
 
@@ -117,9 +112,10 @@ class GlyphSegmenter:
             parchment_mask = np.zeros((H, W), dtype=bool)
             parchment_mask[py0:py1, px0:px1] = True
 
-        # 2. Local adaptive Sauvola thresholding for ink
+        active_c = self.scale_calib or MetricScaleCalibration(manuscript_type=subfolder, image_height_px=H, image_width_px=W)
+        min_speck_px2 = max(2, int(round(active_c.area_mm2_to_px2(0.08))))
         sauvola_mask = self.binarizer.binarize(image)
-        sauvola_mask = self.binarizer.remove_small_artifacts(sauvola_mask, min_size=8)
+        sauvola_mask = self.binarizer.remove_small_artifacts(sauvola_mask, min_size=min_speck_px2)
         ink_candidates = sauvola_mask & parchment_mask
 
         # 3. Component-level color and geometry discrimination
@@ -204,6 +200,13 @@ class GlyphSegmenter:
 
         clean_text_mask = np.zeros((H, W), dtype=bool)
 
+        max_draw_h = int(round(active_c.mm_to_px(28.0 if subfolder == "seraphinianus" else 18.0)))
+        max_draw_w = int(round(active_c.mm_to_px(20.0)))
+        max_draw_a = int(round(active_c.area_mm2_to_px2(280.0 if subfolder == "seraphinianus" else 65.0)))
+        min_c_h = max(2, int(round(active_c.mm_to_px(0.55))))
+        min_c_w = max(1, int(round(active_c.mm_to_px(0.28))))
+        min_c_a = max(2, int(round(active_c.area_mm2_to_px2(0.10))))
+
         for p in props:
             ph = p.bbox[2] - p.bbox[0]
             pw = p.bbox[3] - p.bbox[1]
@@ -213,15 +216,14 @@ class GlyphSegmenter:
                 continue
 
             if subfolder == "seraphinianus":
-                # Macro drawing / frame / illustration (even monochrome black)
-                if (p.area > 12000) or (ph > 180 and pw > 120) or (ph > 220):
+                if (p.area > max_draw_a) or (ph > int(max_draw_h * 0.8) and pw > max_draw_w) or (ph > max_draw_h):
                     continue
-                if p.area < 8 or ph < 4 or pw < 2:
+                if p.area < min_c_a or ph < min_c_h or pw < min_c_w:
                     continue
             else:
-                if ph > 140 or p.area > self.max_drawing_area:
+                if ph > max_draw_h or p.area > max(self.max_drawing_area, max_draw_a):
                     continue
-                if p.area < 10 or ph < 5 or pw < 2:
+                if p.area < min_c_a or ph < min_c_h or pw < min_c_w:
                     continue
 
             c_mask = (labeled[p.bbox[0]:p.bbox[2], p.bbox[1]:p.bbox[3]] == p.label)
@@ -467,8 +469,32 @@ class GlyphSegmenter:
             h_th = max(23.0, p98_d * 0.56)
 
         from scipy.ndimage import binary_dilation, binary_fill_holes
+        import cv2 as _cv2
         core_ink = ((gray < t_sauv) & (darkness > dark_floor)) | (darkness > h_th)
-        # Protect interior closed loop holes already present in core_ink so hysteresis halo never plugs 'o'/'a'/'d' bowls
+
+        # Recover tight inner loop bowls (e.g. upper/lower eyes of EVA 'd'/'8', tight 'o'/'a'/'e', 'sh' plumes)
+        # where optical ink bleed raises local darkness slightly above h_th despite a clear bright center vs the ink ring.
+        ring_k = max(5, (int(round(0.60 * px_per_mm)) | 1))
+        ring_kernel = np.ones((ring_k, ring_k), dtype=np.uint8)
+        local_ink_min = _cv2.erode(gray, ring_kernel)
+        cand_bowl = (
+            core_ink
+            & ((gray - local_ink_min) >= max(22.0, 0.30 * p98_d))
+            & (gray >= (bg - 0.52 * max(25.0, p98_d)))
+        )
+        if np.any(cand_bowl):
+            test_core = core_ink & (~cand_bowl)
+            pad_test = np.pad(test_core, 1, mode="constant", constant_values=False)
+            enclosed_bowls = (binary_fill_holes(pad_test) & (~pad_test))[1:-1, 1:-1] & cand_bowl
+            min_bowl_px = max(4, int(round(0.028 * (px_per_mm ** 2))))
+            if np.any(enclosed_bowls):
+                lbl_b, num_b = label(enclosed_bowls)
+                for bid in range(1, num_b + 1):
+                    bm = (lbl_b == bid)
+                    if int(np.sum(bm)) >= min_bowl_px:
+                        core_ink[bm] = False
+
+        # Protect interior closed loop holes in core_ink so hysteresis halo never plugs 'o'/'a'/'d' bowls
         padded_core = np.pad(core_ink, 1, mode="constant", constant_values=False)
         core_holes = (binary_fill_holes(padded_core) & (~padded_core))[1:-1, 1:-1]
         # Bounded faint hairline / loop-tail continuation (~0.45 mm halo 8-connected to strong ink, strictly outside core holes)
@@ -980,7 +1006,7 @@ class GlyphSegmenter:
 
         gh, gw = mask.shape[:2]
         px_per_mm = float(scale_calib.px_per_mm) if scale_calib is not None else max(4.5, max(gh, gw) / 4.5)
-        min_hole_px = max(4, int(round(0.065 * (px_per_mm ** 2))))
+        min_hole_px = max(3, int(round(0.020 * (px_per_mm ** 2))))
 
         padded = np.pad((mask > 0).astype(bool), 2, mode="constant", constant_values=False)
         holes = binary_fill_holes(padded) & (~padded)
@@ -997,8 +1023,8 @@ class GlyphSegmenter:
             if not cs:
                 continue
             c = max(cs, key=len)
-            approx = approximate_polygon(c, tolerance=0.65)
-            if len(approx) >= 4:
+            approx = approximate_polygon(c, tolerance=0.32)
+            if len(approx) >= 3:
                 hp = [
                     [max(0, int(round(pt[1] - 2)) + x_off), max(0, int(round(pt[0] - 2)) + y_off)]
                     for pt in approx
@@ -1045,22 +1071,22 @@ class GlyphSegmenter:
         aspect = gw / max(1, gh)
         fill_factor = area / max(1, gh * gw)
 
+        active_c = self.scale_calib or MetricScaleCalibration(manuscript_type=subfolder, image_height_px=page_rgb.shape[0], image_width_px=page_rgb.shape[1])
         if strict:
-            # Physical quill-scale bounds
-            if area < 22 or gh < 14 or gw < 6:
+            # Physical millimeter quill-scale bounds (0.85 mm height, 0.45 mm width, 0.12 mm^2 area)
+            if area < active_c.min_glyph_area_px or gh < active_c.min_glyph_height_px or gw < active_c.min_glyph_width_px:
                 return None
-            if gh > self.max_glyph_height or gw > self.max_glyph_width:
+            if gh > active_c.mm_to_px(22.0) or gw > active_c.mm_to_px(22.0):
                 return None
             if aspect > 3.2 or aspect < 0.18:
                 return None
-            # Filamentary stroke test (rejects solid stains / textures)
             if fill_factor < 0.05 or fill_factor > 0.40:
                 return None
         else:
-            if area < 12 or gh < 4 or gw < 2:
+            if area < max(2, int(round(active_c.area_mm2_to_px2(0.08)))) or gh < max(2, int(round(active_c.mm_to_px(0.45)))) or gw < max(1, int(round(active_c.mm_to_px(0.25)))):
                 return None
 
-        crop_pad = 6
+        crop_pad = max(2, int(round(active_c.mm_to_px(0.45))))
         cy0, cx0 = max(0, gy0 - crop_pad), max(0, gx0 - crop_pad)
         cy1, cx1 = min(page_rgb.shape[0], gy1 + crop_pad), min(page_rgb.shape[1], gx1 + crop_pad)
         raw_patch = page_rgb[cy0:cy1, cx0:cx1]

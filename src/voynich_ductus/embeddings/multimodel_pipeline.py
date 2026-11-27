@@ -364,22 +364,20 @@ def enrich_page_multimodel(
     for g in page_data.get("glyphs", []):
         old_by_word.setdefault(g.get("word_id", ""), []).append(g)
 
-    gray_full: Optional[np.ndarray] = None
-    t_sauv_full: Optional[np.ndarray] = None
-    if not is_serafini:
-        gray_full = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
-        win_s = max(15, int(round(scale_calib.mm_to_px(4.1))) | 1)
-        win_s = max(3, min(win_s, (min(H_img, W_img) - 1) | 1))
-        try:
-            g64 = gray_full.astype(np.float64)
-            mean_g = cv2.boxFilter(g64, cv2.CV_64F, (win_s, win_s), normalize=True, borderType=cv2.BORDER_REFLECT)
-            mean_sq = cv2.boxFilter(g64 * g64, cv2.CV_64F, (win_s, win_s), normalize=True, borderType=cv2.BORDER_REFLECT)
-            std_g = np.sqrt(np.maximum(0.0, mean_sq - mean_g * mean_g))
-            t_sauv_full = (mean_g * (1.0 + 0.16 * ((std_g / 128.0) - 1.0))).astype(np.float32)
-        except Exception:
-            t_sauv_full = None
+    gray_full = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    win_s = max(15, int(round(scale_calib.mm_to_px(4.1))) | 1)
+    win_s = max(3, min(win_s, (min(H_img, W_img) - 1) | 1))
+    try:
+        g64 = gray_full.astype(np.float64)
+        mean_g = cv2.boxFilter(g64, cv2.CV_64F, (win_s, win_s), normalize=True, borderType=cv2.BORDER_REFLECT)
+        mean_sq = cv2.boxFilter(g64 * g64, cv2.CV_64F, (win_s, win_s), normalize=True, borderType=cv2.BORDER_REFLECT)
+        std_g = np.sqrt(np.maximum(0.0, mean_sq - mean_g * mean_g))
+        t_sauv_full = (mean_g * (1.0 + 0.16 * ((std_g / 128.0) - 1.0))).astype(np.float32)
+    except Exception:
+        t_sauv_full = None
 
-    # First pass: binarize all word envelopes on the page and induce the folio's Visual Sprite Dictionary
+    # First pass: binarize all word envelopes on the page (100% metric-calibrated mm windows on both codices)
+    min_word_ink = max(2, int(round(scale_calib.area_mm2_to_px2(0.08))))
     word_entries: List[Tuple[Dict[str, Any], Tuple[int, int, int, int], np.ndarray]] = []
     word_patches_bgr: List[np.ndarray] = []
     for w in words:
@@ -397,17 +395,14 @@ def enrich_page_multimodel(
             word_patches_bgr.append(w_patch)
         w_patch_rgb = cv2.cvtColor(w_patch, cv2.COLOR_BGR2RGB)
         try:
-            if is_serafini:
-                w_mask = binarizer.binarize(cv2.cvtColor(w_patch, cv2.COLOR_BGR2GRAY)).astype(bool)
-            else:
-                w_mask = segmenter.binarize_word_crop_hysteresis(
-                    w_patch_rgb,
-                    scale_calib=scale_calib,
-                    full_image_gray=gray_full,
-                    crop_box=(wy0, wx0, wy1, wx1),
-                    precomputed_sauvola=t_sauv_full,
-                ).astype(bool)
-            if np.sum(w_mask) < 12:
+            w_mask = segmenter.binarize_word_crop_hysteresis(
+                w_patch_rgb,
+                scale_calib=scale_calib,
+                full_image_gray=gray_full,
+                crop_box=(wy0, wx0, wy1, wx1),
+                precomputed_sauvola=t_sauv_full,
+            ).astype(bool)
+            if np.sum(w_mask) < min_word_ink:
                 gray_w = cv2.cvtColor(w_patch, cv2.COLOR_BGR2GRAY)
                 w_mask = (gray_w < 128).astype(bool)
         except Exception:

@@ -17,23 +17,36 @@ class LineSegmenter:
 
     def __init__(
         self,
-        min_line_pitch: int = 35,
-        min_line_height: int = 18,
-        min_word_width: int = 18,
-        min_word_area: int = 40,
-        scale_calib: Optional[MetricScaleCalibration] = None
+        min_line_pitch_mm: float = 4.2,
+        min_line_height_mm: float = 0.85,
+        min_word_width_mm: float = 0.65,
+        min_word_area_mm2: float = 0.24,
+        scale_calib: Optional[MetricScaleCalibration] = None,
+        **legacy_kwargs: Any,
     ):
         self.scale_calib = scale_calib
-        if scale_calib is not None:
-            self.min_line_pitch = max(18, int(round(scale_calib.mm_to_px(scale_calib.LINE_PITCH_MEDIEVAL_MM * 0.65))))
-            self.min_line_height = max(10, int(round(scale_calib.min_glyph_height_px)))
-            self.min_word_width = max(8, int(round(scale_calib.min_glyph_width_px)))
-            self.min_word_area = max(15, int(round(scale_calib.min_glyph_area_px * 2.0)))
-        else:
-            self.min_line_pitch = min_line_pitch
-            self.min_line_height = min_line_height
-            self.min_word_width = min_word_width
-            self.min_word_area = min_word_area
+        self.min_line_pitch_mm = min_line_pitch_mm
+        self.min_line_height_mm = min_line_height_mm
+        self.min_word_width_mm = min_word_width_mm
+        self.min_word_area_mm2 = min_word_area_mm2
+        active_c = scale_calib or MetricScaleCalibration(manuscript_type="voynich")
+        self.min_line_pitch = max(2, int(round(active_c.mm_to_px(min_line_pitch_mm))))
+        self.min_line_height = max(2, int(round(active_c.mm_to_px(min_line_height_mm))))
+        self.min_word_width = max(2, int(round(active_c.mm_to_px(min_word_width_mm))))
+        self.min_word_area = max(2, int(round(active_c.area_mm2_to_px2(min_word_area_mm2))))
+
+    def _calib_for_page(self, binary_ink: np.ndarray) -> MetricScaleCalibration:
+        if self.scale_calib is not None:
+            return self.scale_calib
+        default_c = MetricScaleCalibration(manuscript_type="voynich")
+        # Only re-scale to full-folio height (225 mm) when the image spans a full folio (>= 75 mm at nominal scale)
+        if binary_ink.shape[0] >= default_c.mm_to_px(75.0):
+            return MetricScaleCalibration(
+                manuscript_type="voynich",
+                image_height_px=int(binary_ink.shape[0]),
+                image_width_px=int(binary_ink.shape[1]),
+            )
+        return default_c
 
     def isolate_text_paragraph(self, binary_ink: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
         """
@@ -58,27 +71,27 @@ class LineSegmenter:
         and connected component clustering around baseline peaks. Ensures every line from top to bottom
         is captured without dropping short/indented lines or slicing ascenders.
         """
-        if auto_isolate and (binary_ink.shape[0] > 600 and binary_ink.shape[1] > 600):
+        calib = self._calib_for_page(binary_ink)
+        if auto_isolate and (binary_ink.shape[0] > calib.mm_to_px(75.0) and binary_ink.shape[1] > calib.mm_to_px(75.0)):
             work_img, (off_y, off_x, _, _) = self.isolate_text_paragraph(binary_ink)
         else:
             work_img = binary_ink
             off_y, off_x = 0, 0
 
-        # Scale-adaptive line pitch and smoothing sigma based on page height
-        H_work = work_img.shape[0]
-        eff_pitch = max(self.min_line_pitch, int(H_work / 65))
-        min_dist = max(18, int(eff_pitch * 0.65))
+        # Metric-calibrated line pitch (~3.5 mm minimum ruling pitch) and Gaussian smoothing sigma
+        eff_pitch = max(int(round(calib.mm_to_px(self.min_line_pitch_mm))), int(work_img.shape[0] / 65))
+        min_dist = max(2, int(round(eff_pitch * 0.65)))
 
         # Horizontal projection profile
         raw_profile = np.sum(work_img, axis=1).astype(float)
         from scipy.ndimage import gaussian_filter1d
         from scipy.signal import find_peaks
 
-        smooth_profile = gaussian_filter1d(raw_profile, sigma=max(3.0, eff_pitch * 0.08))
+        smooth_profile = gaussian_filter1d(raw_profile, sigma=max(1.0, eff_pitch * 0.08))
 
         # Detect line baseline centers with sensitive relative prominence
         max_p = np.max(smooth_profile) if len(smooth_profile) > 0 else 0
-        min_prom = max(1.5, max_p * 0.015)
+        min_prom = max(1.0, max_p * 0.015)
         peaks, _ = find_peaks(smooth_profile, distance=min_dist, prominence=min_prom)
 
         if len(peaks) == 0:
@@ -94,18 +107,23 @@ class LineSegmenter:
             return []
 
         props = regionprops(labeled_block)
+        min_speck_area = max(1, int(round(calib.area_mm2_to_px2(0.06))))
 
         # Group components by closest baseline peak within bounding band
         line_buckets: Dict[int, List[Any]] = {i: [] for i in range(len(peaks))}
         for p in props:
-            if p.area < 6:
+            if p.area < min_speck_area:
                 continue
             cy = p.centroid[0]
-            # Find closest peak
             distances = [abs(cy - peak_y) for peak_y in peaks]
             closest_idx = int(np.argmin(distances))
             if distances[closest_idx] <= eff_pitch * 1.6:
                 line_buckets[closest_idx].append(p)
+
+        min_line_w = max(2, int(round(calib.mm_to_px(1.20))))
+        min_line_h = max(2, int(round(calib.mm_to_px(0.85))))
+        min_glyph_w = max(2, int(round(calib.mm_to_px(0.45))))
+        h_pad = max(1, int(round(calib.mm_to_px(0.65))))
 
         results = []
         for line_idx, peak_y in enumerate(peaks):
@@ -118,34 +136,25 @@ class LineSegmenter:
             lx0 = min(c.bbox[1] for c in line_comps)
             lx1 = max(c.bbox[3] for c in line_comps)
 
-            if (lx1 - lx0) < 10 or (ly1 - ly0) < 8:
+            if (lx1 - lx0) < min_line_w or (ly1 - ly0) < min_line_h:
                 continue
 
-            # Ensure candidate line contains genuine character-sized, roughly isometric glyph components.
-            # This rejects lines consisting solely of:
-            # - Fine stippling / background hatching (tiny components, area < threshold)
-            # - Illustration quill/spine shading (components that are tall & narrow, h/w >> 1)
-            # Genuine scribal glyphs are roughly square or wider than tall (h/w ≤ 1.8).
-            min_glyph_h = max(8, int(eff_pitch * 0.35))
-            min_glyph_area = max(16, int(eff_pitch * 0.9))
+            min_glyph_h = max(min_line_h, int(eff_pitch * 0.35))
+            min_glyph_area = max(min_speck_area * 2, int(eff_pitch * 0.9))
             valid_glyph_count = sum(
                 1 for c in line_comps
                 if (
                     (c.bbox[2] - c.bbox[0] >= min_glyph_h)
-                    and (c.bbox[3] - c.bbox[1] >= 5)
+                    and (c.bbox[3] - c.bbox[1] >= min_glyph_w)
                     and (c.area >= min_glyph_area)
                     and ((c.bbox[2] - c.bbox[0]) / max(1, c.bbox[3] - c.bbox[1]) <= 1.8)
                 )
             )
-            # Must have at least 1 valid glyph component.
-            # If line is crowded with components (>=8 components, typical of stippled shading/drawings),
-            # it must contain at least 2 glyphs and a glyph density of at least 8%.
             if valid_glyph_count < 1:
                 continue
             if len(line_comps) >= 8 and (valid_glyph_count < 2 or (valid_glyph_count / len(line_comps) < 0.08)):
                 continue
 
-            # Construct clean composite mask with ONLY this line's intact components
             lh = ly1 - ly0
             lw = lx1 - lx0
             line_mask = np.zeros((lh, lw), dtype=bool)
@@ -155,11 +164,10 @@ class LineSegmenter:
                 off_comp_x = c.bbox[1] - lx0
                 line_mask[off_comp_y:off_comp_y + (c.bbox[2] - c.bbox[0]), off_comp_x:off_comp_x + (c.bbox[3] - c.bbox[1])] |= c_mask
 
-            # Bounding box spanning all ink components on this line with horizontal padding
             abs_y0 = off_y + ly0
             abs_y1 = off_y + ly1
-            abs_x0 = max(0, off_x + lx0 - 6)
-            abs_x1 = min(binary_ink.shape[1], off_x + lx1 + 6)
+            abs_x0 = max(0, off_x + lx0 - h_pad)
+            abs_x1 = min(binary_ink.shape[1], off_x + lx1 + h_pad)
 
             results.append({
                 "line_id": f"L{line_idx:03d}",
@@ -175,25 +183,24 @@ class LineSegmenter:
         Segments a text line into clean, intact words using connected component horizontal grouping
         and vertical whitespace gap detection.
         """
+        calib = self.scale_calib or MetricScaleCalibration(manuscript_type="voynich")
         if space_threshold is not None:
             space_gap_min = space_threshold
         elif space_gap_min is None:
-            if self.scale_calib is not None:
-                space_gap_min = max(8, int(round(self.scale_calib.word_space_min_px)))
-            else:
-                space_gap_min = 12
+            space_gap_min = max(2, int(round(calib.word_space_min_px)))
         y_off, x_off = line_offset
 
         labeled_l, num_l = label(line_ink)
         if num_l == 0:
             return []
 
+        min_comp_area = max(1, int(round(calib.area_mm2_to_px2(0.08))))
+        min_word_dim = max(2, int(round(calib.mm_to_px(0.35))))
         props = sorted(regionprops(labeled_l), key=lambda p: p.bbox[1])
-        valid_comps = [p for p in props if p.area >= 8]
+        valid_comps = [p for p in props if p.area >= min_comp_area]
         if not valid_comps:
             return []
 
-        # Cluster components horizontally by inter-character space threshold
         word_clusters: List[List[Any]] = []
         current_cluster = [valid_comps[0]]
 
@@ -221,7 +228,7 @@ class LineSegmenter:
 
             wh = wy1 - wy0
             ww = wx1 - wx0
-            if (ww < 4 and wh < 4) or (ww < 3 or wh < 3):
+            if ww < min_word_dim or wh < min_word_dim:
                 continue
 
             w_crop = np.zeros((wh, ww), dtype=bool)

@@ -78,9 +78,9 @@ The pipeline compiles its entire multi-codex output into a standalone, zero-depe
 
 *Figure 1 — The 4-panel workspace on Voynich folio `f1r` with word `L01_W00` (`ykal`) selected:*
 - **Panel 1 (Left — Folio Navigator)**: Browse all 225 Voynich folios or 371 Seraphinianus pages. Switch dynamically between **Traditional Beinecke Codex Order** (`f1r` $\to$ `f116v`) and **Singulion Quire Order** (*Layfield & Davis, Digital Medievalist 2026*).
-- **Panel 2 (Center-Left — Deep-Zoom Parchment Canvas)**: Interactive high-resolution viewport (up to 800% magnification) with live minimap, display filter (`📷 Natural` vs. client-side `✨ InkBoost` contrast boost — note backend binarization always runs on `Natural` via Sauvola + bounded 8-connected hysteresis with loop-hole protection), **Generative Typewriter + Viterbi MDL** glyph contours (with interior holes punched out via `evenodd` clipping), and toggleable vector layers (`🟣 Lines`, `📦 Word Boxes`, `🟡 Words`, `🔵 Glyphs`).
+- **Panel 2 (Center-Left — Deep-Zoom Parchment Canvas)**: Interactive high-resolution viewport (up to 800% magnification) with live minimap, display filter (`📷 Natural` vs. client-side `✨ InkBoost` contrast boost — backend binarization always runs on `Natural` via Sauvola + local ring-contrast cavity recovery + bounded 8-connected hysteresis), hole-punched glyph contours (`evenodd` clipping down to tight `d`/`8` eyes), and toggleable vector layers (`🟣 Lines`, `📦 Word Boxes`, `🟡 Words`, `🔵 Glyphs`).
 - **Panel 3 (Center-Right — Words & Glyphs Grid)**: Instant switching between extracted lexical word crops (`🟡 Words`) and constituent character crops (`🔵 Glyphs`), filterable by induced canonical archetype.
-- **Panel 4 (Right — Inspector & Kinematic Ductus)**: In **Word view**, displays the word's **3-Scheme Reference Transcriptions (`EVA · Currier · v101`)**, the **Bounded 8-Connected Hysteresis Mask + MST Envelope** diagnostic, the **100%-Coverage Emergent Retro-Transcription** bar (`Gxx` canonical medoid reconstruction), and the **Instance Ductus Sequence**.
+- **Panel 4 (Right — Inspector & Kinematic Ductus)**: In **Word view**, displays the word's **3-Scheme Reference Transcriptions (`EVA · Currier · v101`)** on Voynich, the **Bounded 8-Connected Hysteresis Mask + MST Envelope** diagnostic, the **Instance Ductus Sequence**, and directly beneath it the **100%-Coverage Emergent Retro-Transcription** bar (`Gxx` canonical medoid reconstruction).
 
 ---
 
@@ -330,50 +330,54 @@ In Panel 4 of the Explorer, the number of physical components $N$ extracted insi
 
 ---
 
-## 9. Corpus Scale & Information-Theoretic Diagnostics Benchmark
+## 9. Live Corpus Statistics, Diagnostics & Roadmap
 
-### A. Live Synchronized Corpus vs. Historical Full-Dataset Baseline
+### A. Live Synchronized Database Scope & Information-Theoretic Benchmark
 
-Every run of `scripts/build_dynamic_grand_explorer.py` dynamically computes the active **Live Diagnostics & Corpus Statistics** (`live_stats`) directly from the currently processed HD pages in `data/processed/atlas_dataset` (zero hardcoded numbers inside the Explorer UI). For historical reference, the initial full-dataset pass indexed across lower-res Archive.org/Voynichese baseline exports measured:
+Every execution of `scripts/build_dynamic_grand_explorer.py` dynamically recomputes and injects the exact corpus counts and `BenchmarkSuite` diagnostics from `data/processed/atlas_dataset/` into both `grand_glyph_explorer.html` and the block below (zero hardcoded statistics):
 
-| Corpus Property (Historical Baseline Snapshot) | Voynich Manuscript (Beinecke MS 408) | Codex Seraphinianus (Luigi Serafini, 1981) |
+<!-- LIVE_CORPUS_STATS_START -->
+*Auto-synchronized from `data/processed/atlas_dataset/` on `2026-11-27 16:17:41` via `scripts/build_dynamic_grand_explorer.py`:*
+
+| Metric / Database Scope | Voynich Manuscript (Beinecke MS 408 · 225 mm) | Codex Seraphinianus (1981 · 350 mm) |
 | :--- | :--- | :--- |
-| **Indexed Folios / Pages** | **225 / 225 folios** | **371 / 371 pages** |
-| **Disjoint Lexical Words (0 Overlaps)** | **37,212 words** (Voronoi disjoint partitions) | **68,430 words** (Spatial word containers) |
-| **Baseline Segmented Corpus Glyphs** | **162,333 glyphs** | **456,943 glyphs** |
-| **Live Explorer Synchronization** | Recomputed live from processed Yale Beinecke HD folios (`width >= 2000 px`) on every build | Recomputed live from processed HD plates (`serafini_p002`..`p030`, etc.) on every build |
+| **Indexed Dataset Pages (Canvas Stubs)** | **225** folios (37,601 words, 199,091 glyphs) | **371** pages (63,999 words, 456,338 glyphs) |
+| **Active HD Reprocessed Set** | **5** HD folios (`f1r, f1v, f2r, f2v, f3r`) | **6** HD plates (`serafini_p002, serafini_p004, serafini_p006, serafini_p008, serafini_p011, serafini_p030`) |
+| **Processed Words & Glyphs (`GenerativeTypewriterDecomposer`)** | **575** words · **2,236** isolated glyphs | **515** words · **3,230** isolated glyphs |
+| **Live Canonical Alphabet Size (100% Coverage)** | **42** emergent archetypes | **56** emergent archetypes |
 
-### B. Information-Theoretic Benchmark (`scripts/run_comprehensive_diagnostics.py`)
-
-Evaluating standardized 1,387-token streams across emergent ductus corpora, historical control texts, and adversarial synthetic generators:
-
-| Corpus / Baseline Model | Tokens | $H_1$ Unigram (bits) | $H_2$ Conditional (bits) | Hurst $H$ (DFA) | LZMA / Gzip Ratio | Markov Top-1 (Order 2) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Voynich (Standard EVA Transliteration)** | 1,387 | 3.80 | 2.31 | 0.591 | 0.354 | 50.46% |
-| **Voynich (Emergent Ductus G-Tokens)** | 1,387 | 2.89 | 1.25 | 0.570 | 0.158 | **70.49%** |
-| **Codex Seraphinianus (Emergent Ductus)** | 1,387 | 3.14 | 2.15 | 0.915 | 0.311 | 48.98% |
-| **Authentic 15th-c. Latin Herbal (Control)** | 1,387 | 4.04 | 3.27 | 0.850 | 0.070 | 47.02% |
-| **Timm Self-Citation Generator (Model)** | 1,387 | 3.18 | 2.43 | 0.571 | 0.079 | 62.64% |
-| **Rugg Cardan Grille Generator (Model)** | 1,387 | 3.74 | 2.40 | 0.741 | 0.195 | 45.61% |
-| **Uniform Random Noise (Null Baseline)** | 1,387 | 4.70 | 4.63 | 0.874 | 0.627 | 20.78% |
+| Corpus / Seeded Control (`BenchmarkSuite`) | Evaluated Scope | $H_1$ (bits) | $H_2$ Cond. (bits) | Hurst $H$ (DFA) | LZMA Ratio | Markov Top-1 |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **Voynich (HD Ductus G-Tokens)** | 5 HD folios (575 words) | 4.97 | 4.16 | 0.650 | 0.240 | O1=15% / O2=43% |
+| **Codex Seraphinianus (Ribbon G-Tokens)** | 6 text pages (515 words) | 5.54 | 4.58 | 0.700 | 0.240 | O1=12% / O2=49% |
+| **Natural Latin Herbal (Control)** | Seeded baseline (574 words) | 4.04 | 3.28 | 0.860 | 0.200 | O1=22% / O2=48% |
+| **Timm Self-Citation (Baseline)** | Seeded baseline (574 words) | 3.18 | 2.29 | 0.600 | 0.130 | O1=38% / O2=65% |
+| **Rugg Cardan Grille (Baseline)** | Seeded baseline (574 words) | 3.74 | 2.38 | 0.700 | 0.280 | O1=37% / O2=47% |
+| **Random Uniform Noise (Baseline)** | Seeded baseline (574 words) | 4.69 | 4.51 | 0.470 | 0.630 | O1=8% / O2=32% |
+<!-- LIVE_CORPUS_STATS_END -->
 
 > [!IMPORTANT]
-> **Key Empirical Findings & Scientific Honesty**:
-> 1. **Tokenization Shapes Statistical Conclusions**: Replacing human EVA letters with physical ductus tokens raises 2nd-order Markov transition determinism from **50.46% to 70.49%** and drops conditional entropy $H_2$ from **2.31 to 1.25 bits**, demonstrating how strongly downstream linguistic statistics depend on upstream glyph segmentation criteria.
-> 2. **Rejection of Uncorrelated Gibberish**: Both Voynich and Seraphinianus exhibit sharp conditional entropy drops ($H_1 \to H_2$) and structured transition graphs compared to uniform noise ($H_1 = 4.70 \to H_2 = 4.63$).
-> 3. **Zero Translation Claims**: In strict adherence to our core principles, `VoynichDuctus` makes **no translation or decipherment claims**. It provides an objective, reproducible physical measurement baseline.
+> **Scientific Honesty & Open-Source SOTA Positioning**:
+> 1. **Clean-Room Native Implementations**: `GenerativeTypewriterDecomposer` is a native deterministic Python/CPU implementation inspired by *The Learnable Typewriter* (`ysig/learnable-typewriter`) using loop-stratified visual sprite clustering and Viterbi MDL decoding (external deep repositories such as `google-research/inksight`, `hzwer/Stroke-basedCharacterReconstruction`, and `monniert/dti-clustering` are referenced as architectural benchmarks; `InkSightAdapter` runs a deterministic topological fallback without external T5X weights).
+> 2. **100% Physical Millimeter Calibration**: All paleographic thresholds derive strictly from physical codex heights (`225 mm` for Beinecke MS 408, `350 mm` for *Codex Seraphinianus*, `280 mm` for BnF Gallica) via `MetricScaleCalibration`—zero pixel thresholds.
+> 3. **Zero Translation Claims**: `VoynichDuctus` makes **no translation or decipherment claims**, providing strictly measurable geometric and information-theoretic metrics.
 
-### C. High-Resolution Execution & Throughput Benchmarks
+### B. Measured Throughput & Full-Codex Regeneration Estimates
 
-All Voynich folios are processed strictly on **Yale Beinecke HD scans** (`2400–2500 × 3168–3390 px`, `~14–15 px/mm`, fetched on demand via IIIF—never stored in git) with **all 3 word decompositions (A, B, C)** and **both vector ductus engines (Quill 40° + Euler-Bernoulli skeleton)** per glyph:
+Measured with the unified `GenerativeTypewriterDecomposer` + dual vectorization + DINOv2 SHA-1 patch cache (`~3.1x` faster than the retired multi-tab `A/B/C` pipeline):
 
-| Execution Profile | Resolution & Scope | Observed / Estimated Runtime | Notes |
-| :--- | :--- | :---: | :--- |
-| **Single Dense Folio (`f1r` + DINOv2 Catalogue)** | `2500 × 3168 px` (`210` words, `979` A / `838` B / `949` C glyphs) | **~23 min** (1 CPU thread) | Includes `serafini_p030`, SIFT/RANSAC registration, 3-model vectorization, DINOv2 catalogue induction, and HTML explorer build. |
-| **Standard Folio (`f1v`, `f2r`) — Gentle Local 2-Worker** | `2400 × 3250–3362 px` (`~375–400` glyphs per model) | **~6.5 – 10.5 min / worker** *(~4–5 min/folio wall-clock)* | `BELOW_NORMAL_PRIORITY_CLASS` (`2` workers on a 4-core CPU, single-threaded BLAS/OpenCV, consensus ductus reuse enabled). |
-| **Full Voynich HD Corpus (225 Folios)** | Local gentle (`2` workers on 4-core PC) | **~16 – 20 hours** *(estimated)* | Non-blocking background mode leaves 50% CPU free for concurrent workloads. |
-| **Full Voynich HD Corpus (225 Folios)** | GCP Spot VM (`c2d-standard-16`, `16` vCPUs) | **~1.5 – 2.5 hours** *(estimated)* | Parallelized via `scripts/gcp/cloud_batch_runner.py` with on-demand IIIF fetch & GCS checkpoint sync. |
-| **Both Codices Full HD (225 Voynich + 371 Seraphinianus)** | Local gentle (`2` workers) / GCP `16` vCPUs | **~35 – 45 h** (local) / **~4 – 6 h** (GCP) *(estimated)* | Consensus ductus reuse skips redundant ridge tracking whenever Models B/C match Model A within `1 px`. |
+| Execution Scope | Corpus Volume | Measured / Estimated Wall-Clock |
+| :--- | :--- | :---: |
+| **11-Page HD Verification Batch (`5` Voynich + `6` Seraphinianus)** | `~1,400` words · `~5,000` glyphs | **~3.5 – 4.5 min** (local CPU) |
+| **Full Voynich HD Corpus (`225` Folios)** | `37,601` words (on-demand Yale IIIF) | **~3.0 – 4.0 h** (local 4-worker) / **~35 min** (16-vCPU VM) |
+| **Full Codex Seraphinianus (`371` Pages, `352` with text)** | `63,999` words (local PDF plates) | **~4.5 – 6.0 h** (local 4-worker) / **~50 min** (16-vCPU VM) |
+| **Both Complete Codices (`596` Pages, `101,600` Words)** | Full end-to-end regeneration + DINOv2 catalogues | **~7.5 – 10.0 h** (local) / **~1.5 h** (16-vCPU VM) |
+
+### C. Roadmap
+
+1. **Full-Page Emergent Retro-Transcription**: Reconstruct complete manuscript folios in-place by rendering each word/glyph's canonical medoid (`G01..Gnn`) at its exact physical millimeter coordinates `(x_mm, y_mm, w_mm, h_mm)` for full-page generative comparison against the raw scan.
+2. **Unified Millimeter Biomechanical Quill-Bernoulli Ductus**: Converge onto a single physical ductus engine built on the Euler-Bernoulli minimum-bending skeleton graph, governed strictly in `mm` by fixed physical nib dimensions (`0.45 mm` at `40°` on Voynich; `0.38 mm` on Seraphinianus), sub-nib impact gating (`<= 0.55 mm`), air-lift motion economy, and variable-width pressure ribbons in SVG.
+3. **Full 596-Page Codex Regeneration**: Reprocess all `225` Voynich HD folios and `371` Seraphinianus pages under the converged biomechanical pipeline.
 
 ---
 

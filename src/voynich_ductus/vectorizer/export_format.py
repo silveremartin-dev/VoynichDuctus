@@ -25,28 +25,43 @@ class VectorExporter:
         if len(pts) == 2:
             return f"M {pts[0][1]:.2f} {pts[0][0]:.2f} L {pts[1][1]:.2f} {pts[1][0]:.2f}"
 
-        # Subsample / simplify points so cubic spline doesn't wobble with sub-mm jitter
+        # Subsample only near-duplicate points while strictly preserving sharp cusps / inflections (e.g. '3' middle tongue)
+        import math
         coords = [(float(p[1]), float(p[0])) for p in pts]  # (x, y)
-        is_closed = (len(coords) >= 5 and ((coords[0][0] - coords[-1][0]) ** 2 + (coords[0][1] - coords[-1][1]) ** 2) <= 12.25)
+        is_closed = (len(coords) >= 5 and ((coords[0][0] - coords[-1][0]) ** 2 + (coords[0][1] - coords[-1][1]) ** 2) <= 9.0)
         if min_step is None:
             xs = [c[0] for c in coords]
             ys = [c[1] for c in coords]
             span = max(max(xs) - min(xs), max(ys) - min(ys), 1.0)
-            min_step = max(1.0, min(2.2, span * 0.035))
+            min_step = max(0.45, min(1.05, span * 0.018))
         min_step_sq = float(min_step * min_step)
 
+        def _turn_cos(pa: Tuple[float, float], pb: Tuple[float, float], pc: Tuple[float, float]) -> float:
+            v1x, v1y = pb[0] - pa[0], pb[1] - pa[1]
+            v2x, v2y = pc[0] - pb[0], pc[1] - pb[1]
+            n1 = math.hypot(v1x, v1y)
+            n2 = math.hypot(v2x, v2y)
+            if n1 < 1e-5 or n2 < 1e-5:
+                return 1.0
+            return (v1x * v2x + v1y * v2y) / (n1 * n2)
+
         simplified = [coords[0]]
-        for p in coords[1:-1]:
+        for idx_c in range(1, len(coords) - 1):
+            p = coords[idx_c]
             dx = p[0] - simplified[-1][0]
             dy = p[1] - simplified[-1][1]
-            if (dx * dx + dy * dy) >= min_step_sq:
-                simplified.append(p)
-        simplified.append(coords[0] if is_closed else coords[-1])
+            is_sharp = _turn_cos(coords[idx_c - 1], p, coords[idx_c + 1]) < 0.55
+            if is_sharp or (dx * dx + dy * dy) >= min_step_sq:
+                if (dx * dx + dy * dy) >= 1e-4:
+                    simplified.append(p)
+        end_pt = coords[0] if is_closed else coords[-1]
+        if (end_pt[0] - simplified[-1][0]) ** 2 + (end_pt[1] - simplified[-1][1]) ** 2 >= 1e-4 or len(simplified) == 1:
+            simplified.append(end_pt)
 
         if len(simplified) < 3:
             return " ".join([f"M {simplified[0][0]:.2f} {simplified[0][1]:.2f}"] + [f"L {p[0]:.2f} {p[1]:.2f}" for p in simplified[1:]])
 
-        # Catmull-Rom to Cubic Bézier spline (periodic wrap for closed loops)
+        # Corner-aware Catmull-Rom to Cubic Bézier spline: zero tangent overshoot across sharp cusps ('3', 'm', 'k')
         d_tokens = [f"M {simplified[0][0]:.2f} {simplified[0][1]:.2f}"]
         n = len(simplified)
         if is_closed and n >= 5:
@@ -56,10 +71,12 @@ class VectorExporter:
                 p1 = simplified[i]
                 p2 = simplified[(i + 1) % m]
                 p3 = simplified[(i + 2) % m]
-                cp1x = p1[0] + (p2[0] - p0[0]) / 6.0
-                cp1y = p1[1] + (p2[1] - p0[1]) / 6.0
-                cp2x = p2[0] - (p3[0] - p1[0]) / 6.0
-                cp2y = p2[1] - (p3[1] - p1[1]) / 6.0
+                t1 = 0.0 if _turn_cos(p0, p1, p2) < 0.45 else (1.0 / 6.0)
+                t2 = 0.0 if _turn_cos(p1, p2, p3) < 0.45 else (1.0 / 6.0)
+                cp1x = p1[0] + (p2[0] - p0[0]) * t1
+                cp1y = p1[1] + (p2[1] - p0[1]) * t1
+                cp2x = p2[0] - (p3[0] - p1[0]) * t2
+                cp2y = p2[1] - (p3[1] - p1[1]) * t2
                 d_tokens.append(f"C {cp1x:.2f} {cp1y:.2f}, {cp2x:.2f} {cp2y:.2f}, {p2[0]:.2f} {p2[1]:.2f}")
             d_tokens.append("Z")
         else:
@@ -68,12 +85,12 @@ class VectorExporter:
                 p1 = simplified[i]
                 p2 = simplified[i + 1]
                 p3 = simplified[min(n - 1, i + 2)]
-
-                cp1x = p1[0] + (p2[0] - p0[0]) / 6.0
-                cp1y = p1[1] + (p2[1] - p0[1]) / 6.0
-                cp2x = p2[0] - (p3[0] - p1[0]) / 6.0
-                cp2y = p2[1] - (p3[1] - p1[1]) / 6.0
-
+                t1 = 0.0 if (i > 0 and _turn_cos(p0, p1, p2) < 0.45) else (1.0 / 6.0)
+                t2 = 0.0 if (i + 1 < n - 1 and _turn_cos(p1, p2, p3) < 0.45) else (1.0 / 6.0)
+                cp1x = p1[0] + (p2[0] - p0[0]) * t1
+                cp1y = p1[1] + (p2[1] - p0[1]) * t1
+                cp2x = p2[0] - (p3[0] - p1[0]) * t2
+                cp2y = p2[1] - (p3[1] - p1[1]) * t2
                 d_tokens.append(f"C {cp1x:.2f} {cp1y:.2f}, {cp2x:.2f} {cp2y:.2f}, {p2[0]:.2f} {p2[1]:.2f}")
 
         return " ".join(d_tokens)

@@ -449,6 +449,52 @@ def parse_page_stub_fast(json_path: Path, subfolder: str) -> dict:
     }
 
 
+def sync_readme_live_stats(live_stats: dict, readme_path: Path) -> None:
+    """Synchronizes the live corpus & diagnostics Markdown block inside README.md so zero numbers stay hardcoded."""
+    if not readme_path.exists() or not live_stats:
+        return
+    txt = readme_path.read_text(encoding="utf-8")
+    start_tag = "<!-- LIVE_CORPUS_STATS_START -->"
+    end_tag = "<!-- LIVE_CORPUS_STATS_END -->"
+    if start_tag not in txt or end_tag not in txt:
+        return
+
+    v = live_stats.get("voynich", {})
+    s = live_stats.get("seraphinianus", {})
+    diags = live_stats.get("diagnostics", [])
+    v_ids = ", ".join(v.get("processed_page_ids", [])[:8]) or "—"
+    s_ids = ", ".join(s.get("processed_page_ids", [])[:8]) or "—"
+
+    lines = [
+        start_tag,
+        f"*Auto-synchronized from `data/processed/atlas_dataset/` on `{live_stats.get('computed_at', '')}` via `scripts/build_dynamic_grand_explorer.py`:*",
+        "",
+        "| Metric / Database Scope | Voynich Manuscript (Beinecke MS 408 · 225 mm) | Codex Seraphinianus (1981 · 350 mm) |",
+        "| :--- | :--- | :--- |",
+        f"| **Indexed Dataset Pages (Canvas Stubs)** | **{v.get('indexed_pages_total', 0):,}** folios ({v.get('indexed_words_total', 0):,} words, {v.get('indexed_glyphs_total', 0):,} glyphs) | **{s.get('indexed_pages_total', 0):,}** pages ({s.get('indexed_words_total', 0):,} words, {s.get('indexed_glyphs_total', 0):,} glyphs) |",
+        f"| **Active HD Reprocessed Set** | **{v.get('processed_pages_count', 0)}** HD folios (`{v_ids}`) | **{s.get('processed_pages_count', 0)}** HD plates (`{s_ids}`) |",
+        f"| **Processed Words & Glyphs (`GenerativeTypewriterDecomposer`)** | **{v.get('processed_words', 0):,}** words · **{v.get('processed_glyphs_a', 0):,}** isolated glyphs | **{s.get('processed_words', 0):,}** words · **{s.get('processed_glyphs_a', 0):,}** isolated glyphs |",
+        f"| **Live Canonical Alphabet Size (100% Coverage)** | **{v.get('alphabet_a_size', 0)}** emergent archetypes | **{s.get('alphabet_a_size', 0)}** emergent archetypes |",
+        "",
+        "| Corpus / Seeded Control (`BenchmarkSuite`) | Evaluated Scope | $H_1$ (bits) | $H_2$ Cond. (bits) | Hurst $H$ (DFA) | LZMA Ratio | Markov Top-1 |",
+        "| :--- | :--- | :---: | :---: | :---: | :---: | :---: |",
+    ]
+    for d in diags:
+        h1 = f"{d['h1']:.2f}" if d.get("h1") is not None else "—"
+        h2 = f"{d['h2']:.2f}" if d.get("h2") is not None else "—"
+        hu = f"{d['hurst']:.3f}" if d.get("hurst") is not None else "—"
+        lz = f"{d['lzma_ratio']:.3f}" if d.get("lzma_ratio") is not None else "—"
+        lines.append(
+            f"| **{d.get('name', '')}** | {d.get('scope', '')} | {h1} | {h2} | {hu} | {lz} | {d.get('markov_order', '—')} |"
+        )
+    lines.append(end_tag)
+
+    i0 = txt.index(start_tag)
+    i1 = txt.index(end_tag) + len(end_tag)
+    updated = txt[:i0] + "\n".join(lines) + txt[i1:]
+    readme_path.write_text(updated, encoding="utf-8")
+
+
 def main(skip_catalogue: bool = False):
     import os
     import sys
@@ -571,6 +617,7 @@ def main(skip_catalogue: bool = False):
         output_path=out_html_path,
         live_stats=live_stats,
     )
+    sync_readme_live_stats(live_stats, root_dir / "README.md")
 
     print(f"[+] Successfully generated: {out_html_path.resolve()}")
     print(f"  [+] File size: {out_html_path.stat().st_size / (1024*1024):.2f} MB")

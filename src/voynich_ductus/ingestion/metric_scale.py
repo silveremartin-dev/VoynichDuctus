@@ -115,112 +115,112 @@ class MetricScaleCalibration:
         return float(px2_val * (self.mm_per_px ** 2))
 
     # ------------------------------------------------------------------
-    # Dynamic Scale-Calibrated Paleographic Threshold Queries
+    # Dynamic Scale-Calibrated Paleographic Threshold Queries (100% derived from mm / mm^2)
     # ------------------------------------------------------------------
     @property
     def dot_max_span_px(self) -> float:
-        """Maximum bounding box dimension (px) for an instantaneous touchdown impact point."""
-        return max(4.0, self.mm_to_px(self.DOT_MAX_DIAMETER_MM))
+        """Maximum bounding box dimension for an instantaneous touchdown impact point (0.55 mm)."""
+        return max(1.0, self.mm_to_px(self.DOT_MAX_DIAMETER_MM))
 
     @property
     def dot_max_area_px(self) -> float:
-        """Maximum ink area (px^2) for an instantaneous touchdown impact point."""
-        return max(12.0, self.area_mm2_to_px2(self.DOT_MAX_AREA_MM2))
+        """Maximum ink area for an instantaneous touchdown impact point (0.35 mm^2)."""
+        return max(1.0, self.area_mm2_to_px2(self.DOT_MAX_AREA_MM2))
 
     @property
     def min_glyph_height_px(self) -> float:
-        """Minimum physical height (px) for an authentic textual glyph."""
-        return max(5.0, self.mm_to_px(self.MIN_GLYPH_HEIGHT_MM))
+        """Minimum physical height for an authentic textual glyph (0.85 mm)."""
+        return max(1.0, self.mm_to_px(self.MIN_GLYPH_HEIGHT_MM))
 
     @property
     def min_glyph_width_px(self) -> float:
-        """Minimum physical width (px) for an authentic textual glyph."""
-        return max(3.0, self.mm_to_px(self.MIN_GLYPH_WIDTH_MM))
+        """Minimum physical width for an authentic textual glyph (0.45 mm)."""
+        return max(1.0, self.mm_to_px(self.MIN_GLYPH_WIDTH_MM))
 
     @property
     def min_glyph_area_px(self) -> float:
-        """Minimum physical ink area (px^2) for an authentic textual glyph."""
-        return max(8.0, self.area_mm2_to_px2(self.MIN_GLYPH_AREA_MM2))
+        """Minimum physical ink area for an authentic textual glyph (0.12 mm^2)."""
+        return max(1.0, self.area_mm2_to_px2(self.MIN_GLYPH_AREA_MM2))
 
     @property
     def tiny_height_px(self) -> float:
-        """Threshold separating TINY scale band (diacritics, specks) from CORE letter band."""
+        """Threshold separating TINY scale band (<= 1.30 mm) from CORE letter band."""
         return self.mm_to_px(self.TINY_MAX_HEIGHT_MM)
 
     @property
     def tall_height_px(self) -> float:
-        """Threshold separating CORE letters from TALL ascenders/gallows."""
+        """Threshold separating CORE letters from TALL ascenders/gallows (>= 3.40 mm)."""
         return self.mm_to_px(self.TALL_GALLOWS_MIN_HEIGHT_MM)
 
     @property
     def wide_width_px(self) -> float:
-        """Threshold separating standard letters from WIDE benches/ligatures."""
+        """Threshold separating standard letters from WIDE benches/ligatures (>= 3.40 mm)."""
         return self.mm_to_px(self.WIDE_BENCH_MIN_WIDTH_MM)
 
     @property
     def word_space_min_px(self) -> float:
-        """Inter-word horizontal gap threshold in pixels."""
-        return max(8.0, self.mm_to_px(self.WORD_SPACE_GAP_MM))
+        """Inter-word horizontal whitespace threshold (1.10 mm)."""
+        return max(1.0, self.mm_to_px(self.WORD_SPACE_GAP_MM))
 
     @property
     def diacritic_max_dist_px(self) -> float:
-        """Maximum vertical gap (px) for associating a supralinear diacritic to its base glyph."""
-        return max(4.0, self.mm_to_px(self.DIACRITIC_MAX_DIST_MM))
+        """Maximum vertical gap (0.90 mm) for associating a supralinear diacritic to its base glyph."""
+        return max(1.0, self.mm_to_px(self.DIACRITIC_MAX_DIST_MM))
 
     @property
     def macro_drawing_height_px(self) -> float:
-        """Height threshold (px) separating text lines/glyphs from macro drawings and miniatures."""
+        """Height threshold (16.0 mm) separating text lines/glyphs from macro drawings and miniatures."""
         return self.mm_to_px(self.MACRO_DRAWING_MIN_HEIGHT_MM)
 
     @property
     def macro_drawing_area_px(self) -> float:
-        """Area threshold (px^2) separating text lines/glyphs from macro drawings and miniatures."""
+        """Area threshold (30.0 mm^2) separating text lines/glyphs from macro drawings and miniatures."""
         return self.area_mm2_to_px2(self.MACRO_DRAWING_MIN_AREA_MM2)
 
     @property
     def quill_nib_width_px(self) -> float:
-        """Physical beveled quill nib stroke width in pixels."""
-        return max(2.0, self.mm_to_px(self.QUILL_NIB_WIDTH_MM))
+        """Physical beveled quill nib stroke width (0.45 mm)."""
+        return max(1.0, self.mm_to_px(self.QUILL_NIB_WIDTH_MM))
 
     @property
     def single_glyph_max_width_px(self) -> int:
-        """Maximum width (px) of an intact single character before ligature valley analysis."""
-        return max(16, int(round(self.mm_to_px(self.SINGLE_GLYPH_MAX_WIDTH_MM))))
+        """Maximum width (3.50 mm) of an intact single character before ligature valley analysis."""
+        return max(2, int(round(self.mm_to_px(self.SINGLE_GLYPH_MAX_WIDTH_MM))))
 
     @property
     def ligature_valley_min_pitch_px(self) -> int:
-        """Minimum horizontal pitch (px) between consecutive character cuts inside a word."""
-        return max(8, int(round(self.mm_to_px(self.LIGATURE_VALLEY_MIN_PITCH_MM))))
+        """Minimum horizontal pitch (1.45 mm) between consecutive character cuts inside a word."""
+        return max(2, int(round(self.mm_to_px(self.LIGATURE_VALLEY_MIN_PITCH_MM))))
 
     @property
     def ligature_peak_window_px(self) -> int:
-        """Horizontal window (px) for measuring local ink height peaks around a ligature valley."""
-        return max(8, int(round(self.mm_to_px(self.LIGATURE_PEAK_WINDOW_MM))))
+        """Horizontal window (1.80 mm) for measuring local ink height peaks around a ligature valley."""
+        return max(2, int(round(self.mm_to_px(self.LIGATURE_PEAK_WINDOW_MM))))
 
     @property
     def min_loop_hole_area_px(self) -> int:
-        """Minimum enclosed area (px^2) for a topological hole to be certified as a scribal loop rather than vellum grain noise."""
-        return max(6, int(round(self.area_mm2_to_px2(self.MIN_LOOP_HOLE_AREA_MM2))))
+        """Minimum enclosed area (0.18 mm^2) for a certified scribal loop cavity."""
+        return max(2, int(round(self.area_mm2_to_px2(self.MIN_LOOP_HOLE_AREA_MM2))))
 
     @property
     def min_loop_hole_height_px(self) -> int:
-        """Minimum vertical opening (px) for a certified topological loop."""
-        return max(3, int(round(self.mm_to_px(self.MIN_LOOP_HOLE_HEIGHT_MM))))
+        """Minimum vertical opening (0.50 mm) for a certified topological loop."""
+        return max(1, int(round(self.mm_to_px(self.MIN_LOOP_HOLE_HEIGHT_MM))))
 
     @property
     def min_loop_hole_width_px(self) -> int:
-        """Minimum horizontal opening (px) for a certified topological loop."""
-        return max(2, int(round(self.mm_to_px(self.MIN_LOOP_HOLE_WIDTH_MM))))
+        """Minimum horizontal opening (0.38 mm) for a certified topological loop."""
+        return max(1, int(round(self.mm_to_px(self.MIN_LOOP_HOLE_WIDTH_MM))))
 
     @property
     def intra_word_bridge_px(self) -> int:
-        """Morphological horizontal closing span (px) bridging disconnected letters inside a single word polygon."""
-        return max(7, int(round(self.mm_to_px(self.INTRA_WORD_BRIDGE_MM)))) | 1
+        """Morphological horizontal closing span (2.10 mm) bridging disconnected letters inside a word hull."""
+        return max(3, int(round(self.mm_to_px(self.INTRA_WORD_BRIDGE_MM)))) | 1
 
     @property
     def intra_glyph_bridge_px(self) -> int:
-        """Morphological horizontal closing span (px) bridging multi-stroke components inside a single glyph polygon."""
-        return max(5, int(round(self.mm_to_px(self.INTRA_GLYPH_BRIDGE_MM)))) | 1
+        """Morphological horizontal closing span (1.10 mm) bridging multi-stroke components inside a glyph hull."""
+        return max(3, int(round(self.mm_to_px(self.INTRA_GLYPH_BRIDGE_MM)))) | 1
 
     def get_summary_dict(self) -> Dict[str, Any]:
         """Returns structured metadata dictionary documenting calibration parameters."""

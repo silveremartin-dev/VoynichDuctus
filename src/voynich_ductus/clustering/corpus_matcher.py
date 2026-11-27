@@ -110,50 +110,9 @@ class CorpusCorrespondenceMatcher:
 </svg>""",
     }
 
-    SERAFINI_REFERENCE_SVGS: Dict[str, str] = {
-        "S-L01": """<svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
-  <ellipse cx="36" cy="68" rx="20" ry="26" fill="none" stroke="#c084fc" stroke-width="8"/>
-  <line x1="56" y1="18" x2="56" y2="98" stroke="#c084fc" stroke-width="8" stroke-linecap="round"/>
-  <circle cx="36" cy="42" r="3.5" fill="#10b981"/>
-</svg>""",
-        "S-C02": """<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
-  <line x1="20" y1="65" x2="100" y2="65" stroke="#c084fc" stroke-width="8" stroke-linecap="round"/>
-  <path d="M 40 65 C 40 42 80 42 80 65" fill="none" stroke="#c084fc" stroke-width="8"/>
-</svg>""",
-        "S-H03": """<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
-  <path d="M 28 85 C 28 50 56 50 56 85 C 56 50 84 50 84 85" fill="none" stroke="#c084fc" stroke-width="8" stroke-linecap="round"/>
-</svg>""",
-        "S-W04": """<svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
-  <line x1="35" y1="35" x2="60" y2="65" stroke="#c084fc" stroke-width="8" stroke-linecap="round"/>
-  <path d="M 60 65 Q 75 90 50 105 Q 30 115 15 105" fill="none" stroke="#c084fc" stroke-width="8" stroke-linecap="round"/>
-</svg>""",
-        "S-B05": """<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
-  <line x1="25" y1="35" x2="95" y2="35" stroke="#c084fc" stroke-width="8" stroke-linecap="round"/>
-  <line x1="60" y1="35" x2="60" y2="95" stroke="#c084fc" stroke-width="8" stroke-linecap="round"/>
-</svg>""",
-        "S-K06": """<svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="50" cy="65" r="28" fill="none" stroke="#c084fc" stroke-width="8"/>
-  <line x1="20" y1="65" x2="80" y2="65" stroke="#c084fc" stroke-width="8"/>
-</svg>""",
-        "S-S07": """<svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
-  <path d="M 65 25 C 30 15 20 45 50 65 C 80 85 70 115 35 105" fill="none" stroke="#c084fc" stroke-width="8" stroke-linecap="round"/>
-</svg>""",
-        "S-M08": """<svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
-  <line x1="35" y1="40" x2="35" y2="95" stroke="#c084fc" stroke-width="8" stroke-linecap="round"/>
-  <line x1="65" y1="40" x2="65" y2="95" stroke="#c084fc" stroke-width="8" stroke-linecap="round"/>
-  <line x1="30" y1="40" x2="70" y2="40" stroke="#c084fc" stroke-width="6"/>
-</svg>""",
-        "S-T09": """<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
-  <line x1="25" y1="40" x2="95" y2="40" stroke="#c084fc" stroke-width="7" stroke-linecap="round"/>
-  <line x1="35" y1="40" x2="35" y2="95" stroke="#c084fc" stroke-width="7" stroke-linecap="round"/>
-  <line x1="60" y1="40" x2="60" y2="95" stroke="#c084fc" stroke-width="7" stroke-linecap="round"/>
-  <line x1="85" y1="40" x2="85" y2="95" stroke="#c084fc" stroke-width="7" stroke-linecap="round"/>
-</svg>""",
-        "S-P10": """<svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="50" cy="65" r="14" fill="#c084fc"/>
-  <path d="M 50 51 C 65 51 75 65 70 80 C 65 92 45 92 40 85" fill="none" stroke="#c084fc" stroke-width="5" stroke-linecap="round"/>
-</svg>""",
-    }
+    # Codex Seraphinianus has no external reference font or standardized ASCII typology;
+    # canonical representation relies strictly on emergent manuscript medoids (zero synthetic cartoons).
+    SERAFINI_REFERENCE_SVGS: Dict[str, str] = {}
 
     # Voynich Standard Paleographic Profiles with Strict Topological Constraints
     VOYNICH_STANDARD_PROFILES = [
