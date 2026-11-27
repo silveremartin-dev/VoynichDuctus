@@ -304,17 +304,18 @@ class CalligraphicVectorizer:
         )
 
         if single_stroke_mode or (max_strokes is not None and max_strokes == 1):
-            st = self._extract_continuous_cursive_tour(
-                mask_bool, ppm=ppm, w_nib_mm=w_nib_mm, is_macro=is_macro
+            strict_one = (max_strokes is not None and max_strokes == 1)
+            curs_strokes = self._extract_continuous_cursive_tour(
+                mask_bool, ppm=ppm, w_nib_mm=w_nib_mm, is_macro=is_macro, allow_diacritics=(not strict_one)
             )
-            return [st] if st is not None else [self._make_impact_stroke(pts_all, 0, ppm, w_nib_mm)]
+            return curs_strokes if curs_strokes else [self._make_impact_stroke(pts_all, 0, ppm, w_nib_mm)]
 
         stroke_limit = min(4, max_strokes) if max_strokes is not None else 4
         labeled_mask, num_features = label(mask_bool, structure=np.ones((3, 3), dtype=bool))
         if num_features == 0:
             return []
 
-        comp_min_area_px = max(1, int(round(calib.area_mm2_to_px2(0.035))))
+        comp_min_area_px = max(1, int(round(calib.area_mm2_to_px2(0.045))))
         components = []
         for cid in range(1, num_features + 1):
             cm = (labeled_mask == cid)
@@ -333,23 +334,35 @@ class CalligraphicVectorizer:
         if not components:
             return [self._make_impact_stroke(pts_all, 0, ppm, w_nib_mm)]
 
-        # Prioritize largest substantive components so tiny specks never starve main stems of stroke budget
+        # Prioritize largest substantive components; govern secondary marks strictly by stroke-thickness ratio!
         components.sort(key=lambda c: c["area_mm2"], reverse=True)
+        dom_comp = components[0]
+        dom_has_stroke = (
+            max(dom_comp["span_h_mm"], dom_comp["span_w_mm"]) > 1.38 * w_nib_mm
+            and dom_comp["area_mm2"] > 1.35 * (w_nib_mm ** 2)
+        )
 
         graph_ext = StrokeGraphExtractor()
         raw_stroke_dicts: List[Dict[str, Any]] = []
 
-        for comp in components:
+        for comp_idx, comp in enumerate(components):
             rem_budget = stroke_limit - len(raw_stroke_dicts)
             if rem_budget <= 0:
                 break
 
-            # Detached sub-nib dot component inside a multi-component glyph (e.g. dot of 'i')
-            if (
-                (comp["span_h_mm"] <= sub_nib_span_mm and comp["span_w_mm"] <= sub_nib_span_mm)
-                or comp["area_mm2"] <= calib.DOT_MAX_AREA_MM2
-            ):
-                raw_stroke_dicts.append(self._make_impact_stroke(comp["pts"], len(raw_stroke_dicts), ppm, w_nib_mm))
+            max_comp_span_mm = max(comp["span_h_mm"], comp["span_w_mm"])
+            # On Voynich (split quill), once a real glyph stroke body is identified, isolated specks
+            # smaller than ~1.4x stroke thickness are parchment grain / bleed — NEVER intentional dots!
+            if comp_idx > 0 and dom_has_stroke:
+                if (
+                    max_comp_span_mm <= 1.38 * w_nib_mm
+                    or comp["area_mm2"] < max(1.30 * (w_nib_mm ** 2), 0.13 * dom_comp["area_mm2"])
+                ):
+                    continue
+
+            if max_comp_span_mm <= sub_nib_span_mm and comp["area_mm2"] <= calib.DOT_MAX_AREA_MM2:
+                if not dom_has_stroke:
+                    raw_stroke_dicts.append(self._make_impact_stroke(comp["pts"], len(raw_stroke_dicts), ppm, w_nib_mm))
                 continue
 
             comp_strokes = self._extract_component_quill_bernoulli(
@@ -371,14 +384,14 @@ class CalligraphicVectorizer:
         return ordered[:stroke_limit]
 
     def _clean_pinholes_and_get_holes(
-        self, comp_mask: np.ndarray, ppm: float
+        self, comp_mask: np.ndarray, ppm: float, is_serafini: bool = False
     ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
         """
-        Fills microscopic vellum grain pores (`<= 0.045 mm^2` or inscribed radius `<= 0.115 mm` < quarter nib),
-        preserving 100% of genuine enclosed loop cavities (`o`, `a`, `e`, `d`, `8`, `sh`) and precomputing `dist_to_hole_px`.
+        Fills microscopic vellum grain pores (`<= 0.045 mm^2` on Voynich; `<= 1 px` on Seraphinianus
+        so narrow cursive loops at ~6.3 px/mm never get plugged solid) and precomputes `dist_to_hole_px`.
         """
-        pinhole_max_px = max(1, int(round(0.045 * (ppm ** 2))))
-        max_pore_rad_px = 0.115 * ppm
+        pinhole_max_px = 1 if is_serafini else max(1, int(round(0.045 * (ppm ** 2))))
+        max_pore_rad_px = 0.0 if is_serafini else (0.115 * ppm)
         padded = np.pad(comp_mask, 2, mode="constant", constant_values=False)
         holes = binary_fill_holes(padded) & (~padded)
         lbl_h, num_h = label(holes)
@@ -389,12 +402,125 @@ class CalligraphicVectorizer:
             ha = int(np.sum(hm))
             if ha <= pinhole_max_px:
                 clean_comp |= hm
-            elif ha <= int(round(0.070 * (ppm ** 2))) and float(np.max(distance_transform_edt(hm))) <= max_pore_rad_px:
+            elif not is_serafini and ha <= int(round(0.070 * (ppm ** 2))) and float(np.max(distance_transform_edt(hm))) <= max_pore_rad_px:
                 clean_comp |= hm
             elif np.any(hm):
                 holes_union |= hm
         dist_to_hole = distance_transform_edt(~holes_union) if np.any(holes_union) else None
         return clean_comp, holes_union, dist_to_hole
+
+    @staticmethod
+    def _decompose_cycles_for_medieval_quill(
+        segs: List[Dict[str, Any]],
+        ppm: float,
+        w_nib_mm: float,
+    ) -> List[Dict[str, Any]]:
+        """
+        Medieval Split-Quill Pull Law (15th-century Gothic / Humanist / Voynich ductus):
+        A 40° split goose quill pulls downward/rightward and lifts rather than pushing 360° upward
+        around a closed circle. Every closed bowl ('o', 'a', 'd', '8') or steep U-turn climbing
+        upward by `> 1.05 * w_nib` is split at its top crest (`y_min`) and bottom trough (`y_max`)
+        into downward-pulled strokes (`2` crescents for 'o'; `2-3` strokes `c-bowl + i-minim` for 'a').
+        """
+        mm_per_px = 1.0 / ppm
+        close_tol_px = 0.42 * ppm
+        max_up_climb_mm = max(0.46, 1.05 * w_nib_mm)
+        out: List[Dict[str, Any]] = []
+
+        for s in segs:
+            pts = list(s.get("points", []))
+            if len(pts) < 4:
+                out.append(s)
+                continue
+
+            is_loop = (
+                s.get("type") == "loop"
+                or (len(pts) >= 6 and math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= close_tol_px)
+            )
+            if is_loop:
+                ring = pts[:-1] if math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= close_tol_px else pts
+                m = len(ring)
+                if m >= 6:
+                    # Top-left ~11:30 crest vs bottom-right ~5:30 join
+                    i_top = min(range(m), key=lambda k: float(ring[k][0]) + 0.12 * float(ring[k][1]))
+                    i_bot = max(range(m), key=lambda k: float(ring[k][0]) + 0.12 * float(ring[k][1]))
+                    if i_top != i_bot:
+                        # Path 1: i_top -> ... -> i_bot (forward index wrap)
+                        p_fwd = []
+                        k = i_top
+                        while True:
+                            p_fwd.append(ring[k])
+                            if k == i_bot:
+                                break
+                            k = (k + 1) % m
+                        # Path 2: i_top -> ... -> i_bot (backward index wrap)
+                        p_bwd = []
+                        k = i_top
+                        while True:
+                            p_bwd.append(ring[k])
+                            if k == i_bot:
+                                break
+                            k = (k - 1 + m) % m
+                        for sub_idx, sub_pts in enumerate((p_fwd, p_bwd)):
+                            if len(sub_pts) >= 2:
+                                out.append({
+                                    "stroke_id": f"{s.get('stroke_id', 's')}_q{sub_idx}",
+                                    "type": "segment",
+                                    "points": sub_pts,
+                                    "start": (sub_pts[0][0], sub_pts[0][1]),
+                                    "end": (sub_pts[-1][0], sub_pts[-1][1]),
+                                    "length": float(len(sub_pts)),
+                                })
+                        continue
+
+            # Open segment check: split BOTH '∩' arches (climbing up to a top crest `i_top` then descending)
+            # AND '∪' bowls (plunging to a bottom trough `i_bot` then climbing back up) so NO stroke pushes upward!
+            ys = [float(p[0]) for p in pts]
+            i_top = int(np.argmin(ys))
+            i_bot = int(np.argmax(ys))
+            if 1 <= i_top <= len(pts) - 2:
+                drop_0_mm = (ys[0] - ys[i_top]) * mm_per_px
+                drop_1_mm = (ys[-1] - ys[i_top]) * mm_per_px
+                if drop_0_mm >= max_up_climb_mm * 0.72 and drop_1_mm >= max_up_climb_mm * 0.72:
+                    p_left = pts[:i_top + 1][::-1]
+                    p_right = pts[i_top:]
+                    for sub_idx, sub_pts in enumerate((p_left, p_right)):
+                        if len(sub_pts) >= 2:
+                            out.append({
+                                "stroke_id": f"{s.get('stroke_id', 's')}_a{sub_idx}",
+                                "type": "segment",
+                                "points": sub_pts,
+                                "start": (sub_pts[0][0], sub_pts[0][1]),
+                                "end": (sub_pts[-1][0], sub_pts[-1][1]),
+                                "length": float(len(sub_pts)),
+                            })
+                    continue
+            if 1 <= i_bot <= len(pts) - 2:
+                climb_0_mm = (ys[i_bot] - ys[0]) * mm_per_px
+                climb_1_mm = (ys[i_bot] - ys[-1]) * mm_per_px
+                if climb_0_mm >= max_up_climb_mm * 0.78 and climb_1_mm >= max_up_climb_mm * 0.78:
+                    p_left = pts[:i_bot + 1]
+                    p_right = pts[i_bot:][::-1]
+                    for sub_idx, sub_pts in enumerate((p_left, p_right)):
+                        if len(sub_pts) >= 2:
+                            out.append({
+                                "stroke_id": f"{s.get('stroke_id', 's')}_u{sub_idx}",
+                                "type": "segment",
+                                "points": sub_pts,
+                                "start": (sub_pts[0][0], sub_pts[0][1]),
+                                "end": (sub_pts[-1][0], sub_pts[-1][1]),
+                                "length": float(len(sub_pts)),
+                            })
+                    continue
+
+            # Orient open stroke downward (top -> bottom; left -> right when horizontal)
+            dy_mm = (pts[-1][0] - pts[0][0]) * mm_per_px
+            dx_mm = (pts[-1][1] - pts[0][1]) * mm_per_px
+            if dy_mm < -0.20 or (abs(dy_mm) <= 0.20 and dx_mm < -0.20):
+                pts = pts[::-1]
+            out.append(dict(s, type="segment", points=pts, start=(pts[0][0], pts[0][1]), end=(pts[-1][0], pts[-1][1])))
+
+        return out
 
     def _extract_component_quill_bernoulli(
         self,
@@ -412,7 +538,7 @@ class CalligraphicVectorizer:
         """
         h, w = comp_mask.shape
         mm_per_px = 1.0 / ppm
-        clean_comp, holes_union, dist_to_hole = self._clean_pinholes_and_get_holes(comp_mask, ppm)
+        clean_comp, holes_union, dist_to_hole = self._clean_pinholes_and_get_holes(comp_mask, ppm, is_serafini=is_serafini)
         dist_map = distance_transform_edt(clean_comp)
         raw_skel = skeletonize(clean_comp)
 
@@ -442,10 +568,14 @@ class CalligraphicVectorizer:
             if substantive:
                 raw_segs = substantive
 
-        # 3. Minimum-action junction chaining: merge segments across junctions whenever
-        #    on-vellum bending cost in mm < physical pen-lift action cost (1.45 mm)
+        # 3. Medieval Split-Quill Pull Decomposition on Voynich:
+        #    Decompose closed bowls ('o', 'a', 'd') into 2-3 downward-pulled strokes rather than 360° circles!
+        if not is_serafini:
+            raw_segs = self._decompose_cycles_for_medieval_quill(raw_segs, ppm=ppm, w_nib_mm=w_nib_mm)
+
+        # 4. Minimum-action junction chaining (strictly preserving downward quill pull on Voynich)
         chained_segs = self._chain_segments_minimum_action(
-            raw_segs, ppm=ppm, w_nib_mm=w_nib_mm, max_strokes=max_strokes
+            raw_segs, ppm=ppm, w_nib_mm=w_nib_mm, max_strokes=max_strokes, medieval_downward_only=(not is_serafini)
         )
 
         # 4. Complete free eroded endpoints to true ink extremities (bounded narrow forward cone in mm)
@@ -538,38 +668,68 @@ class CalligraphicVectorizer:
         ppm: float,
         w_nib_mm: float,
         is_macro: bool,
-    ) -> Optional[Dict[str, Any]]:
+        allow_diacritics: bool = True,
+    ) -> List[Dict[str, Any]]:
         """
-        Extracts strictly 1 continuous biomechanical cursive stroke (Codex Seraphinianus mode)
-        via an Eulerian Trail / Chinese-Postman tour directly on the homotopy-preserving skeleton graph.
+        Extracts smooth curvilinear cursive loop strokes (Codex Seraphinianus mode):
+        - Never jumps across blank paper to detached diacritic dots; renders authentic
+          supralinear/infralinear dots (`0.32..2.2 * w_stroke^2`) as separate `is_impact=True` nib dots.
+        - Converts thick optical-bleed side lobes into smooth elliptical micro-loops rather than 180° spikes.
         """
         lbl, num_f = label(mask_bool, structure=np.ones((3, 3), dtype=bool))
         if num_f == 0:
-            return None
-        cc_sizes = [(cid, int(np.sum(lbl == cid))) for cid in range(1, num_f + 1)]
-        dom_id = max(cc_sizes, key=lambda x: x[1])[0]
-        comp_mask = (lbl == dom_id)
-        min_frag_px = max(2, int(round(0.05 * (ppm ** 2))))
-        for cid, csize in cc_sizes:
-            if cid != dom_id and csize >= min_frag_px:
-                comp_mask |= (lbl == cid)
+            return []
+        mm_per_px = 1.0 / ppm
+        w_stroke_px = w_nib_mm * ppm
+
+        cc_info = []
+        for cid in range(1, num_f + 1):
+            cm = (lbl == cid)
+            pts_c = np.argwhere(cm)
+            cc_info.append({
+                "cid": cid,
+                "mask": cm,
+                "pts": pts_c,
+                "area": len(pts_c),
+                "h": int(pts_c[:, 0].max() - pts_c[:, 0].min()) + 1,
+                "w": int(pts_c[:, 1].max() - pts_c[:, 1].min()) + 1,
+            })
+        cc_info.sort(key=lambda x: x["area"], reverse=True)
+        dom = cc_info[0]
+        comp_mask = dom["mask"].copy()
+        dom_dist_out = distance_transform_edt(~comp_mask)
+
+        diacritic_strokes: List[Dict[str, Any]] = []
+        for c in cc_info[1:]:
+            min_gap_px = float(np.min(dom_dist_out[c["mask"]]))
+            fill_r = float(c["area"]) / float(max(1, c["h"] * c["w"]))
+            is_compact_dot = (
+                min_gap_px >= 0.28 * ppm
+                and 0.28 * (w_stroke_px ** 2) <= float(c["area"]) <= 2.35 * (w_stroke_px ** 2)
+                and max(c["h"], c["w"]) <= 1.75 * w_stroke_px
+                and fill_r >= 0.42
+            )
+            if is_compact_dot:
+                if allow_diacritics and len(diacritic_strokes) < 2:
+                    diacritic_strokes.append(self._make_impact_stroke(c["pts"], len(diacritic_strokes) + 1, ppm, w_nib_mm))
+            elif min_gap_px <= 1.05 * ppm and c["area"] >= max(2, int(round(0.045 * (ppm ** 2)))):
+                comp_mask |= c["mask"]
+                dom_dist_out = distance_transform_edt(~comp_mask)
 
         h, w = comp_mask.shape
-        mm_per_px = 1.0 / ppm
-        clean_comp, _, dist_to_hole = self._clean_pinholes_and_get_holes(comp_mask, ppm)
+        clean_comp, _, dist_to_hole = self._clean_pinholes_and_get_holes(comp_mask, ppm, is_serafini=True)
         dist_map = distance_transform_edt(clean_comp)
         raw_skel = skeletonize(clean_comp)
         if not np.any(raw_skel):
-            return None
+            return diacritic_strokes
 
-        spur_min_px = max(2, int(round(0.36 * ppm)))
+        spur_min_px = max(2, int(round(0.42 * ppm)))
         skel = self.prune_skeleton_spurs(raw_skel, dist_map, min_spur_len=spur_min_px)
         graph_ext = StrokeGraphExtractor()
         raw_segs = graph_ext.decompose_into_strokes(graph_ext.build_pixel_graph(skel, dist_map * 2.0))
         if not raw_segs:
-            return None
+            return diacritic_strokes
 
-        raw_segs = self._splice_cusp_tongues(raw_segs, px_per_mm=ppm)
         chained = self._chain_segments_minimum_action(raw_segs, ppm=ppm, w_nib_mm=w_nib_mm, max_strokes=6)
         med_half_w = float(np.median(dist_map[clean_comp])) if np.any(clean_comp) else (0.5 * w_nib_mm * ppm)
 
@@ -581,46 +741,35 @@ class CalligraphicVectorizer:
                 chains.append(pts)
 
         if not chains:
-            return None
+            return diacritic_strokes
 
-        # Recover any genuine uncovered cursive flourish (>= nib footprint) before single-tour assembly
-        min_res_mm2 = max(0.20, 1.05 * (w_nib_mm ** 2))
-        min_res_px = max(4, int(round(min_res_mm2 * (ppm ** 2))))
-        min_limb_arc_mm = max(0.52, 1.25 * w_nib_mm)
-        for _ in range(2):
-            pred_m = self._rasterize_strokes_mask(chains, (h, w), scale_w=1.05)
-            uncov = clean_comp & (~pred_m)
-            if int(np.sum(uncov)) < min_res_px:
-                break
-            lbl_u, n_u = label(uncov, structure=np.ones((3, 3), dtype=bool))
-            if n_u == 0:
-                break
-            cnt_u = np.bincount(lbl_u.ravel())
-            cnt_u[0] = 0
-            best_uid = int(np.argmax(cnt_u))
-            if int(cnt_u[best_uid]) < min_res_px:
-                break
-            u_mask = (lbl_u == best_uid)
-            u_grown = (cv2.dilate(u_mask.astype(np.uint8), self._ONES_3X3_U8, iterations=max(1, int(round(0.18 * ppm)))) > 0) & clean_comp
-            u_skel = skeletonize(u_grown)
-            if int(np.sum(u_skel)) < 2:
-                break
-            u_segs = graph_ext.decompose_into_strokes(graph_ext.build_pixel_graph(u_skel, dist_map * 2.0))
-            if not u_segs:
-                break
-            u_ch = self._chain_segments_minimum_action(u_segs, ppm=ppm, w_nib_mm=w_nib_mm, max_strokes=1)
-            if u_ch and len(u_ch[0].get("points", [])) >= 2:
-                u_pts = [(float(p[0]), float(p[1]), max(0.5, float(p[2]))) for p in u_ch[0]["points"]]
-                u_ext = self._extend_and_anchor_stroke(u_pts, clean_comp, dist_map, chains, med_half_w, ppm=ppm)
-                if self._polyline_arc_mm(u_ext, mm_per_px) >= min_limb_arc_mm:
-                    chains.append(u_ext)
-                else:
-                    break
+        def _make_smooth_lobe_loop(lobe_pts: List[Tuple[float, float, float]]) -> List[Tuple[float, float, float]]:
+            """Opens a collapsed cursive side-lobe into a smooth teardrop micro-loop instead of a 180° needle spike."""
+            if len(lobe_pts) < 3:
+                return []
+            j_y, j_x = lobe_pts[0][0], lobe_pts[0][1]
+            t_y, t_x, t_w = lobe_pts[-1][0], lobe_pts[-1][1], lobe_pts[-1][2]
+            ay, ax = t_y - j_y, t_x - j_x
+            alen = math.hypot(ay, ax)
+            if alen < 0.42 * ppm:
+                return []
+            ny, nx = -ax / alen, ay / alen
+            max_bulge = min(0.32 * ppm, 0.42 * max(p[2] * 0.5 for p in lobe_pts))
+            out_half = []
+            in_half = []
+            n_l = len(lobe_pts)
+            for idx_l, lp in enumerate(lobe_pts):
+                u = float(idx_l) / float(max(1, n_l - 1))
+                bulge = max_bulge * math.sin(math.pi * u)
+                out_half.append((lp[0] + ny * bulge, lp[1] + nx * bulge, lp[2] * 0.85))
+                in_half.append((lp[0] - ny * bulge, lp[1] - nx * bulge, lp[2] * 0.85))
+            tip_cap = (t_y + (ay / alen) * (0.12 * ppm), t_x + (ax / alen) * (0.12 * ppm), t_w * 0.85)
+            return out_half + [tip_cap] + in_half[::-1]
 
-        # Assemble all chains into 1 minimum-action continuous cursive tour (splicing T-branches in-place)
-        chains.sort(key=lambda ch: (min(p[0] for p in ch) * 1.2 + min(p[1] for p in ch)) * mm_per_px)
+        # Assemble chains into 1 curvilinear continuous tour without sharp 180° spikes
+        chains.sort(key=lambda ch: len(ch), reverse=True)
         tour = list(chains[0])
-        close_tol_px = 0.35 * ppm
+        close_tol_px = 0.40 * ppm
         if len(tour) >= 2 and math.hypot(tour[0][0] - tour[-1][0], tour[0][1] - tour[-1][1]) > close_tol_px:
             if (tour[0][0] * 1.5 + tour[0][1]) > (tour[-1][0] * 1.5 + tour[-1][1]):
                 tour = tour[::-1]
@@ -643,19 +792,19 @@ class CalligraphicVectorizer:
             d_mid_0 = min((math.hypot(bp[0] - chosen[0][0], bp[1] - chosen[0][1]), bi) for bi, bp in enumerate(tour))
             d_mid_1 = min((math.hypot(bp[0] - chosen[-1][0], bp[1] - chosen[-1][1]), bi) for bi, bp in enumerate(tour))
 
-            if is_ch_loop and d_mid_0[0] + 0.25 * ppm < best_d:
+            if is_ch_loop and d_mid_0[0] + 0.25 * ppm < best_d and d_mid_0[0] <= 0.90 * ppm:
                 bi = d_mid_0[1]
                 tour = tour[:bi + 1] + chosen + tour[bi + 1:]
-            elif min(d_mid_0[0], d_mid_1[0]) + 0.35 * ppm < best_d and min(d_mid_0[0], d_mid_1[0]) <= 0.75 * ppm:
+            elif min(d_mid_0[0], d_mid_1[0]) + 0.30 * ppm < best_d and min(d_mid_0[0], d_mid_1[0]) <= 0.75 * ppm:
                 if d_mid_0[0] <= d_mid_1[0]:
                     bi = d_mid_0[1]
-                    exc = chosen + chosen[:-1][::-1]
+                    lobe_loop = _make_smooth_lobe_loop(chosen)
                 else:
                     bi = d_mid_1[1]
-                    rev_c = chosen[::-1]
-                    exc = rev_c + rev_c[:-1][::-1]
-                tour = tour[:bi + 1] + exc + tour[bi + 1:]
-            else:
+                    lobe_loop = _make_smooth_lobe_loop(chosen[::-1])
+                if lobe_loop:
+                    tour = tour[:bi + 1] + lobe_loop + tour[bi + 1:]
+            elif best_d <= 1.25 * ppm:
                 if best_mode == "append_fwd":
                     tour = tour + chosen
                 elif best_mode == "append_rev":
@@ -680,11 +829,11 @@ class CalligraphicVectorizer:
             is_serafini=True,
         )
         if len(cal_pts) < 2:
-            return None
+            return diacritic_strokes
 
         arc_mm = self._polyline_arc_mm(cal_pts, mm_per_px)
         mean_w_px = float(np.mean([p[2] for p in cal_pts]))
-        return {
+        main_st = {
             "stroke_id": "cal_s00",
             "order_index": 0,
             "points": cal_pts,
@@ -701,6 +850,12 @@ class CalligraphicVectorizer:
             "is_macro_non_scribal": is_macro,
             "px_per_mm": ppm,
         }
+        all_out = [main_st]
+        for idx_d, ds in enumerate(diacritic_strokes, start=1):
+            ds["order_index"] = idx_d
+            ds["stroke_id"] = f"cal_s{idx_d:02d}"
+            all_out.append(ds)
+        return all_out
 
     def _chain_segments_minimum_action(
         self,
@@ -708,13 +863,13 @@ class CalligraphicVectorizer:
         ppm: float,
         w_nib_mm: float,
         max_strokes: int,
+        medieval_downward_only: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Chains topological skeleton segments across junctions by comparing on-vellum
-        Euler-Bernoulli bending + gap cost (in mm) against the physical pen-lift cost `C_lift_mm`:
-          C_join(s1 -> s2) = d_gap_mm + 0.95 * w_nib_mm * (1 - cos_theta)^1.4
-        Straight X-crossings (cos_theta ~ 1.0, C_join ~ 0) merge first, leaving orthogonal crossbars
-        separate; smooth stem-to-bowl Eulerian trails (`'d'`, `'b'`, `'q'`, `'8'`) fuse into 1 fluid stroke.
+        Euler-Bernoulli bending + gap cost (in mm) against the physical pen-lift cost `C_lift_mm`.
+        When `medieval_downward_only=True` (Voynich split quill), segments are NEVER reversed
+        upward against the nib grain and never fused into 360° upward-climbing loops!
         """
         if len(segments) <= 1:
             return segments
@@ -727,7 +882,26 @@ class CalligraphicVectorizer:
         if len(work) <= 1:
             return work
 
-        # Pass 1: Merge whenever C_join_mm < PEN_LIFT_ACTION_COST_MM and cos_theta >= -0.38
+        def _violates_medieval_pull(cand_pts: List[Tuple[float, float, float]]) -> bool:
+            if not medieval_downward_only or len(cand_pts) < 4:
+                return False
+            # Never close back onto start into a 360° circle on a medieval split quill!
+            if len(cand_pts) >= 6 and math.hypot(cand_pts[0][0] - cand_pts[-1][0], cand_pts[0][1] - cand_pts[-1][1]) * mm_per_px <= 0.45:
+                return True
+            # Never climb upward by > 1.05 * w_nib_mm after reaching any point along the stroke!
+            max_y_seen = float(cand_pts[0][0])
+            max_climb_px = max(0.46, 1.05 * w_nib_mm) * ppm
+            for pt in cand_pts[1:]:
+                y_cur = float(pt[0])
+                if y_cur > max_y_seen:
+                    max_y_seen = y_cur
+                elif (max_y_seen - y_cur) > max_climb_px:
+                    return True
+            return False
+
+        min_cos_allow = 0.22 if medieval_downward_only else -0.38
+
+        # Pass 1: Merge whenever C_join_mm < PEN_LIFT_ACTION_COST_MM and tangent/pull constraints hold
         merged = True
         while merged and len(work) > 1:
             merged = False
@@ -741,22 +915,30 @@ class CalligraphicVectorizer:
                     p2 = work[j]["points"]
                     p2s, p2e = p2[0], p2[-1]
 
-                    orientations = [
-                        (math.hypot(p1e[0] - p2s[0], p1e[1] - p2s[1]) * mm_per_px, p1, p2),
-                        (math.hypot(p1e[0] - p2e[0], p1e[1] - p2e[1]) * mm_per_px, p1, p2[::-1]),
-                        (math.hypot(p2e[0] - p1s[0], p2e[1] - p1s[1]) * mm_per_px, p2, p1),
-                        (math.hypot(p1s[0] - p2s[0], p1s[1] - p2s[1]) * mm_per_px, p1[::-1], p2),
-                    ]
+                    if medieval_downward_only:
+                        orientations = [
+                            (math.hypot(p1e[0] - p2s[0], p1e[1] - p2s[1]) * mm_per_px, p1, p2),
+                            (math.hypot(p2e[0] - p1s[0], p2e[1] - p1s[1]) * mm_per_px, p2, p1),
+                        ]
+                    else:
+                        orientations = [
+                            (math.hypot(p1e[0] - p2s[0], p1e[1] - p2s[1]) * mm_per_px, p1, p2),
+                            (math.hypot(p1e[0] - p2e[0], p1e[1] - p2e[1]) * mm_per_px, p1, p2[::-1]),
+                            (math.hypot(p2e[0] - p1s[0], p2e[1] - p1s[1]) * mm_per_px, p2, p1),
+                            (math.hypot(p1s[0] - p2s[0], p1s[1] - p2s[1]) * mm_per_px, p1[::-1], p2),
+                        ]
                     for gap_mm, a_pts, b_pts in orientations:
                         if gap_mm > max_join_gap_mm:
                             continue
                         cos_t = JunctionResolver._tangent_cosine(a_pts, b_pts, k=k_tan)
-                        if cos_t < -0.38:
+                        if cos_t < min_cos_allow:
+                            continue
+                        comb = a_pts + (b_pts[1:] if gap_mm < 0.08 else b_pts)
+                        if _violates_medieval_pull(comb):
                             continue
                         turn_cost_mm = gap_mm + 0.95 * w_nib_mm * ((1.0 - cos_t) ** 1.4)
                         if turn_cost_mm < best_cost:
                             best_cost = turn_cost_mm
-                            comb = a_pts + (b_pts[1:] if gap_mm < 0.08 else b_pts)
                             best_action = (i, j, comb)
 
             if best_action is not None:
@@ -772,7 +954,7 @@ class CalligraphicVectorizer:
                 work.pop(j)
                 merged = True
 
-        # Pass 2: If still above stroke ceiling, coalesce closest touching branches at junctions before ranking by arc-length
+        # Pass 2: If still above stroke ceiling, coalesce closest compatible branches or rank longest strokes
         while max_strokes > 0 and len(work) > max_strokes:
             best_d_mm = max_join_gap_mm * 1.45
             best_pair = None
@@ -780,14 +962,21 @@ class CalligraphicVectorizer:
                 p1 = work[i]["points"]
                 for j in range(i + 1, len(work)):
                     p2 = work[j]["points"]
-                    opts = [
-                        (math.hypot(p1[-1][0] - p2[0][0], p1[-1][1] - p2[0][1]) * mm_per_px, p1 + p2),
-                        (math.hypot(p1[-1][0] - p2[-1][0], p1[-1][1] - p2[-1][1]) * mm_per_px, p1 + p2[::-1]),
-                        (math.hypot(p2[-1][0] - p1[0][0], p2[-1][1] - p1[0][1]) * mm_per_px, p2 + p1),
-                        (math.hypot(p1[0][0] - p2[0][0], p1[0][1] - p2[0][1]) * mm_per_px, p1[::-1] + p2),
-                    ]
+                    opts = (
+                        [
+                            (math.hypot(p1[-1][0] - p2[0][0], p1[-1][1] - p2[0][1]) * mm_per_px, p1 + p2),
+                            (math.hypot(p2[-1][0] - p1[0][0], p2[-1][1] - p1[0][1]) * mm_per_px, p2 + p1),
+                        ]
+                        if medieval_downward_only
+                        else [
+                            (math.hypot(p1[-1][0] - p2[0][0], p1[-1][1] - p2[0][1]) * mm_per_px, p1 + p2),
+                            (math.hypot(p1[-1][0] - p2[-1][0], p1[-1][1] - p2[-1][1]) * mm_per_px, p1 + p2[::-1]),
+                            (math.hypot(p2[-1][0] - p1[0][0], p2[-1][1] - p1[0][1]) * mm_per_px, p2 + p1),
+                            (math.hypot(p1[0][0] - p2[0][0], p1[0][1] - p2[0][1]) * mm_per_px, p1[::-1] + p2),
+                        ]
+                    )
                     for d_mm, comb in opts:
-                        if d_mm < best_d_mm:
+                        if d_mm < best_d_mm and not _violates_medieval_pull(comb):
                             best_d_mm = d_mm
                             best_pair = (i, j, comb)
             if best_pair is not None:
@@ -940,7 +1129,8 @@ class CalligraphicVectorizer:
         cusp_chord_mm = max(0.42, 0.95 * w_nib_mm)
         min_anchor_sep_mm = max(0.55, 1.20 * w_nib_mm)
         cand_cusps: List[Tuple[int, float]] = []
-        if cum_mm[-1] >= 2.0 * cusp_chord_mm:
+        # Never freeze sharp angles on Seraphinianus: its continuous cursive script is 100% curvilinear loops!
+        if (not is_serafini) and cum_mm[-1] >= 2.0 * cusp_chord_mm:
             for i in range(1, n_pts - 1):
                 if cum_mm[i] < cusp_chord_mm or (cum_mm[-1] - cum_mm[i]) < cusp_chord_mm:
                     continue
@@ -967,13 +1157,14 @@ class CalligraphicVectorizer:
                     anchors[-1] = idx_c
         anchors.append(n_pts - 1)
 
-        # Physical hand-inertia smoothing scale (0.22 mm) and sub-nib RDP simplification (0.052 mm)
+        # Physical hand-inertia smoothing scale (0.30 mm curvilinear on Seraphinianus, 0.22 mm on Voynich)
         py_all = np.array([p[0] for p in dedup], dtype=np.float64)
         px_all = np.array([p[1] for p in dedup], dtype=np.float64)
         step_ds = float(np.median(np.hypot(np.diff(py_all), np.diff(px_all)))) if n_pts >= 3 else (0.08 * ppm)
         step_ds = max(0.04 * ppm, step_ds)
-        sig_pts = max(1.0, min(4.5, (0.22 * ppm) / max(1e-3, step_ds)))
-        rdp_eps_px = 0.052 * ppm
+        inertia_mm = 0.30 if is_serafini else 0.22
+        sig_pts = max(1.1, min(5.0, (inertia_mm * ppm) / max(1e-3, step_ds)))
+        rdp_eps_px = (0.040 if is_serafini else 0.052) * ppm
         simplified: List[Tuple[float, float, float]] = []
 
         if is_closed and len(anchors) == 2:

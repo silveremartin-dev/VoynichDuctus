@@ -231,6 +231,94 @@ def _extract_euler_bernoulli_ductus(
     return eb_strokes, eb_svg
 
 
+def _sanitize_glyph_mask_by_stroke_thickness(
+    g_mask: np.ndarray,
+    is_serafini: bool,
+    scale_calib: MetricScaleCalibration,
+) -> Tuple[np.ndarray, int, int, int, int]:
+    """
+    Cleans an isolated glyph mask strictly by the physical ratio of component size
+    to local stroke thickness `w_stroke`, eliminating stray parchment grain and
+    adjacent-line bleed on Voynich while preserving authentic detached diacritic dots
+    on Codex Seraphinianus, and returns `(clean_submask, dy0, dx0, dy1, dx1)` tightly cropped.
+    """
+    from scipy.ndimage import distance_transform_edt, label as nd_label
+
+    gh, gw = g_mask.shape[:2]
+    if gh == 0 or gw == 0 or not np.any(g_mask):
+        return g_mask, 0, 0, gh, gw
+
+    ppm = float(scale_calib.px_per_mm)
+    lbl, num = nd_label(g_mask, structure=np.ones((3, 3), dtype=bool))
+    if num <= 1:
+        ys, xs = np.where(g_mask)
+        y0, y1 = int(ys.min()), int(ys.max()) + 1
+        x0, x1 = int(xs.min()), int(xs.max()) + 1
+        return g_mask[y0:y1, x0:x1], y0, x0, y1, x1
+
+    comps = []
+    for cid in range(1, num + 1):
+        cm = (lbl == cid)
+        ys, xs = np.where(cm)
+        area = len(ys)
+        comps.append({
+            "cid": cid,
+            "mask": cm,
+            "area": area,
+            "y0": int(ys.min()),
+            "y1": int(ys.max()) + 1,
+            "x0": int(xs.min()),
+            "x1": int(xs.max()) + 1,
+            "h": int(ys.max() - ys.min()) + 1,
+            "w": int(xs.max() - xs.min()) + 1,
+        })
+    comps.sort(key=lambda c: c["area"], reverse=True)
+    dom = comps[0]
+    edt_dom = distance_transform_edt(dom["mask"])[dom["mask"]]
+    w_stroke_px = float(np.clip(2.0 * np.median(edt_dom), 0.30 * ppm, 0.68 * ppm)) if len(edt_dom) > 0 else (0.44 * ppm)
+
+    kept = dom["mask"].copy()
+    for c in comps[1:]:
+        v_gap = max(0, max(dom["y0"] - c["y1"], c["y0"] - dom["y1"]))
+        h_gap = max(0, max(dom["x0"] - c["x1"], c["x0"] - dom["x1"]))
+        if not is_serafini:
+            # Voynich: no i-dots exist; keep only genuine detached stroke limbs close to the main body
+            min_limb_area = max(1.45 * (w_stroke_px ** 2), 0.14 * float(dom["area"]))
+            max_span = float(max(c["h"], c["w"]))
+            if (
+                c["area"] >= min_limb_area
+                and max_span >= 1.35 * w_stroke_px
+                and v_gap <= 1.65 * w_stroke_px
+                and h_gap <= 1.50 * w_stroke_px
+            ):
+                kept |= c["mask"]
+        else:
+            # Seraphinianus: keep cursive hairline continuations AND crisp supralinear/infralinear diacritic dots
+            touches_tb_edge = (c["y0"] == 0 and gh > int(5.0 * ppm)) or (c["y1"] == gh and gh > int(5.0 * ppm))
+            is_limb = (
+                not touches_tb_edge
+                and c["area"] >= 0.42 * (w_stroke_px ** 2)
+                and v_gap <= 2.40 * w_stroke_px
+                and h_gap <= 1.80 * w_stroke_px
+            )
+            fill_ratio = float(c["area"]) / float(max(1, c["h"] * c["w"]))
+            is_diacritic_dot = (
+                not touches_tb_edge
+                and 0.30 * (w_stroke_px ** 2) <= float(c["area"]) <= 2.35 * (w_stroke_px ** 2)
+                and fill_ratio >= 0.42
+                and max(c["h"], c["w"]) <= 1.85 * w_stroke_px
+                and v_gap <= 3.50 * w_stroke_px
+                and h_gap <= 1.35 * w_stroke_px
+            )
+            if is_limb or is_diacritic_dot:
+                kept |= c["mask"]
+
+    ys_k, xs_k = np.where(kept)
+    y0, y1 = int(ys_k.min()), int(ys_k.max()) + 1
+    x0, x1 = int(xs_k.min()), int(xs_k.max()) + 1
+    return kept[y0:y1, x0:x1], y0, x0, y1, x1
+
+
 def _vectorize_glyph_mask(
     g_mask: np.ndarray,
     gy0: int,
@@ -246,7 +334,7 @@ def _vectorize_glyph_mask(
     resolver: JunctionResolver,
 ) -> Tuple[List[Dict[str, Any]], str, List[Dict[str, Any]], str, List[List[int]]]:
     """Extracts biomechanical mm quill/ribbon ductus strokes, Euler-Bernoulli skeleton ductus, SVGs, and tight ink polygon."""
-    max_strokes = 1 if is_serafini else 4
+    max_strokes = 3 if is_serafini else 4
     ppm = float(scale_calib.px_per_mm)
     strokes = tracker.extract_calligraphic_ductus(
         g_mask, single_stroke_mode=is_serafini, max_strokes=max_strokes, scale_calib=scale_calib
@@ -453,10 +541,13 @@ def enrich_page_multimodel(
             assembled = typewriter_decomposer.decompose_word(w_mask, scale_calib=scale_calib)
             g_idx = 0
             for comp in assembled:
-                g_mask = comp["mask"].astype(bool)
+                raw_g_mask = comp["mask"].astype(bool)
                 by0, bx0, by1, bx1 = comp["bbox_local"]
-                gy0, gx0 = wy0 + int(by0), wx0 + int(bx0)
-                gy1, gx1 = wy0 + int(by1), wx0 + int(bx1)
+                g_mask, ty0, tx0, ty1, tx1 = _sanitize_glyph_mask_by_stroke_thickness(
+                    raw_g_mask, is_serafini=is_serafini, scale_calib=scale_calib
+                )
+                gy0, gx0 = wy0 + int(by0) + ty0, wx0 + int(bx0) + tx0
+                gy1, gx1 = wy0 + int(by0) + ty1, wx0 + int(bx0) + tx1
                 gh, gw = g_mask.shape[:2]
                 area = int(np.sum(g_mask))
                 h_mm = scale_calib.px_to_mm(gh)

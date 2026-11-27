@@ -471,21 +471,24 @@ class GlyphSegmenter:
         import cv2 as _cv2
         core_ink = ((gray < t_sauv) & (darkness > dark_floor)) | (darkness > h_th)
 
-        # Recover tight inner loop bowls (e.g. upper/lower eyes of EVA 'd'/'8', tight 'o'/'a'/'e', 'sh' plumes)
-        # where optical ink bleed raises local darkness slightly above h_th despite a clear bright center vs the ink ring.
-        ring_k = max(5, (int(round(0.60 * px_per_mm)) | 1))
+        # Recover tight inner loop bowls (e.g. upper/lower eyes of EVA 'd'/'8', tight 'o'/'a'/'e', and narrow Seraphinianus cursive loops)
+        # where optical ink bleed raises local darkness slightly above h_th despite a clear bright center vs the surrounding ink ring.
+        is_serafini_cal = bool(scale_calib is not None and getattr(scale_calib, "manuscript_type", "") == "seraphinianus")
+        ring_k = max(3, (int(round((0.52 if is_serafini_cal else 0.60) * px_per_mm)) | 1))
         ring_kernel = np.ones((ring_k, ring_k), dtype=np.uint8)
         local_ink_min = _cv2.erode(gray, ring_kernel)
+        min_ring_contrast = max(14.0, 0.20 * p98_d) if is_serafini_cal else max(22.0, 0.30 * p98_d)
+        bg_allowance = 0.66 if is_serafini_cal else 0.52
         cand_bowl = (
             core_ink
-            & ((gray - local_ink_min) >= max(22.0, 0.30 * p98_d))
-            & (gray >= (bg - 0.52 * max(25.0, p98_d)))
+            & ((gray - local_ink_min) >= min_ring_contrast)
+            & (gray >= (bg - bg_allowance * max(25.0, p98_d)))
         )
         if np.any(cand_bowl):
             test_core = core_ink & (~cand_bowl)
             pad_test = np.pad(test_core, 1, mode="constant", constant_values=False)
             enclosed_bowls = (binary_fill_holes(pad_test) & (~pad_test))[1:-1, 1:-1] & cand_bowl
-            min_bowl_px = max(4, int(round(0.028 * (px_per_mm ** 2))))
+            min_bowl_px = max(2 if is_serafini_cal else 3, int(round(0.022 * (px_per_mm ** 2))))
             if np.any(enclosed_bowls):
                 lbl_b, num_b = label(enclosed_bowls)
                 for bid in range(1, num_b + 1):

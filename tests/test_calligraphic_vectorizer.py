@@ -146,13 +146,22 @@ def test_small_looped_glyph_no_sub_nib_sawtooth_tremor():
     mask[bowl_hole] = False
 
     strokes = vec.extract_calligraphic_ductus(mask, scale_calib=cal)
-    assert 1 <= len(strokes) <= 2
+    # Medieval Split-Quill Pull Law: looped Voynich 'a' executes in 2-3 downward quill strokes (never 1 upward 360° circle)
+    assert 2 <= len(strokes) <= 4
+    assert all(not s.get("is_impact", False) for s in strokes)
 
     total_pts = sum(len(s["points"]) for s in strokes)
-    assert total_pts <= 32
+    assert total_pts <= 42
 
     for s in strokes:
         pts = s["points"]
+        # Verify downward medieval quill pull (no stroke climbs steeply upward against the 40° split nib)
+        max_y_seen = pts[0][0]
+        for p in pts[1:]:
+            if p[0] > max_y_seen:
+                max_y_seen = p[0]
+            else:
+                assert (max_y_seen - p[0]) / ppm <= 0.65, "Medieval Voynich stroke pushed upward against split nib!"
         for i in range(1, len(pts) - 1):
             dy1, dx1 = pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]
             dy2, dx2 = pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]
@@ -164,6 +173,8 @@ def test_small_looped_glyph_no_sub_nib_sawtooth_tremor():
 
     svg = VectorExporter.to_svg(strokes, 30, 23, px_per_mm=ppm, variable_width=True)
     assert 'fill-rule="evenodd"' in svg
+    assert 'fill-opacity="0.68"' in svg
+
 
 
 

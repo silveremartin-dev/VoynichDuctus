@@ -1745,6 +1745,10 @@ def generate_explorer_html(
             }}
             if (ms === 'voynich') {{
                 applyFolioOrdering();
+            }} else {{
+                const procSet = new Set(((data.live_stats && data.live_stats.seraphinianus && data.live_stats.seraphinianus.processed_page_ids) || []));
+                const firstHdIdx = data.seraphinianus.pages.findIndex(p => procSet.has(p.page_id));
+                if (firstHdIdx >= 0) currentPageIdx = firstHdIdx;
             }}
 
             populateAlphabetSchemeOptions();
@@ -2078,12 +2082,18 @@ def generate_explorer_html(
                     }}
                 }}
 
+                const procIds = new Set(((data.live_stats && data.live_stats[currentMs] && data.live_stats[currentMs].processed_page_ids) || []));
+                const hdBadge = procIds.has(p.page_id)
+                    ? `<span style="font-size:0.56rem; background:#064e3b; border:1px solid #10b981; color:#34d399; padding:0px 4px; border-radius:3px; font-weight:bold;" title="Reprocessed HD Millimeter Ductus">HD</span>`
+                    : '';
+
                 items.push(`
                     <div class="page-item ${{idx === currentPageIdx ? 'active' : ''}}" data-page-id="${{p.page_id}}" onclick="selectPage(${{idx}})">
                         <div style="overflow:hidden;">
                             <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
                                 <span style="font-size:0.68rem; color:var(--text-muted); font-family:monospace; min-width:24px;">#${{idx + 1}}</span>
                                 <strong style="color:var(--text-main);">${{p.page_id}}</strong>
+                                ${{hdBadge}}
                                 ${{extraTag}}
                             </div>
                             <div style="font-size:0.70rem; color:var(--text-muted); margin-top:2px;">${{p.line_count}} lines, ${{wCount}} words</div>
@@ -2338,6 +2348,13 @@ def generate_explorer_html(
 
         function cleanSvgString(svg, pad = 6) {{
             if (!svg) return '';
+            // Preserve true physical millimeter stroke widths & variable-width nib ribbons emitted by VectorExporter
+            if (svg.includes('id="voynich_strokes"')) {{
+                if (!svg.includes('preserveAspectRatio=')) {{
+                    svg = svg.replace(/<svg\b/, '<svg preserveAspectRatio="xMidYMid meet"');
+                }}
+                return svg.replace(/style="overflow:visible;"/, 'style="overflow:hidden;"');
+            }}
             let vw = 40;
             let vh = 40;
             const match = svg.match(/viewBox="([^"]+)"/);
@@ -4047,7 +4064,13 @@ def generate_explorer_html(
                         <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; max-height:94px; padding:4px; overflow:hidden;">
                             ${{cleanDuctusSvg}}
                         </div>
-                        <span style="font-size:0.56rem; color:#38bdf8; flex-shrink:0;">${{(selectedGlyph.strokes && selectedGlyph.strokes[0] && selectedGlyph.strokes[0].is_impact) ? 'Touchdown Impact (v=0 · 0.0 mm)' : `${{selectedGlyph.stroke_count || 1}} stroke(s) · Nib &amp; Pressure (mm)`}}</span>
+                        <span style="font-size:0.56rem; color:#38bdf8; flex-shrink:0;">${{(() => {{
+                            const sts = selectedGlyph.strokes || [];
+                            if (sts.length === 1 && sts[0].is_impact) return `Nib Dot (Ø ${{sts[0].mean_width_mm || '0.35'}} mm)`;
+                            const mwList = sts.filter(s => !s.is_impact && s.mean_width_mm).map(s => Number(s.mean_width_mm));
+                            const mwTxt = mwList.length ? ` · Width ~${{(mwList.reduce((a,b)=>a+b,0)/mwList.length).toFixed(2)}} mm` : ' · Nib & Pressure (mm)';
+                            return `${{selectedGlyph.stroke_count || sts.length || 1}} stroke(s)${{mwTxt}}`;
+                        }})()}}</span>
                     </div>
                     <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:145px; height:145px; background:#040d1a; border:1px solid #a855f7; border-radius:6px; padding:6px; overflow:hidden;">
                         <span style="font-size:0.60rem; color:#c084fc; font-weight:bold; letter-spacing:0.03em; text-transform:uppercase; flex-shrink:0;">📐 Euler-Bernoulli Skeleton</span>

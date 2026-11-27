@@ -138,11 +138,11 @@ class VectorExporter:
             m = n_k - 1
             for i in range(m):
                 p0, p1, p2, p3 = clean[(i - 1) % m], clean[i], clean[(i + 1) % m], clean[(i + 2) % m]
-                t1 = 0.0 if _turn_cos_xy(p0, p1, p2) < 0.0 else (1.0 / 6.0)
-                t2 = 0.0 if _turn_cos_xy(p1, p2, p3) < 0.0 else (1.0 / 6.0)
+                t1 = 0.0 if _turn_cos_xy(p0, p1, p2) < -0.25 else (1.0 / 6.0)
+                t2 = 0.0 if _turn_cos_xy(p1, p2, p3) < -0.25 else (1.0 / 6.0)
                 cp1x, cp1y = p1[0] + (p2[0] - p0[0]) * t1, p1[1] + (p2[1] - p0[1]) * t1
                 cp2x, cp2y = p2[0] - (p3[0] - p1[0]) * t2, p2[1] - (p3[1] - p1[1]) * t2
-                steps = 4
+                steps = 5
                 for s_i in range(steps):
                     u = float(s_i) / float(steps)
                     um = 1.0 - u
@@ -154,11 +154,11 @@ class VectorExporter:
         else:
             for i in range(n_k - 1):
                 p0, p1, p2, p3 = clean[max(0, i - 1)], clean[i], clean[i + 1], clean[min(n_k - 1, i + 2)]
-                t1 = 0.0 if (i > 0 and _turn_cos_xy(p0, p1, p2) < 0.0) else (1.0 / 6.0)
-                t2 = 0.0 if (i + 1 < n_k - 1 and _turn_cos_xy(p1, p2, p3) < 0.0) else (1.0 / 6.0)
+                t1 = 0.0 if (i > 0 and _turn_cos_xy(p0, p1, p2) < -0.25) else (1.0 / 6.0)
+                t2 = 0.0 if (i + 1 < n_k - 1 and _turn_cos_xy(p1, p2, p3) < -0.25) else (1.0 / 6.0)
                 cp1x, cp1y = p1[0] + (p2[0] - p0[0]) * t1, p1[1] + (p2[1] - p0[1]) * t1
                 cp2x, cp2y = p2[0] - (p3[0] - p1[0]) * t2, p2[1] - (p3[1] - p1[1]) * t2
-                steps = 4
+                steps = 5
                 for s_i in range(steps):
                     u = float(s_i) / float(steps)
                     um = 1.0 - u
@@ -212,11 +212,34 @@ class VectorExporter:
             tokens.append("Z")
             return " ".join(tokens)
 
+        # Smooth semicircular endcaps on open strokes so the true physical nib thickness is cleanly closed
         tokens = [f"M {left_side[0][0]:.2f} {left_side[0][1]:.2f}"]
         for lx, ly in left_side[1:]:
             tokens.append(f"L {lx:.2f} {ly:.2f}")
+        end_x, end_y, end_w = samples[-1]
+        end_r = 0.5 * end_w
+        dx_e, dy_e = samples[-1][0] - samples[-2][0], samples[-1][1] - samples[-2][1]
+        ne = math.hypot(dx_e, dy_e)
+        if ne > 1e-5:
+            ux_e, uy_e = dx_e / ne, dy_e / ne
+            px_e, py_e = -uy_e, ux_e
+            for ang in (0.25 * math.pi, 0.0, -0.25 * math.pi):
+                cx_cap = end_x + end_r * (math.cos(ang) * ux_e + math.sin(ang) * px_e)
+                cy_cap = end_y + end_r * (math.cos(ang) * uy_e + math.sin(ang) * py_e)
+                tokens.append(f"L {cx_cap:.2f} {cy_cap:.2f}")
         for rx, ry in reversed(right_side):
             tokens.append(f"L {rx:.2f} {ry:.2f}")
+        st_x, st_y, st_w = samples[0]
+        st_r = 0.5 * st_w
+        dx_s, dy_s = samples[0][0] - samples[1][0], samples[0][1] - samples[1][1]
+        ns_0 = math.hypot(dx_s, dy_s)
+        if ns_0 > 1e-5:
+            ux_s, uy_s = dx_s / ns_0, dy_s / ns_0
+            px_s, py_s = -uy_s, ux_s
+            for ang in (0.25 * math.pi, 0.0, -0.25 * math.pi):
+                cx_cap = st_x + st_r * (math.cos(ang) * ux_s + math.sin(ang) * px_s)
+                cy_cap = st_y + st_r * (math.cos(ang) * uy_s + math.sin(ang) * py_s)
+                tokens.append(f"L {cx_cap:.2f} {cy_cap:.2f}")
         tokens.append("Z")
         return " ".join(tokens)
 
@@ -314,32 +337,36 @@ class VectorExporter:
                 )
                 continue
 
-            # 1. Variable-width physical nib + pressure ribbon (true pleins & déliés in mm)
+            # 1. Prominent physical variable-width nib + pressure ribbon (true supposed stroke thickness in mm!)
+            avg_width = sum(p[2] for p in norm_pts) / len(norm_pts)
             if variable_width:
                 ribbon_d = VectorExporter._build_variable_width_ribbon_d(norm_pts)
                 if ribbon_d:
+                    rib_edge_w = max(0.20, (0.035 * eff_ppm) if eff_ppm > 0 else 0.32)
                     svg_lines.append(
-                        f'    <path d="{ribbon_d}" fill="{color}" fill-rule="evenodd" fill-opacity="0.34" stroke="none"/>'
+                        f'    <path d="{ribbon_d}" fill="{color}" fill-rule="evenodd" fill-opacity="0.68" '
+                        f'stroke="{color}" stroke-opacity="0.95" stroke-width="{rib_edge_w:.2f}"/>'
                     )
-
-            # 2. Crisp kinematic centerline trajectory (true physical scale, never glyph_dim-scaled)
-            avg_width = sum(p[2] for p in norm_pts) / len(norm_pts)
-            if variable_width:
-                stroke_width = max(phys_spine_min, min(avg_width * 0.34, phys_spine_cap))
+                stroke_width = max(0.30, (0.055 * eff_ppm) if eff_ppm > 0 else max(phys_spine_min * 0.7, min(avg_width * 0.22, phys_spine_cap * 0.6)))
+                spine_color = "#f8fafc"
+                spine_opacity = "0.82"
             else:
                 stroke_width = max(phys_spine_min, min(avg_width * 0.42, phys_spine_cap * 1.15))
+                spine_color = color
+                spine_opacity = "1.0"
 
             d_str = VectorExporter._points_to_smooth_path_d(norm_pts)
             start_y, start_x = norm_pts[0][0], norm_pts[0][1]
 
             svg_lines.append(
                 f'    <path id="{stroke.get("stroke_id", f"s{i}")}" d="{d_str}" '
-                f'fill="none" stroke="{color}" stroke-width="{stroke_width:.2f}" '
-                f'stroke-linecap="round" stroke-linejoin="round" data-order="{stroke.get("order_index", i)}"/>'
+                f'fill="none" stroke="{spine_color}" stroke-opacity="{spine_opacity}" stroke-width="{stroke_width:.2f}" '
+                f'stroke-linecap="round" stroke-linejoin="round" data-order="{stroke.get("order_index", i)}" '
+                f'data-mean-width="{avg_width:.2f}"/>'
             )
 
             # 3. Pen-down touchdown dot (#10b981) & subtle direction chevron at pen-lift exit
-            dot_r = max(0.45, min(stroke_width * 0.80, phys_spine_cap * 0.95))
+            dot_r = max(0.42, min(max(stroke_width * 1.25, avg_width * 0.22), phys_spine_cap * 0.90))
             svg_lines.append(
                 f'    <circle cx="{start_x:.2f}" cy="{start_y:.2f}" r="{dot_r:.2f}" fill="#10b981" opacity="0.95"/>'
             )
