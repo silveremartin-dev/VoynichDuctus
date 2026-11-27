@@ -337,19 +337,19 @@ In Panel 4 of the Explorer, the number of physical components $N$ extracted insi
 Every execution of `scripts/build_dynamic_grand_explorer.py` dynamically recomputes and injects the exact corpus counts and `BenchmarkSuite` diagnostics from `data/processed/atlas_dataset/` into both `grand_glyph_explorer.html` and the block below (zero hardcoded statistics):
 
 <!-- LIVE_CORPUS_STATS_START -->
-*Auto-synchronized from `data/processed/atlas_dataset/` on `2026-11-27 16:17:41` via `scripts/build_dynamic_grand_explorer.py`:*
+*Auto-synchronized from `data/processed/atlas_dataset/` on `2026-11-27 16:40:37` via `scripts/build_dynamic_grand_explorer.py`:*
 
 | Metric / Database Scope | Voynich Manuscript (Beinecke MS 408 · 225 mm) | Codex Seraphinianus (1981 · 350 mm) |
 | :--- | :--- | :--- |
-| **Indexed Dataset Pages (Canvas Stubs)** | **225** folios (37,601 words, 199,091 glyphs) | **371** pages (63,999 words, 456,338 glyphs) |
+| **Indexed Dataset Pages (Canvas Stubs)** | **225** folios (37,601 words, 199,091 glyphs) | **371** pages (63,999 words, 456,214 glyphs) |
 | **Active HD Reprocessed Set** | **5** HD folios (`f1r, f1v, f2r, f2v, f3r`) | **6** HD plates (`serafini_p002, serafini_p004, serafini_p006, serafini_p008, serafini_p011, serafini_p030`) |
-| **Processed Words & Glyphs (`GenerativeTypewriterDecomposer`)** | **575** words · **2,236** isolated glyphs | **515** words · **3,230** isolated glyphs |
-| **Live Canonical Alphabet Size (100% Coverage)** | **42** emergent archetypes | **56** emergent archetypes |
+| **Processed Words & Glyphs (`GenerativeTypewriterDecomposer`)** | **575** words · **2,236** isolated glyphs | **515** words · **3,106** isolated glyphs |
+| **Live Canonical Alphabet Size (100% Coverage)** | **41** emergent archetypes | **55** emergent archetypes |
 
 | Corpus / Seeded Control (`BenchmarkSuite`) | Evaluated Scope | $H_1$ (bits) | $H_2$ Cond. (bits) | Hurst $H$ (DFA) | LZMA Ratio | Markov Top-1 |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Voynich (HD Ductus G-Tokens)** | 5 HD folios (575 words) | 4.97 | 4.16 | 0.650 | 0.240 | O1=15% / O2=43% |
-| **Codex Seraphinianus (Ribbon G-Tokens)** | 6 text pages (515 words) | 5.54 | 4.58 | 0.700 | 0.240 | O1=12% / O2=49% |
+| **Voynich (HD Ductus G-Tokens)** | 5 HD folios (575 words) | 4.99 | 4.18 | 0.670 | 0.240 | O1=15% / O2=43% |
+| **Codex Seraphinianus (Ribbon G-Tokens)** | 6 text pages (515 words) | 5.61 | 4.58 | 0.710 | 0.240 | O1=11% / O2=51% |
 | **Natural Latin Herbal (Control)** | Seeded baseline (574 words) | 4.04 | 3.28 | 0.860 | 0.200 | O1=22% / O2=48% |
 | **Timm Self-Citation (Baseline)** | Seeded baseline (574 words) | 3.18 | 2.29 | 0.600 | 0.130 | O1=38% / O2=65% |
 | **Rugg Cardan Grille (Baseline)** | Seeded baseline (574 words) | 3.74 | 2.38 | 0.700 | 0.280 | O1=37% / O2=47% |
@@ -364,20 +364,20 @@ Every execution of `scripts/build_dynamic_grand_explorer.py` dynamically recompu
 
 ### B. Measured Throughput & Full-Codex Regeneration Estimates
 
-Measured with the unified `GenerativeTypewriterDecomposer` + dual vectorization + DINOv2 SHA-1 patch cache (`~3.1x` faster than the retired multi-tab `A/B/C` pipeline):
+Measured directly on the 11-page HD batch (`164.3 s` total on 2 gentle workers for `5,342` isolated glyphs = `30.8 ms/glyph` end-to-end with `GenerativeTypewriterDecomposer` + Biomechanical Millimeter Quill-Bernoulli vectorization):
 
 | Execution Scope | Corpus Volume | Measured / Estimated Wall-Clock |
 | :--- | :--- | :---: |
-| **11-Page HD Verification Batch (`5` Voynich + `6` Seraphinianus)** | `~1,400` words · `~5,000` glyphs | **~3.5 – 4.5 min** (local CPU) |
-| **Full Voynich HD Corpus (`225` Folios)** | `37,601` words (on-demand Yale IIIF) | **~3.0 – 4.0 h** (local 4-worker) / **~35 min** (16-vCPU VM) |
-| **Full Codex Seraphinianus (`371` Pages, `352` with text)** | `63,999` words (local PDF plates) | **~4.5 – 6.0 h** (local 4-worker) / **~50 min** (16-vCPU VM) |
-| **Both Complete Codices (`596` Pages, `101,600` Words)** | Full end-to-end regeneration + DINOv2 catalogues | **~7.5 – 10.0 h** (local) / **~1.5 h** (16-vCPU VM) |
+| **11-Page HD Verification Batch (`5` Voynich + `6` Seraphinianus)** | `1,090` words · `5,342` glyphs | **`2 min 44 s`** (`164.3 s`, 2 gentle workers) |
+| **Full Voynich HD Corpus (`225` Folios)** | `37,601` words (on-demand Yale IIIF) | **~1.0 – 1.4 h** (local 4-worker) / **~20 min** (16-vCPU VM) |
+| **Full Codex Seraphinianus (`371` Pages, `352` with text)** | `63,999` words (local PDF plates) | **~1.8 – 2.3 h** (local 4-worker) / **~30 min** (16-vCPU VM) |
+| **Both Complete Codices (`596` Pages, `101,600` Words)** | Full end-to-end regeneration + DINOv2 catalogues | **~2.8 – 3.7 h** (local 4-worker) / **~50 min** (16-vCPU VM) |
 
 ### C. Roadmap
 
 1. **Full-Page Emergent Retro-Transcription**: Reconstruct complete manuscript folios in-place by rendering each word/glyph's canonical medoid (`G01..Gnn`) at its exact physical millimeter coordinates `(x_mm, y_mm, w_mm, h_mm)` for full-page generative comparison against the raw scan.
-2. **Unified Millimeter Biomechanical Quill-Bernoulli Ductus**: Converge onto a single physical ductus engine built on the Euler-Bernoulli minimum-bending skeleton graph, governed strictly in `mm` by fixed physical nib dimensions (`0.45 mm` at `40°` on Voynich; `0.38 mm` on Seraphinianus), sub-nib impact gating (`<= 0.55 mm`), air-lift motion economy, and variable-width pressure ribbons in SVG.
-3. **Full 596-Page Codex Regeneration**: Reprocess all `225` Voynich HD folios and `371` Seraphinianus pages under the converged biomechanical pipeline.
+2. **Closed-Loop Kinematic Word Re-Segmentation**: Couple low-recall / high-stroke-count ductus residuals back into word lattice cutting to split rare fused cursive compounds automatically.
+3. **Full 596-Page Codex Regeneration**: Reprocess all `225` Voynich HD folios and `371` Seraphinianus pages under the Biomechanical Millimeter Quill-Bernoulli pipeline.
 
 ---
 

@@ -96,28 +96,107 @@ class VectorExporter:
         return " ".join(d_tokens)
 
     @staticmethod
+    def _build_variable_width_ribbon_d(pts: List[Tuple[float, float, float]]) -> str:
+        """
+        Builds a closed SVG polygon path representing the physical variable-width nib + pressure
+        calligraphic footprint along `pts = [(y, x, width_px), ...]`.
+        """
+        import math
+        if len(pts) < 2:
+            return ""
+
+        # Deduplicate ultra-close points while keeping start/end and width profile
+        clean: List[Tuple[float, float, float]] = [pts[0]]
+        for p in pts[1:]:
+            if math.hypot(p[1] - clean[-1][1], p[0] - clean[-1][0]) >= 0.25:
+                clean.append(p)
+        if len(clean) == 1 and math.hypot(pts[-1][1] - clean[0][1], pts[-1][0] - clean[0][0]) > 1e-3:
+            clean.append(pts[-1])
+        if len(clean) < 2:
+            return ""
+
+        left_side: List[Tuple[float, float]] = []
+        right_side: List[Tuple[float, float]] = []
+        n = len(clean)
+        for i in range(n):
+            y, x, w = float(clean[i][0]), float(clean[i][1]), max(0.35, float(clean[i][2]))
+            r = 0.5 * w
+            if i == 0:
+                dy, dx = clean[1][0] - y, clean[1][1] - x
+            elif i == n - 1:
+                dy, dx = y - clean[i - 1][0], x - clean[i - 1][1]
+            else:
+                dy, dx = clean[i + 1][0] - clean[i - 1][0], clean[i + 1][1] - clean[i - 1][1]
+            norm = math.hypot(dx, dy)
+            if norm < 1e-5:
+                nx_perp, ny_perp = 0.0, 1.0
+            else:
+                nx_perp, ny_perp = -dy / norm, dx / norm
+            left_side.append((x + nx_perp * r, y + ny_perp * r))
+            right_side.append((x - nx_perp * r, y - ny_perp * r))
+
+        tokens = [f"M {left_side[0][0]:.2f} {left_side[0][1]:.2f}"]
+        for lx, ly in left_side[1:]:
+            tokens.append(f"L {lx:.2f} {ly:.2f}")
+        for rx, ry in reversed(right_side):
+            tokens.append(f"L {rx:.2f} {ry:.2f}")
+        tokens.append("Z")
+        return " ".join(tokens)
+
+    @staticmethod
     def to_svg(
         strokes: List[Dict[str, Any]],
         width: int,
         height: int,
         output_path: Optional[Union[str, Path]] = None,
         include_order_colors: bool = True,
-        pad: int = 6,
+        pad: Optional[int] = None,
+        px_per_mm: Optional[float] = None,
+        variable_width: bool = True,
     ) -> str:
         """
-        Exports strokes to an SVG string/file with embedded kinematic ordering and smooth cubic curves.
-        Includes padding in viewBox to avoid border clipping and ensure exact 1:1 alignment with scan crops.
+        Exports strokes to an SVG string/file with true physical millimeter scaling (zero box-relative
+        nib inflation) and variable-width nib + pressure ribbons.
+        - A sub-nib speck (e.g. 0.3 mm x 0.3 mm) sits inside a minimum 1.6 mm physical window as a stationary nib imprint.
+        - A giant macro shape (e.g. 300 mm x 300 mm) keeps the physical 0.45 mm quill width without scaling up.
         """
-        # Palette for distinct pen-lift strokes
+        import math
         colors = ["#38bdf8", "#10b981", "#f59e0b", "#c084fc", "#f43f5e", "#06b6d4", "#a855f7"]
 
-        vx = -pad
-        vy = -pad
-        vw = max(1, width + 2 * pad)
-        vh = max(1, height + 2 * pad)
+        eff_ppm = float(px_per_mm) if (px_per_mm is not None and px_per_mm > 0) else 0.0
+        if eff_ppm <= 0.0:
+            for s in strokes:
+                if s.get("px_per_mm", 0.0) > 0:
+                    eff_ppm = float(s["px_per_mm"])
+                    break
+
+        if pad is None:
+            pad_f = max(2.0, 0.35 * eff_ppm) if eff_ppm > 0 else 6.0
+        else:
+            pad_f = float(pad)
+
+        raw_w = max(1.0, float(width))
+        raw_h = max(1.0, float(height))
+
+        # Enforce minimum physical viewport window (1.60 mm x 1.60 mm) when calibrated in mm
+        # so a 0.3 mm speck is never zoomed 10x to masquerade as a full-sized character.
+        min_view_px = (1.60 * eff_ppm) if eff_ppm > 0 else 0.0
+        inner_w = max(raw_w, min_view_px)
+        inner_h = max(raw_h, min_view_px)
+        off_x = 0.5 * (inner_w - raw_w)
+        off_y = 0.5 * (inner_h - raw_h)
+
+        vx = -(pad_f + off_x)
+        vy = -(pad_f + off_y)
+        vw = max(1.0, inner_w + 2.0 * pad_f)
+        vh = max(1.0, inner_h + 2.0 * pad_f)
+
+        # Physical reference nib spine thickness in scan units (never proportional to glyph_dim!)
+        phys_spine_cap = (0.24 * eff_ppm) if eff_ppm > 0 else 2.2
+        phys_spine_min = (0.09 * eff_ppm) if eff_ppm > 0 else 0.75
 
         svg_lines = [
-            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vx} {vy} {vw} {vh}" width="100%" height="100%" style="overflow:hidden;">',
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vx:.2f} {vy:.2f} {vw:.2f} {vh:.2f}" width="100%" height="100%" style="overflow:hidden;">',
             '  <g id="voynich_strokes">'
         ]
 
@@ -126,8 +205,7 @@ class VectorExporter:
             if not pts:
                 continue
 
-            # Normalize points format to List[Tuple[y, x, width]]
-            norm_pts = []
+            norm_pts: List[Tuple[float, float, float]] = []
             for p in pts:
                 if isinstance(p, dict):
                     y_val = float(p.get("y", 0.0))
@@ -144,10 +222,35 @@ class VectorExporter:
                 continue
 
             color = colors[i % len(colors)] if include_order_colors else "#38bdf8"
-            glyph_dim = max(width, height)
-            max_allowed_w = max(0.85, min(glyph_dim * 0.068, 3.4))
+            is_impact = bool(stroke.get("is_impact", False)) or len(norm_pts) == 1
+            nib_deg = float(stroke.get("nib_angle_deg", 40.0))
+
+            if is_impact:
+                cy, cx, w_imp = norm_pts[0]
+                rx = max(0.45, 0.50 * w_imp)
+                ry = max(0.30, 0.30 * w_imp)
+                svg_lines.append(
+                    f'    <ellipse id="{stroke.get("stroke_id", f"s{i}")}" cx="{cx:.2f}" cy="{cy:.2f}" '
+                    f'rx="{rx:.2f}" ry="{ry:.2f}" transform="rotate({-nib_deg:.1f} {cx:.2f} {cy:.2f})" '
+                    f'fill="{color}" fill-opacity="0.65" stroke="#10b981" stroke-width="{max(0.35, phys_spine_min * 0.7):.2f}" '
+                    f'data-order="{stroke.get("order_index", i)}" data-impact="true"/>'
+                )
+                continue
+
+            # 1. Variable-width physical nib + pressure ribbon (true pleins & déliés in mm)
+            if variable_width:
+                ribbon_d = VectorExporter._build_variable_width_ribbon_d(norm_pts)
+                if ribbon_d:
+                    svg_lines.append(
+                        f'    <path d="{ribbon_d}" fill="{color}" fill-opacity="0.34" stroke="none"/>'
+                    )
+
+            # 2. Crisp kinematic centerline trajectory (true physical scale, never glyph_dim-scaled)
             avg_width = sum(p[2] for p in norm_pts) / len(norm_pts)
-            stroke_width = max(0.65, min(avg_width * 0.48, max_allowed_w))
+            if variable_width:
+                stroke_width = max(phys_spine_min, min(avg_width * 0.34, phys_spine_cap))
+            else:
+                stroke_width = max(phys_spine_min, min(avg_width * 0.42, phys_spine_cap * 1.15))
 
             d_str = VectorExporter._points_to_smooth_path_d(norm_pts)
             start_y, start_x = norm_pts[0][0], norm_pts[0][1]
@@ -157,11 +260,28 @@ class VectorExporter:
                 f'fill="none" stroke="{color}" stroke-width="{stroke_width:.2f}" '
                 f'stroke-linecap="round" stroke-linejoin="round" data-order="{stroke.get("order_index", i)}"/>'
             )
-            # Pen-down touch point indicator (small circle on stroke start)
-            dot_r = max(0.55, min(stroke_width * 0.70, glyph_dim * 0.052, 2.1))
+
+            # 3. Pen-down touchdown dot (#10b981) & subtle direction chevron at pen-lift exit
+            dot_r = max(0.45, min(stroke_width * 0.80, phys_spine_cap * 0.95))
             svg_lines.append(
                 f'    <circle cx="{start_x:.2f}" cy="{start_y:.2f}" r="{dot_r:.2f}" fill="#10b981" opacity="0.95"/>'
             )
+            if len(norm_pts) >= 3:
+                end_y, end_x = norm_pts[-1][0], norm_pts[-1][1]
+                prev_y, prev_x = norm_pts[-2][0], norm_pts[-2][1]
+                tdx, tdy = end_x - prev_x, end_y - prev_y
+                tn = math.hypot(tdx, tdy)
+                if tn > 1e-4 and math.hypot(end_x - start_x, end_y - start_y) > dot_r * 2.2:
+                    ux, uy = tdx / tn, tdy / tn
+                    px_n, py_n = -uy, ux
+                    ah = max(0.7, stroke_width * 1.45)
+                    aw = max(0.5, stroke_width * 0.95)
+                    ax1, ay1 = end_x - ux * ah + px_n * aw, end_y - uy * ah + py_n * aw
+                    ax2, ay2 = end_x - ux * ah - px_n * aw, end_y - uy * ah - py_n * aw
+                    svg_lines.append(
+                        f'    <path d="M {ax1:.2f} {ay1:.2f} L {end_x:.2f} {end_y:.2f} L {ax2:.2f} {ay2:.2f}" '
+                        f'fill="none" stroke="{color}" stroke-width="{max(0.4, stroke_width * 0.75):.2f}" stroke-linecap="round" stroke-linejoin="round"/>'
+                    )
 
         svg_lines.append("  </g>")
         svg_lines.append("</svg>")

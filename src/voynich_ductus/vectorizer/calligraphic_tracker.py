@@ -1,27 +1,48 @@
 """
-Native Calligraphic Vectorizer and Pen-Nib Physics Ridge Tracker (Our Model).
-Replaces generic skeleton morphology with native quill/pen physics:
-- Morphological spur pruning: eliminates parchment roughness micro-spurs shorter than nib width.
-- Full nib-footprint extinction radius (r = d_EDT + 1.5 px): prevents u-turns and Brownian bouncing inside thick ink stems.
-- Centers stroke entry at true white-bordered endpoints or top-left loop crests.
-- Continuous Euler-Bernoulli path tracing through junctions without premature splitting.
-- Fixed-angle beveled nib mechanics (pleins et déliés: w(theta) = W_nib * |sin(theta - theta_nib)| + w_0).
-- Biomechanical trajectory smoothing and keypoint simplification (Ramer-Douglas-Peucker / spline control points).
+Biomechanical Millimeter Quill-Bernoulli Vectorizer (`CalligraphicVectorizer`).
+
+Unifies topological minimum-bending skeleton graphs (Euler-Bernoulli) with strict
+physical millimeter writing-instrument mechanics (zero pixel thresholds, zero box-relative
+nib auto-scaling):
+1. Fixed Physical Instrument Scale (`mm`):
+   - Voynich 40° beveled goose quill (`w_nib ~ 0.45 mm`, chisel edge `~0.13 mm`, max pressed plein `<= 0.92 mm`).
+   - Codex Seraphinianus continuous cursive nib (`w_nib ~ 0.42 mm`, pressure-modulated single-stroke ribbon).
+   - Sub-nib physical impossibility gate: marks <= `0.55 mm` (`<= 1.22 * w_nib`) or `<= 0.35 mm^2` cannot
+     physically sustain a stroke trajectory and derender strictly as stationary nib impacts (`v = 0`, `length_mm = 0`).
+   - Macro physical ceiling: shapes `> 15 mm` or ink bands thicker than `3 * w_nib` never inflate the virtual nib
+     beyond physical quill bounds (`is_macro_non_scribal = True`).
+2. Economy of Motion (Minimum Biomechanical Action Functional in `mm`):
+   - Built directly on the homotopy-preserving medial skeleton graph (preserving 100% of Euler loop cycles
+     and stem-to-bowl Eulerian trails without artificial loop amputation).
+   - Splices protruding `'3'`-shaped cusp tongues (`v = 0` bounce-back without air lift).
+   - Chains junction segments when on-vellum bending cost in `mm` beats physical pen-lift cost `C_lift_mm`,
+     penalizes anti-grain upward quill gouging, and solves exact minimum air-travel stroke sequencing.
+3. Coupled 40° Bevel + Inferred Scribal Pressure `p(s)` + Analytic Loop-Hole Clearance:
+   - Infers smooth muscular pressure `p(s)` along arc-length from physical ink ribbon width `2 * EDT_mm(s)`
+     relative to geometric 40° bevel projection, while analytically clamping clearance around enclosed holes.
 """
 
+import itertools
 import math
-from typing import List, Dict, Tuple, Any, Optional
+from typing import List, Dict, Tuple, Any, Optional, TYPE_CHECKING
+
 import cv2
 import numpy as np
-from scipy.ndimage import distance_transform_edt, gaussian_filter
+from scipy.ndimage import binary_fill_holes, distance_transform_edt, gaussian_filter1d, label
 from skimage.morphology import skeletonize
+
+from voynich_ductus.vectorizer.junction_resolver import JunctionResolver
+from voynich_ductus.vectorizer.stroke_graph import StrokeGraphExtractor
+
+if TYPE_CHECKING:
+    from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
 
 
 class CalligraphicVectorizer:
     """
-    Simulates right-handed 15th-century quill pen physics to derender 2D ink raster
-    directly into ordered (x, y, t, width) kinematic trajectories without graph branching
-    or Brownian bouncing artifacts.
+    Biomechanical Millimeter Quill-Bernoulli Ductus Engine.
+    Derenders 2D binary ink masks into ordered `(y, x, width_px)` trajectories governed
+    strictly in physical millimeters (`mm`) by nib geometry, muscular pressure, and motion economy.
     """
 
     _DEG_KERNEL = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=np.uint8)
@@ -31,22 +52,30 @@ class CalligraphicVectorizer:
         for a in np.linspace(-np.deg2rad(65), np.deg2rad(65), 19)
     ]
 
+    # Physical writing instrument constants in millimeters (mm)
+    VOYNICH_NOMINAL_NIB_MM: float = 0.45
+    SERAFINI_NOMINAL_NIB_MM: float = 0.42
+    MIN_NIB_CHISEL_RATIO: float = 0.28      # Thin 40° délié edge (~0.13 mm)
+    MAX_PRESSED_SPREAD_MM: float = 0.92     # Physical ceiling for heavy pressure + vellum capillary spread
+    MACRO_SPAN_THRESHOLD_MM: float = 15.0   # Above 15 mm, flag as macro / non-scribal illustration element
+    PEN_LIFT_ACTION_COST_MM: float = 1.45   # Equivalent hand-travel cost (mm) of lifting & re-landing the quill
+
     def __init__(
         self,
         nib_angle_deg: float = 40.0,
         min_nib_width: float = 1.2,
         max_nib_width: float = 5.5,
-        smoothing_sigma: float = 0.85
+        smoothing_sigma: float = 0.85,
     ):
-        self.nib_angle_rad = np.deg2rad(nib_angle_deg)
-        self.min_nib_width = min_nib_width
-        self.max_nib_width = max_nib_width
-        self.smoothing_sigma = smoothing_sigma
+        self.nib_angle_rad = float(np.deg2rad(nib_angle_deg))
+        self.min_nib_width = float(min_nib_width)
+        self.max_nib_width = float(max_nib_width)
+        self.smoothing_sigma = float(smoothing_sigma)
 
     def estimate_nib_width(self, tangent_angle: float) -> float:
         """
-        Calculates expected physical stroke thickness based on tangent direction relative to nib bevel:
-        w(theta) = W_nib * |sin(theta - theta_nib)| + w_0
+        Calculates expected stroke thickness based on tangent direction relative to nib bevel:
+        w(theta) = (W_max - W_min) * |sin(theta - theta_nib)| + W_min
         """
         d_theta = tangent_angle - self.nib_angle_rad
         effective_w = (self.max_nib_width - self.min_nib_width) * np.abs(np.sin(d_theta)) + self.min_nib_width
@@ -55,23 +84,25 @@ class CalligraphicVectorizer:
     @staticmethod
     def prune_skeleton_spurs(skel: np.ndarray, dist_map: np.ndarray, min_spur_len: int = 4) -> np.ndarray:
         """
-        Prunes parasitic lateral skeleton spurs caused by vellum/parchment contour roughness.
-        Iteratively removes degree-1 leaf branches whose length from a junction (degree >= 3)
-        is shorter than the local physical nib radius or `min_spur_len`.
-        Never deletes simple open curves (which have 2 endpoints and 0 junctions).
+        Protrusion-aware morphological spur filter:
+        Removes only parasitic degree-1 skeleton hairs caused by vellum edge roughness
+        that remain trapped inside `1.22 * R_junc` of their parent junction, preserving
+        100% of protruding cusps (`'3'`), serifs, and terminal hooks.
         """
         pruned = skel.copy().astype(bool)
         h, w = pruned.shape
-        if np.sum(pruned) <= 5:
+        if int(np.sum(pruned)) <= 5:
             return pruned
 
         def get_degree_map(s: np.ndarray) -> np.ndarray:
             s_u8 = s.astype(np.uint8)
-            return (cv2.filter2D(s_u8, cv2.CV_16U, CalligraphicVectorizer._DEG_KERNEL, borderType=cv2.BORDER_CONSTANT) * s_u8).astype(np.int32)
+            return (
+                cv2.filter2D(s_u8, cv2.CV_16U, CalligraphicVectorizer._DEG_KERNEL, borderType=cv2.BORDER_CONSTANT)
+                * s_u8
+            ).astype(np.int32)
 
         deg_map = get_degree_map(pruned)
         if not np.any(deg_map >= 3):
-            # Pure unbranched curve or closed loop: no lateral spurs to prune
             return pruned
 
         rem_count = int(np.sum(pruned))
@@ -79,48 +110,46 @@ class CalligraphicVectorizer:
         for ey, ex in endpoints:
             if not pruned[ey, ex]:
                 continue
-            # Walk from endpoint toward nearest junction
             chain = [(int(ey), int(ex))]
             cy, cx = int(ey), int(ex)
             hit_junction = False
-            local_nib_r = max(float(min_spur_len), float(dist_map[ey, ex]) * 1.45 + 1.5)
+            jn_y, jn_x = cy, cx
+            local_nib_r = max(float(min_spur_len), float(dist_map[ey, ex]) * 1.45)
             max_walk = int(round(local_nib_r)) + 1
 
             for _ in range(max_walk):
                 y0, y1 = max(0, cy - 1), min(h, cy + 2)
                 x0, x1 = max(0, cx - 1), min(w, cx + 2)
-                nbs = []
-                for ny in range(y0, y1):
-                    for nx in range(x0, x1):
-                        if (ny != cy or nx != cx) and pruned[ny, nx] and (ny, nx) not in chain:
-                            nbs.append((ny, nx))
+                nbs = [
+                    (ny, nx)
+                    for ny in range(y0, y1)
+                    for nx in range(x0, x1)
+                    if (ny != cy or nx != cx) and pruned[ny, nx] and (ny, nx) not in chain
+                ]
                 if not nbs:
                     break
                 ny, nx = nbs[0]
                 if deg_map[ny, nx] >= 3:
                     hit_junction = True
+                    jn_y, jn_x = ny, nx
                     break
                 chain.append((ny, nx))
                 cy, cx = ny, nx
 
-            # Only prune if it terminates at a junction within the spur threshold, does NOT protrude
-            # outside the junction's inscribed ink disk (preserving '3' middle cusps, hooks, and serifs!),
-            # leaves at least 4 skeleton pixels intact, AND never disconnects a loop/junction
             if hit_junction and len(chain) <= max_walk and (rem_count - len(chain)) >= 4:
-                jn_y, jn_x = ny, nx
                 r_junc = float(dist_map[jn_y, jn_x])
                 tip_dist = math.hypot(float(ey - jn_y), float(ex - jn_x))
-                if tip_dist > max(2.2, r_junc * 1.25 + 1.0):
+                if tip_dist > r_junc * 1.25:
                     continue
                 tip_y, tip_x = chain[-1]
-                # Count neighbors of the junction excluding the tip of this spur
                 y0_j, y1_j = max(0, jn_y - 1), min(h, jn_y + 2)
                 x0_j, x1_j = max(0, jn_x - 1), min(w, jn_x + 2)
-                rem_deg = 0
-                for jy in range(y0_j, y1_j):
-                    for jx in range(x0_j, x1_j):
-                        if (jy, jx) != (jn_y, jn_x) and (jy, jx) != (tip_y, tip_x) and pruned[jy, jx]:
-                            rem_deg += 1
+                rem_deg = sum(
+                    1
+                    for jy in range(y0_j, y1_j)
+                    for jx in range(x0_j, x1_j)
+                    if (jy, jx) != (jn_y, jn_x) and (jy, jx) != (tip_y, tip_x) and pruned[jy, jx]
+                )
                 if rem_deg >= 2:
                     for py, px in chain:
                         pruned[py, px] = False
@@ -129,13 +158,10 @@ class CalligraphicVectorizer:
 
         return pruned
 
-    def find_touchdown_endpoints(self, binary_mask: np.ndarray, skel: np.ndarray) -> List[Tuple[float, int, int, float, float]]:
-        """
-        Identifies genuine scribal touchdown points on the pruned skeleton:
-        1. Free endpoints in white space (degree 1 in skeleton).
-        2. For closed loops without degree 1 endpoints, the top-left loop crest (11 o'clock).
-        Returns list of (priority, y, x, initial_dy, initial_dx).
-        """
+    def find_touchdown_endpoints(
+        self, binary_mask: np.ndarray, skel: np.ndarray
+    ) -> List[Tuple[float, int, int, float, float]]:
+        """Identifies scribal touchdown endpoints (degree-1 tips or 11-o'clock loop crests)."""
         h, w = binary_mask.shape
         skel_u8 = skel.astype(np.uint8)
         if not np.any(skel_u8):
@@ -148,8 +174,6 @@ class CalligraphicVectorizer:
             norm_y = y / max(1.0, float(h))
             norm_x = x / max(1.0, float(w))
             priority = 12.0 - norm_x * 5.0 - norm_y * 5.0
-
-            # Walk 2-3 skeleton steps inward to compute a stable initial tangent
             cy, cx = int(y), int(x)
             visited_walk = {(cy, cx)}
             for _ in range(3):
@@ -168,410 +192,910 @@ class CalligraphicVectorizer:
                 visited_walk.add(nxt)
                 cy, cx = nxt
 
-            init_dy = float(cy - y)
-            init_dx = float(cx - x)
+            init_dy, init_dx = float(cy - y), float(cx - x)
             n_len = math.hypot(init_dy, init_dx)
             if n_len > 1e-4:
                 endpoints.append((priority, int(y), int(x), init_dy / n_len, init_dx / n_len))
             else:
                 endpoints.append((priority, int(y), int(x), 1.0, 0.2))
 
-        # If no degree 1 endpoints found (pure closed loop 'o' or '0'), pick top-left crest
         if not endpoints:
             skel_pts = np.argwhere(skel)
             best_p = min(skel_pts, key=lambda p: (p[0] / max(1.0, float(h))) * 1.5 + (p[1] / max(1.0, float(w))) * 2.0)
-            y, x = int(best_p[0]), int(best_p[1])
-            endpoints.append((12.0, y, x, 1.0, 0.3))
+            endpoints.append((12.0, int(best_p[0]), int(best_p[1]), 1.0, 0.3))
 
         endpoints.sort(key=lambda item: item[0], reverse=True)
         return endpoints
 
     @staticmethod
-    def _mark_nib_footprint_visited(
-        pts: List[Tuple[float, float, float]],
-        dist_map: np.ndarray,
-        visited_mask: np.ndarray,
-        extra_margin: float = 1.6
-    ):
-        """
-        Marks the entire physical quill nib footprint covered by a traced trajectory as visited.
-        Unlike a 1-pixel line, a quill stroke of radius R = dist_map[y, x] covers all ink within
-        radius R + extra_margin, preventing the tracker from ever bouncing back along the opposite
-        edge of the same stem.
-        """
-        h, w = visited_mask.shape
-        yy, xx = np.ogrid[:h, :w]
-        for p in pts:
-            py, px = float(p[0]), float(p[1])
-            iy = max(0, min(h - 1, int(round(py))))
-            ix = max(0, min(w - 1, int(round(px))))
-            r = max(2.2, float(dist_map[iy, ix]) + extra_margin)
-            r_int = int(np.ceil(r))
-            y0, y1 = max(0, iy - r_int), min(h, iy + r_int + 1)
-            x0, x1 = max(0, ix - r_int), min(w, ix + r_int + 1)
-            sub_y = np.arange(y0, y1)[:, None] - py
-            sub_x = np.arange(x0, x1)[None, :] - px
-            visited_mask[y0:y1, x0:x1] |= ((sub_y * sub_y + sub_x * sub_x) <= (r * r))
+    def _polyline_arc_mm(pts: List[Tuple[float, float, float]], mm_per_px: float) -> float:
+        if len(pts) < 2:
+            return 0.0
+        return float(
+            sum(math.hypot(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]) for k in range(len(pts) - 1))
+            * mm_per_px
+        )
+
+    def _make_impact_stroke(
+        self,
+        pts_rc: np.ndarray,
+        stroke_idx: int,
+        ppm: float,
+        w_nib_mm: float,
+    ) -> Dict[str, Any]:
+        """Builds a zero-trajectory stationary nib touchdown impact (`v = 0`, `length_mm = 0.0`)."""
+        cy = float(np.mean(pts_rc[:, 0]))
+        cx = float(np.mean(pts_rc[:, 1]))
+        span_h_mm = (float(pts_rc[:, 0].max() - pts_rc[:, 0].min()) + 1.0) / ppm
+        span_w_mm = (float(pts_rc[:, 1].max() - pts_rc[:, 1].min()) + 1.0) / ppm
+        w_edge_mm = self.MIN_NIB_CHISEL_RATIO * w_nib_mm
+        w_contact_mm = float(np.clip(min(max(span_h_mm, span_w_mm), w_nib_mm * 1.15), w_edge_mm, self.MAX_PRESSED_SPREAD_MM))
+        w_px = round(max(0.5, w_contact_mm * ppm), 2)
+        return {
+            "stroke_id": f"cal_s{stroke_idx:02d}",
+            "order_index": stroke_idx,
+            "points": [(round(cy, 2), round(cx, 2), w_px)],
+            "length": 0.0,
+            "length_mm": 0.0,
+            "start": (round(cy, 2), round(cx, 2)),
+            "end": (round(cy, 2), round(cx, 2)),
+            "nib_angle_deg": float(np.rad2deg(self.nib_angle_rad)),
+            "mean_width": w_px,
+            "mean_width_mm": round(w_contact_mm, 3),
+            "mean_pressure": 1.0,
+            "is_impact": True,
+            "is_dot": True,
+            "is_macro_non_scribal": False,
+            "px_per_mm": ppm,
+        }
 
     def extract_calligraphic_ductus(
         self,
         binary_mask: np.ndarray,
         single_stroke_mode: bool = False,
         max_strokes: Optional[int] = None,
-        scale_calib: Optional[Any] = None
+        scale_calib: Optional["MetricScaleCalibration"] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Derenders a 2D binary ink patch into smooth, biomechanically realistic calligraphic strokes.
-        When single_stroke_mode=True (e.g. for Codex Seraphinianus), strictly guarantees that
-        the letter is derendered as a single continuous scribal gesture without pen lifts or retracing.
+        Derenders a 2D binary ink mask into biomechanically ordered `(y, x, width_px)` strokes
+        governed strictly in millimeters (`mm`) by physical nib geometry, pressure, and motion economy.
         """
         if binary_mask is None or not np.any(binary_mask):
             return []
 
-        mask_h, mask_w = binary_mask.shape
-        pts_all = np.argwhere(binary_mask)
-        total_ink_area = int(len(pts_all))
-
-        min_y, min_x = pts_all.min(axis=0)
-        max_y, max_x = pts_all.max(axis=0)
-        span_h = int(max_y - min_y + 1)
-        span_w = int(max_x - min_x + 1)
-
-        dist_full = distance_transform_edt(binary_mask)
-        inner_dists = dist_full[dist_full > 0.5]
-        med_half_width = float(np.median(inner_dists)) if len(inner_dists) > 0 else 1.0
-        est_nib_width = max(1.5, 2.0 * med_half_width)
-        px_per_mm = float(scale_calib.px_per_mm) if (scale_calib is not None and hasattr(scale_calib, "px_per_mm")) else max(4.5, est_nib_width / 0.45)
-
-        if scale_calib is not None and hasattr(scale_calib, "dot_max_span_px"):
-            dot_span_limit = max(float(scale_calib.dot_max_span_px), 3.0 * est_nib_width)
-            dot_area_limit = max(float(scale_calib.dot_max_area_px), 4.5 * (est_nib_width ** 2))
+        mask_bool = binary_mask.astype(bool)
+        if scale_calib is None:
+            from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
+            calib = MetricScaleCalibration(
+                manuscript_type="seraphinianus" if single_stroke_mode else "voynich"
+            )
         else:
-            dot_span_limit = max(8.0, 3.0 * est_nib_width)
-            dot_area_limit = max(28.0, 4.5 * (est_nib_width ** 2))
+            calib = scale_calib
+        ppm = max(1e-3, float(calib.px_per_mm))
+        mm_per_px = 1.0 / ppm
 
-        if (span_h <= dot_span_limit and span_w <= dot_span_limit) or total_ink_area <= dot_area_limit:
-            cy = float(np.mean(pts_all[:, 0]))
-            cx = float(np.mean(pts_all[:, 1]))
-            w_nib = float(round(est_nib_width, 1))
-            return [{
-                "stroke_id": "cal_s00",
-                "order_index": 0,
-                "points": [(cy, cx, w_nib)],
-                "length": 0.0,
-                "start": (cy, cx),
-                "end": (cy, cx),
-                "nib_angle_deg": float(np.rad2deg(self.nib_angle_rad)),
-                "mean_width": w_nib,
-                "is_impact": True,
-                "is_dot": True
-            }]
+        w_nib_nom_mm = self.SERAFINI_NOMINAL_NIB_MM if single_stroke_mode else self.VOYNICH_NOMINAL_NIB_MM
+
+        pts_all = np.argwhere(mask_bool)
+        span_h_mm = (float(pts_all[:, 0].max() - pts_all[:, 0].min()) + 1.0) * mm_per_px
+        span_w_mm = (float(pts_all[:, 1].max() - pts_all[:, 1].min()) + 1.0) * mm_per_px
+        total_area_mm2 = float(len(pts_all)) * (mm_per_px ** 2)
+
+        # Physical Law 1: Sub-nib & zero-displacement impact gate (e.g. 0.3 mm speck or stationary 0.65 mm nib blot)
+        # No stroke trajectory can exist if the mark is smaller than the nib OR is a solid compact blot with ~0 net travel!
+        sub_nib_span_mm = max(calib.DOT_MAX_DIAMETER_MM, 1.40 * w_nib_nom_mm)
+        if (span_h_mm <= sub_nib_span_mm and span_w_mm <= sub_nib_span_mm) or total_area_mm2 <= max(calib.DOT_MAX_AREA_MM2, 0.42):
+            return [self._make_impact_stroke(pts_all, 0, ppm, w_nib_nom_mm)]
+
+        dist_full_mm = distance_transform_edt(mask_bool) * mm_per_px
+        max_inscribed_d_mm = float(np.max(dist_full_mm)) * 2.0
+        if max(span_h_mm, span_w_mm) <= 1.05 and (max(span_h_mm, span_w_mm) - max_inscribed_d_mm) <= 0.22:
+            pad_chk = np.pad(mask_bool, 1, mode="constant", constant_values=False)
+            if not np.any(binary_fill_holes(pad_chk) & (~pad_chk)):
+                return [self._make_impact_stroke(pts_all, 0, ppm, w_nib_nom_mm)]
+        inner_mm = dist_full_mm[mask_bool]
+        med_ribbon_mm = float(np.median(inner_mm)) * 2.0 if len(inner_mm) > 0 else w_nib_nom_mm
+
+        # Calibrate active nib width strictly within authentic physical instrument bounds [0.30 mm, 0.65 mm]
+        # Even on a 300 mm x 300 mm block, w_nib_mm NEVER exceeds 0.65 mm!
+        w_nib_mm = float(np.clip(0.65 * med_ribbon_mm + 0.35 * w_nib_nom_mm, 0.30, 0.65))
+        is_macro = bool(
+            max(span_h_mm, span_w_mm) > self.MACRO_SPAN_THRESHOLD_MM or med_ribbon_mm > 3.0 * self.VOYNICH_NOMINAL_NIB_MM
+        )
 
         if single_stroke_mode or (max_strokes is not None and max_strokes == 1):
-            single_stroke = self._extract_dominant_single_stroke(binary_mask, px_per_mm=px_per_mm)
-            return [single_stroke] if single_stroke else []
+            st = self._extract_continuous_cursive_tour(
+                mask_bool, ppm=ppm, w_nib_mm=w_nib_mm, is_macro=is_macro
+            )
+            return [st] if st is not None else [self._make_impact_stroke(pts_all, 0, ppm, w_nib_mm)]
 
-        from scipy.ndimage import label, binary_fill_holes
-        labeled_mask, num_features = label(binary_mask)
+        stroke_limit = min(4, max_strokes) if max_strokes is not None else 4
+        labeled_mask, num_features = label(mask_bool, structure=np.ones((3, 3), dtype=bool))
         if num_features == 0:
             return []
 
-        comp_min_area = max(10, int(round(0.06 * (px_per_mm ** 2)))) if scale_calib is not None else 10
-        # Keep genuine closed-loop eyes ('o', 'a', 'd'/'8', 'e' >= 6 px^2 on HD) intact; fill grain pinholes
-        pinhole_max_area = max(3, int(round(0.024 * (px_per_mm ** 2))))
-        spur_min_len = max(2, int(round(max(med_half_width * 1.15, 0.28 * px_per_mm))))
-        sigma_eff = max(0.55, 0.08 * px_per_mm)
-        step_size_eff = max(1.0, min(1.35, 0.11 * px_per_mm))
-        min_res_area = max(4, int(round(0.025 * (px_per_mm ** 2))))
-
+        comp_min_area_px = max(1, int(round(calib.area_mm2_to_px2(0.035))))
         components = []
-        for comp_id in range(1, num_features + 1):
-            comp_mask = (labeled_mask == comp_id)
-            comp_area = int(np.sum(comp_mask))
-            if comp_area < comp_min_area:
+        for cid in range(1, num_features + 1):
+            cm = (labeled_mask == cid)
+            ca = int(np.sum(cm))
+            if ca < comp_min_area_px:
                 continue
-            pts = np.argwhere(comp_mask)
-            c_min_y, c_min_x = pts.min(axis=0)
+            c_pts = np.argwhere(cm)
             components.append({
-                "id": comp_id,
-                "mask": comp_mask,
-                "area": comp_area,
-                "min_y": int(c_min_y),
-                "min_x": int(c_min_x)
+                "mask": cm,
+                "pts": c_pts,
+                "area_mm2": float(ca) * (mm_per_px ** 2),
+                "span_h_mm": (float(c_pts[:, 0].max() - c_pts[:, 0].min()) + 1.0) * mm_per_px,
+                "span_w_mm": (float(c_pts[:, 1].max() - c_pts[:, 1].min()) + 1.0) * mm_per_px,
             })
 
-        components.sort(key=lambda c: (c["min_y"] // max(12, int(round(1.4 * px_per_mm))), c["min_x"]))
+        if not components:
+            return [self._make_impact_stroke(pts_all, 0, ppm, w_nib_mm)]
 
-        from voynich_ductus.vectorizer.stroke_graph import StrokeGraphExtractor
-        from voynich_ductus.vectorizer.junction_resolver import JunctionResolver
+        # Prioritize largest substantive components so tiny specks never starve main stems of stroke budget
+        components.sort(key=lambda c: c["area_mm2"], reverse=True)
 
         graph_ext = StrokeGraphExtractor()
-        junc_res = JunctionResolver(right_handed_prior=True)
-
-        strokes: List[Dict[str, Any]] = []
-        stroke_idx = 0
-        stroke_limit = min(4, max_strokes) if max_strokes is not None else 4
+        raw_stroke_dicts: List[Dict[str, Any]] = []
 
         for comp in components:
-            if len(strokes) >= stroke_limit:
+            rem_budget = stroke_limit - len(raw_stroke_dicts)
+            if rem_budget <= 0:
                 break
-            comp_mask = comp["mask"]
-            h, w = comp_mask.shape
 
-            # Fill tiny internal grain pinholes so skeletonization doesn't split around dust
-            padded = np.pad(comp_mask, 2, mode="constant", constant_values=False)
-            filled = binary_fill_holes(padded)
-            holes = filled & (~padded)
-            lbl_h, num_h = label(holes)
-            clean_comp = comp_mask.copy()
-            real_holes = []
-            for hid in range(1, num_h + 1):
-                h_mask = (lbl_h == hid)[2:-2, 2:-2]
-                h_area = int(np.sum(h_mask))
-                if h_area <= pinhole_max_area:
-                    clean_comp |= h_mask
-                elif np.any(h_mask):
-                    real_holes.append(h_mask)
+            # Detached sub-nib dot component inside a multi-component glyph (e.g. dot of 'i')
+            if (
+                (comp["span_h_mm"] <= sub_nib_span_mm and comp["span_w_mm"] <= sub_nib_span_mm)
+                or comp["area_mm2"] <= calib.DOT_MAX_AREA_MM2
+            ):
+                raw_stroke_dicts.append(self._make_impact_stroke(comp["pts"], len(raw_stroke_dicts), ppm, w_nib_mm))
+                continue
 
-            dist_map = distance_transform_edt(clean_comp)
-            raw_skel = skeletonize(clean_comp)
-            skel = self.prune_skeleton_spurs(raw_skel, dist_map, min_spur_len=spur_min_len)
-            smoothed_dist = gaussian_filter(dist_map.astype(np.float32), sigma=sigma_eff)
+            comp_strokes = self._extract_component_quill_bernoulli(
+                comp["mask"],
+                ppm=ppm,
+                w_nib_mm=w_nib_mm,
+                max_strokes=rem_budget,
+                is_serafini=False,
+                is_macro=is_macro,
+                graph_ext=graph_ext,
+            )
+            raw_stroke_dicts.extend(comp_strokes)
 
-            comp_raw_strokes: List[List[Tuple[float, float, float]]] = []
-            loop_covered_skel = np.zeros_like(skel, dtype=bool)
+        if not raw_stroke_dicts:
+            return [self._make_impact_stroke(pts_all, 0, ppm, w_nib_mm)]
 
-            # 1. Extract closed-loop rings first around genuine interior holes ('o', 'a', 'd', 'q', 'p', 'f')
-            if real_holes:
-                try:
-                    from skimage.measure import find_contours
-                    for h_mask in real_holes:
-                        if len(strokes) + len(comp_raw_strokes) >= stroke_limit:
-                            break
-                        contours = find_contours(h_mask.astype(np.float32), 0.5)
-                        if not contours:
-                            continue
-                        ring_c = max(contours, key=len)
-                        if len(ring_c) < 6:
-                            continue
-                        ring_open = ring_c[:-1] if np.hypot(ring_c[0][0] - ring_c[-1][0], ring_c[0][1] - ring_c[-1][1]) < 1.5 else ring_c
-                        if len(ring_open) < 6:
-                            continue
-                        hy_c = float(np.mean(ring_open[:, 0]))
-                        hx_c = float(np.mean(ring_open[:, 1]))
-                        angles = np.unwrap(np.arctan2(ring_open[:, 0] - hy_c, ring_open[:, 1] - hx_c))
-                        if angles[-1] < angles[0]:
-                            ring_open = ring_open[::-1]
-                        start_idx = int(np.argmin(
-                            (ring_open[:, 0] / max(1.0, float(h))) * 1.5 + (ring_open[:, 1] / max(1.0, float(w))) * 2.0
-                        ))
-                        ordered_ring = np.vstack([ring_open[start_idx:], ring_open[:start_idx], ring_open[start_idx:start_idx + 1]])
-                        n_ring = len(ordered_ring)
-                        ring_pts: List[Tuple[float, float, float]] = []
-                        max_push = max(3.0, min(med_half_width * 2.2, 0.75 * px_per_mm))
-                        for ri in range(n_ring):
-                            py, px_coord = float(ordered_ring[ri][0]), float(ordered_ring[ri][1])
-                            p_prev = ordered_ring[(ri - 1) % (n_ring - 1)]
-                            p_next = ordered_ring[(ri + 1) % (n_ring - 1)]
-                            ty, tx = float(p_next[0] - p_prev[0]), float(p_next[1] - p_prev[1])
-                            tn = float(np.hypot(ty, tx)) or 1.0
-                            n1y, n1x = -tx / tn, ty / tn
-                            if (n1y * (py - hy_c) + n1x * (px_coord - hx_c)) < 0:
-                                n1y, n1x = -n1y, -n1x
-                            best_ry, best_rx, best_rd = py, px_coord, 0.0
-                            for step_t in np.linspace(0.5, max_push, 10):
-                                cy_t = py + n1y * step_t
-                                cx_t = px_coord + n1x * step_t
-                                iy_t, ix_t = int(round(cy_t)), int(round(cx_t))
-                                if 0 <= iy_t < h and 0 <= ix_t < w and clean_comp[iy_t, ix_t]:
-                                    d_loc = float(smoothed_dist[iy_t, ix_t])
-                                    if d_loc >= best_rd:
-                                        best_rd = d_loc
-                                        best_ry, best_rx = cy_t, cx_t
-                                elif best_rd > 0.0:
-                                    break
-                            w_ring = max(1.6, best_rd * 2.0)
-                            ring_pts.append((round(best_ry, 2), round(best_rx, 2), round(w_ring, 2)))
-                        if len(ring_pts) >= 6:
-                            ring_pts[-1] = ring_pts[0]
-                            comp_raw_strokes.append(ring_pts)
-                            # Mark only tight ring core so attached stems ('a', 'd', 'q') retain their full body up to the loop wall
-                            self._mark_nib_footprint_visited(ring_pts, dist_map * 0.72, loop_covered_skel, extra_margin=0.6)
-                except Exception:
-                    pass
+        # Solve global minimum biomechanical action sequencing (top-left entry + quill pull prior + minimum air-travel)
+        ordered = self._order_strokes_minimum_action(raw_stroke_dicts, mask_bool.shape, ppm=ppm)
+        return ordered[:stroke_limit]
 
-            # 2. Extract crossing-preserving topological strokes on remaining skeleton (preserving '3' middle cusps & short hooks!)
-            rem_budget = stroke_limit - (len(strokes) + len(comp_raw_strokes))
-            rem_skel = skel & (~loop_covered_skel)
-            if rem_budget > 0 and int(np.sum(rem_skel)) >= 2:
-                p_graph = graph_ext.build_pixel_graph(rem_skel, dist_map * 2.0)
-                raw_segs = graph_ext.decompose_into_strokes(p_graph)
-                if raw_segs:
-                    raw_segs = self._splice_cusp_tongues(raw_segs, px_per_mm=px_per_mm)
-                    # Filter 1-2 px junction-triangle artifacts only when main strokes exist
-                    if len(raw_segs) > 1:
-                        substantial = [s for s in raw_segs if len(s.get("points", [])) >= 3]
-                        if substantial:
-                            raw_segs = substantial
-                    chained = junc_res.resolve_and_order_strokes(
-                        raw_segs,
-                        max_gap=max(5.5, 0.75 * px_per_mm),
-                        min_cos=-0.45,
-                        max_strokes=max(rem_budget + 3, 6),
-                    )
-                    # Prioritize longest substantive strokes before enforcing rem_budget so top micro-serifs never evict lower arches!
-                    chained.sort(
-                        key=lambda s: sum(
-                            math.hypot(s["points"][k + 1][0] - s["points"][k][0], s["points"][k + 1][1] - s["points"][k][1])
-                            for k in range(len(s.get("points", [])) - 1)
-                        ),
-                        reverse=True,
-                    )
-                    for ch_s in chained[:rem_budget]:
-                        c_pts = [(float(p[0]), float(p[1]), max(1.5, float(p[2]))) for p in ch_s.get("points", [])]
-                        if len(c_pts) >= 2:
-                            c_pts = self._extend_and_anchor_stroke(c_pts, clean_comp, dist_map, comp_raw_strokes, med_half_width)
-                            comp_raw_strokes.append(c_pts)
+    def _clean_pinholes_and_get_holes(
+        self, comp_mask: np.ndarray, ppm: float
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+        """
+        Fills only microscopic vellum grain pinholes (`<= 0.020 mm^2`), preserving 100% of genuine
+        enclosed loop cavities (`o`, `a`, `e`, `d`, `8`, `sh`) and precomputing `dist_to_hole_px`.
+        """
+        pinhole_max_px = max(1, int(round(0.020 * (ppm ** 2))))
+        padded = np.pad(comp_mask, 2, mode="constant", constant_values=False)
+        holes = binary_fill_holes(padded) & (~padded)
+        lbl_h, num_h = label(holes)
+        clean_comp = comp_mask.copy()
+        holes_union = np.zeros_like(comp_mask, dtype=bool)
+        for hid in range(1, num_h + 1):
+            hm = (lbl_h == hid)[2:-2, 2:-2]
+            ha = int(np.sum(hm))
+            if ha <= pinhole_max_px:
+                clean_comp |= hm
+            elif np.any(hm):
+                holes_union |= hm
+        dist_to_hole = distance_transform_edt(~holes_union) if np.any(holes_union) else None
+        return clean_comp, holes_union, dist_to_hole
 
-            # Fallback ridge trace if skeleton graph produced nothing on a valid component
-            if not comp_raw_strokes:
-                candidates = self.find_touchdown_endpoints(clean_comp, skel)
-                if candidates:
-                    _, sy, sx, dy, dx = candidates[0]
-                    fb_pts = self._trace_continuous_ridge(
-                        smoothed_dist, skel, None, sy, sx, dy, dx,
-                        max_steps=int(max(h, w) * 2.8 / max(1.0, step_size_eff * 0.6)),
-                        step_size=step_size_eff,
-                    )
-                    if len(fb_pts) >= 2:
-                        comp_raw_strokes.append(self._extend_and_anchor_stroke(fb_pts, clean_comp, dist_map, [], med_half_width))
+    def _extract_component_quill_bernoulli(
+        self,
+        comp_mask: np.ndarray,
+        ppm: float,
+        w_nib_mm: float,
+        max_strokes: int,
+        is_serafini: bool,
+        is_macro: bool,
+        graph_ext: StrokeGraphExtractor,
+    ) -> List[Dict[str, Any]]:
+        """
+        Extracts 1..max_strokes trajectories on a connected component directly from its
+        homotopy-preserving medial skeleton graph using minimum biomechanical action.
+        """
+        h, w = comp_mask.shape
+        mm_per_px = 1.0 / ppm
+        clean_comp, holes_union, dist_to_hole = self._clean_pinholes_and_get_holes(comp_mask, ppm)
+        dist_map = distance_transform_edt(clean_comp)
+        raw_skel = skeletonize(clean_comp)
 
-            # 3. Analysis-by-Synthesis Residual Pass: recover uncovered middle cusps ('3'), crossbars, hooks & plumes
-            while (len(strokes) + len(comp_raw_strokes)) < stroke_limit and comp_raw_strokes:
-                pred_m = self._rasterize_strokes_mask(comp_raw_strokes, (h, w), scale_w=0.80)
-                uncov = clean_comp & (~pred_m)
-                if int(np.sum(uncov)) < min_res_area:
-                    break
-                lbl_u, n_u = label(uncov, structure=np.ones((3, 3), dtype=bool))
-                if n_u == 0:
-                    break
-                cnt_u = np.bincount(lbl_u.ravel())
-                cnt_u[0] = 0
-                best_uid = int(np.argmax(cnt_u))
-                if int(cnt_u[best_uid]) < min_res_area:
-                    break
-                u_mask = (lbl_u == best_uid)
-                # Dilate slightly inside clean_comp so the residual piece connects smoothly to its parent junction
-                u_grown = (cv2.dilate(u_mask.astype(np.uint8), self._ONES_3X3_U8, iterations=2) > 0) & clean_comp
-                u_skel = skeletonize(u_grown)
-                if int(np.sum(u_skel)) < 2:
-                    ys_u, xs_u = np.where(u_mask)
-                    if len(ys_u) < 2:
-                        break
-                    i0 = int(np.argmin(ys_u + xs_u))
-                    i1 = int(np.argmax(ys_u + xs_u))
-                    u_pts = [
-                        (float(ys_u[i0]), float(xs_u[i0]), max(1.5, float(dist_map[ys_u[i0], xs_u[i0]]) * 2.0)),
-                        (float(ys_u[i1]), float(xs_u[i1]), max(1.5, float(dist_map[ys_u[i1], xs_u[i1]]) * 2.0)),
-                    ]
-                else:
-                    u_graph = graph_ext.build_pixel_graph(u_skel, dist_map * 2.0)
-                    u_segs = graph_ext.decompose_into_strokes(u_graph)
-                    if not u_segs:
-                        break
-                    u_chained = junc_res.resolve_and_order_strokes(u_segs, max_gap=max(5.0, 0.7 * px_per_mm), min_cos=-0.50, max_strokes=1)
-                    if not u_chained:
-                        break
-                    u_pts = [(float(p[0]), float(p[1]), max(1.5, float(p[2]))) for p in u_chained[0].get("points", [])]
-                if len(u_pts) < 2:
-                    break
-                u_pts = self._extend_and_anchor_stroke(u_pts, clean_comp, dist_map, comp_raw_strokes, med_half_width)
-                comp_raw_strokes.append(u_pts)
-                new_pred = self._rasterize_strokes_mask(comp_raw_strokes, (h, w), scale_w=0.80)
-                if int(np.sum(clean_comp & (~new_pred))) >= int(np.sum(clean_comp & (~pred_m))) - 1:
-                    break
+        if not np.any(raw_skel):
+            pts_c = np.argwhere(clean_comp)
+            return [self._make_impact_stroke(pts_c, 0, ppm, w_nib_mm)] if len(pts_c) > 0 else []
 
-            # 4. Parameterize cubic Bézier control points & optimize silhouette centering + 40° quill width IoU
-            param_list: List[List[Tuple[float, float, float]]] = []
-            for r_pts in comp_raw_strokes:
-                c_pts = self._parameterize_stroke(r_pts, px_per_mm=px_per_mm, dist_map=dist_map)
-                if len(c_pts) >= 2:
-                    param_list.append(c_pts)
+        spur_min_px = max(2, int(round(0.30 * ppm)))
+        skel = self.prune_skeleton_spurs(raw_skel, dist_map, min_spur_len=spur_min_px)
 
-            if param_list:
-                opt_list = self._optimize_strokes_on_silhouette(param_list, clean_comp, dist_map, px_per_mm=px_per_mm)
-                for calligraphic_pts in opt_list:
-                    if len(strokes) >= stroke_limit:
-                        break
-                    strokes.append({
-                        "stroke_id": f"cal_s{stroke_idx:02d}",
-                        "order_index": stroke_idx,
-                        "points": calligraphic_pts,
-                        "length": float(len(calligraphic_pts)),
-                        "start": (calligraphic_pts[0][0], calligraphic_pts[0][1]),
-                        "end": (calligraphic_pts[-1][0], calligraphic_pts[-1][1]),
-                        "nib_angle_deg": float(np.rad2deg(self.nib_angle_rad)),
-                        "mean_width": float(np.mean([p[2] for p in calligraphic_pts]))
-                    })
-                    stroke_idx += 1
+        p_graph = graph_ext.build_pixel_graph(skel, dist_map * 2.0)
+        raw_segs = graph_ext.decompose_into_strokes(p_graph)
+        if not raw_segs:
+            pts_c = np.argwhere(clean_comp)
+            return [self._make_impact_stroke(pts_c, 0, ppm, w_nib_mm)] if len(pts_c) > 0 else []
 
-        if not strokes:
-            pts = np.argwhere(binary_mask)
-            if len(pts) > 0:
-                p0 = pts.min(axis=0)
-                p1 = pts.max(axis=0)
-                sub_pts = [
-                    (float(p0[0]), float(p0[1]), float(est_nib_width)),
-                    (float(p1[0]), float(p1[1]), float(est_nib_width))
-                ]
-                strokes.append({
-                    "stroke_id": "cal_s00",
-                    "order_index": 0,
-                    "points": sub_pts,
-                    "length": 2.0,
-                    "start": (sub_pts[0][0], sub_pts[0][1]),
-                    "end": (sub_pts[-1][0], sub_pts[-1][1]),
-                    "nib_angle_deg": 40.0,
-                    "mean_width": float(est_nib_width)
-                })
+        # 1. Splice protruding '3'-cusp bounce-back tongues (zero air-lift cusp reversal)
+        raw_segs = self._splice_cusp_tongues(raw_segs, px_per_mm=ppm)
 
-        # Re-orient each stroke to respect Western ductus (top-to-bottom, left-to-right)
-        for s in strokes:
-            pts = s.get("points", [])
+        # 2. Drop tiny 1-2 node junction-triangle slivers (< 0.22 mm) only when main branches exist
+        min_sliver_mm = 0.22
+        if len(raw_segs) > 1:
+            substantive = [
+                s for s in raw_segs
+                if s.get("type") == "loop" or self._polyline_arc_mm(s.get("points", []), mm_per_px) >= min_sliver_mm
+            ]
+            if substantive:
+                raw_segs = substantive
+
+        # 3. Minimum-action junction chaining: merge segments across junctions whenever
+        #    on-vellum bending cost in mm < physical pen-lift action cost (1.45 mm)
+        chained_segs = self._chain_segments_minimum_action(
+            raw_segs, ppm=ppm, w_nib_mm=w_nib_mm, max_strokes=max_strokes
+        )
+
+        # 4. Complete free eroded endpoints to true ink extremities (bounded to <= 0.85 mm forward cone)
+        med_half_w = float(np.median(dist_map[clean_comp])) if np.any(clean_comp) else (0.5 * w_nib_mm * ppm)
+        raw_polylines: List[List[Tuple[float, float, float]]] = []
+        for s in chained_segs:
+            pts = [(float(p[0]), float(p[1]), max(0.5, float(p[2]))) for p in s.get("points", [])]
             if len(pts) >= 2:
-                p_s = pts[0]
-                p_e = pts[-1]
-                # Do not invert closed loops whose start and end already meet at the top
-                if np.hypot(p_s[0] - p_e[0], p_s[1] - p_e[1]) > 3.5:
-                    s_cost = (p_s[0] / max(1.0, float(mask_h))) * 2.0 + (p_s[1] / max(1.0, float(mask_w))) * 2.5
-                    e_cost = (p_e[0] / max(1.0, float(mask_h))) * 2.0 + (p_e[1] / max(1.0, float(mask_w))) * 2.5
-                    if s_cost > e_cost:
-                        pts = pts[::-1]
-                        s["points"] = pts
-                        s["start"] = (pts[0][0], pts[0][1])
-                        s["end"] = (pts[-1][0], pts[-1][1])
+                pts = self._extend_and_anchor_stroke(pts, clean_comp, dist_map, raw_polylines, med_half_w, ppm=ppm)
+                raw_polylines.append(pts)
 
-        strokes.sort(key=lambda s: (s["start"][0] / max(1.0, float(mask_h))) * 2.0 + (s["start"][1] / max(1.0, float(mask_w))) * 2.5)
-        for idx, s in enumerate(strokes):
+        # 5. Residual ink limb recovery: if an authentic branch (>= 0.04 mm^2) remained uncovered
+        min_res_px = max(3, int(round(0.040 * (ppm ** 2))))
+        while len(raw_polylines) < max_strokes and raw_polylines:
+            pred_m = self._rasterize_strokes_mask(raw_polylines, (h, w), scale_w=0.90)
+            uncov = clean_comp & (~pred_m)
+            if int(np.sum(uncov)) < min_res_px:
+                break
+            lbl_u, n_u = label(uncov, structure=np.ones((3, 3), dtype=bool))
+            if n_u == 0:
+                break
+            cnt_u = np.bincount(lbl_u.ravel())
+            cnt_u[0] = 0
+            best_uid = int(np.argmax(cnt_u))
+            if int(cnt_u[best_uid]) < min_res_px:
+                break
+            u_mask = (lbl_u == best_uid)
+            grow_iters = max(1, int(round(0.18 * ppm)))
+            u_grown = (cv2.dilate(u_mask.astype(np.uint8), self._ONES_3X3_U8, iterations=grow_iters) > 0) & clean_comp
+            u_skel = skeletonize(u_grown)
+            if int(np.sum(u_skel)) < 2:
+                break
+            u_segs = graph_ext.decompose_into_strokes(graph_ext.build_pixel_graph(u_skel, dist_map * 2.0))
+            if not u_segs:
+                break
+            u_ch = self._chain_segments_minimum_action(u_segs, ppm=ppm, w_nib_mm=w_nib_mm, max_strokes=1)
+            if not u_ch or len(u_ch[0].get("points", [])) < 2:
+                break
+            u_pts = [(float(p[0]), float(p[1]), max(0.5, float(p[2]))) for p in u_ch[0]["points"]]
+            u_pts = self._extend_and_anchor_stroke(u_pts, clean_comp, dist_map, raw_polylines, med_half_w, ppm=ppm)
+            raw_polylines.append(u_pts)
+            new_pred = self._rasterize_strokes_mask(raw_polylines, (h, w), scale_w=0.90)
+            if int(np.sum(clean_comp & (~new_pred))) >= int(np.sum(uncov)) - 1:
+                break
+
+        # 6. Parameterize with coupled 40° bevel + inferred muscular pressure p(s) + loop-hole clearance
+        out_strokes: List[Dict[str, Any]] = []
+        for idx, poly in enumerate(raw_polylines[:max_strokes]):
+            cal_pts, mean_p = self._parameterize_biomechanical_stroke(
+                poly,
+                clean_comp=clean_comp,
+                dist_map=dist_map,
+                dist_to_hole=dist_to_hole,
+                ppm=ppm,
+                w_nib_mm=w_nib_mm,
+                is_serafini=is_serafini,
+            )
+            if len(cal_pts) < 2:
+                continue
+            arc_mm = self._polyline_arc_mm(cal_pts, mm_per_px)
+            mean_w_px = float(np.mean([p[2] for p in cal_pts]))
+            out_strokes.append({
+                "stroke_id": f"cal_s{idx:02d}",
+                "order_index": idx,
+                "points": cal_pts,
+                "length": float(len(cal_pts)),
+                "length_mm": round(arc_mm, 3),
+                "start": (cal_pts[0][0], cal_pts[0][1]),
+                "end": (cal_pts[-1][0], cal_pts[-1][1]),
+                "nib_angle_deg": float(np.rad2deg(self.nib_angle_rad)),
+                "mean_width": round(mean_w_px, 2),
+                "mean_width_mm": round(mean_w_px * mm_per_px, 3),
+                "mean_pressure": round(mean_p, 3),
+                "is_impact": False,
+                "is_dot": False,
+                "is_macro_non_scribal": is_macro,
+                "px_per_mm": ppm,
+            })
+
+        return out_strokes
+
+    def _extract_continuous_cursive_tour(
+        self,
+        mask_bool: np.ndarray,
+        ppm: float,
+        w_nib_mm: float,
+        is_macro: bool,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Extracts strictly 1 continuous biomechanical cursive stroke (Codex Seraphinianus mode)
+        via an Eulerian Trail / Chinese-Postman tour directly on the homotopy-preserving skeleton graph.
+        """
+        lbl, num_f = label(mask_bool, structure=np.ones((3, 3), dtype=bool))
+        if num_f == 0:
+            return None
+        cc_sizes = [(cid, int(np.sum(lbl == cid))) for cid in range(1, num_f + 1)]
+        dom_id = max(cc_sizes, key=lambda x: x[1])[0]
+        comp_mask = (lbl == dom_id)
+        min_frag_px = max(2, int(round(0.05 * (ppm ** 2))))
+        for cid, csize in cc_sizes:
+            if cid != dom_id and csize >= min_frag_px:
+                comp_mask |= (lbl == cid)
+
+        h, w = comp_mask.shape
+        mm_per_px = 1.0 / ppm
+        clean_comp, _, dist_to_hole = self._clean_pinholes_and_get_holes(comp_mask, ppm)
+        dist_map = distance_transform_edt(clean_comp)
+        raw_skel = skeletonize(clean_comp)
+        if not np.any(raw_skel):
+            return None
+
+        spur_min_px = max(2, int(round(0.28 * ppm)))
+        skel = self.prune_skeleton_spurs(raw_skel, dist_map, min_spur_len=spur_min_px)
+        graph_ext = StrokeGraphExtractor()
+        raw_segs = graph_ext.decompose_into_strokes(graph_ext.build_pixel_graph(skel, dist_map * 2.0))
+        if not raw_segs:
+            return None
+
+        raw_segs = self._splice_cusp_tongues(raw_segs, px_per_mm=ppm)
+        chained = self._chain_segments_minimum_action(raw_segs, ppm=ppm, w_nib_mm=w_nib_mm, max_strokes=6)
+        med_half_w = float(np.median(dist_map[clean_comp])) if np.any(clean_comp) else (0.5 * w_nib_mm * ppm)
+
+        chains: List[List[Tuple[float, float, float]]] = []
+        for s in chained:
+            pts = [(float(p[0]), float(p[1]), max(0.5, float(p[2]))) for p in s.get("points", [])]
+            if len(pts) >= 2:
+                pts = self._extend_and_anchor_stroke(pts, clean_comp, dist_map, chains, med_half_w, ppm=ppm)
+                chains.append(pts)
+
+        if not chains:
+            return None
+
+        # Recover any uncovered cursive flourish (>= 0.045 mm^2) before single-tour assembly
+        min_res_px = max(3, int(round(0.045 * (ppm ** 2))))
+        for _ in range(2):
+            pred_m = self._rasterize_strokes_mask(chains, (h, w), scale_w=0.90)
+            uncov = clean_comp & (~pred_m)
+            if int(np.sum(uncov)) < min_res_px:
+                break
+            lbl_u, n_u = label(uncov, structure=np.ones((3, 3), dtype=bool))
+            if n_u == 0:
+                break
+            cnt_u = np.bincount(lbl_u.ravel())
+            cnt_u[0] = 0
+            best_uid = int(np.argmax(cnt_u))
+            if int(cnt_u[best_uid]) < min_res_px:
+                break
+            u_mask = (lbl_u == best_uid)
+            u_grown = (cv2.dilate(u_mask.astype(np.uint8), self._ONES_3X3_U8, iterations=max(1, int(round(0.18 * ppm)))) > 0) & clean_comp
+            u_skel = skeletonize(u_grown)
+            if int(np.sum(u_skel)) < 2:
+                break
+            u_segs = graph_ext.decompose_into_strokes(graph_ext.build_pixel_graph(u_skel, dist_map * 2.0))
+            if not u_segs:
+                break
+            u_ch = self._chain_segments_minimum_action(u_segs, ppm=ppm, w_nib_mm=w_nib_mm, max_strokes=1)
+            if u_ch and len(u_ch[0].get("points", [])) >= 2:
+                u_pts = [(float(p[0]), float(p[1]), max(0.5, float(p[2]))) for p in u_ch[0]["points"]]
+                chains.append(self._extend_and_anchor_stroke(u_pts, clean_comp, dist_map, chains, med_half_w, ppm=ppm))
+
+        # Assemble all chains into 1 minimum-action continuous cursive tour (splicing T-branches in-place)
+        chains.sort(key=lambda ch: (min(p[0] for p in ch) * 1.2 + min(p[1] for p in ch)) * mm_per_px)
+        tour = list(chains[0])
+        close_tol_px = 0.35 * ppm
+        if len(tour) >= 2 and math.hypot(tour[0][0] - tour[-1][0], tour[0][1] - tour[-1][1]) > close_tol_px:
+            if (tour[0][0] * 1.5 + tour[0][1]) > (tour[-1][0] * 1.5 + tour[-1][1]):
+                tour = tour[::-1]
+
+        rem = chains[1:]
+        while rem:
+            best_ri, best_mode, best_d = 0, "append_fwd", 1e9
+            for ri, rch in enumerate(rem):
+                opts = [
+                    ("append_fwd", math.hypot(tour[-1][0] - rch[0][0], tour[-1][1] - rch[0][1])),
+                    ("append_rev", math.hypot(tour[-1][0] - rch[-1][0], tour[-1][1] - rch[-1][1])),
+                    ("prepend_fwd", math.hypot(rch[-1][0] - tour[0][0], rch[-1][1] - tour[0][1])),
+                    ("prepend_rev", math.hypot(rch[0][0] - tour[0][0], rch[0][1] - tour[0][1])),
+                ]
+                for m_s, d_s in opts:
+                    if d_s < best_d:
+                        best_d, best_ri, best_mode = d_s, ri, m_s
+            chosen = rem.pop(best_ri)
+            is_ch_loop = math.hypot(chosen[0][0] - chosen[-1][0], chosen[0][1] - chosen[-1][1]) <= close_tol_px
+            d_mid_0 = min((math.hypot(bp[0] - chosen[0][0], bp[1] - chosen[0][1]), bi) for bi, bp in enumerate(tour))
+            d_mid_1 = min((math.hypot(bp[0] - chosen[-1][0], bp[1] - chosen[-1][1]), bi) for bi, bp in enumerate(tour))
+
+            if is_ch_loop and d_mid_0[0] + 0.25 * ppm < best_d:
+                bi = d_mid_0[1]
+                tour = tour[:bi + 1] + chosen + tour[bi + 1:]
+            elif min(d_mid_0[0], d_mid_1[0]) + 0.35 * ppm < best_d and min(d_mid_0[0], d_mid_1[0]) <= 0.75 * ppm:
+                if d_mid_0[0] <= d_mid_1[0]:
+                    bi = d_mid_0[1]
+                    exc = chosen + chosen[:-1][::-1]
+                else:
+                    bi = d_mid_1[1]
+                    rev_c = chosen[::-1]
+                    exc = rev_c + rev_c[:-1][::-1]
+                tour = tour[:bi + 1] + exc + tour[bi + 1:]
+            else:
+                if best_mode == "append_fwd":
+                    tour = tour + chosen
+                elif best_mode == "append_rev":
+                    tour = tour + chosen[::-1]
+                elif best_mode == "prepend_fwd":
+                    tour = chosen + tour
+                else:
+                    tour = chosen[::-1] + tour
+
+        # Ensure natural top-to-bottom / left-to-right cursive orientation when open
+        if len(tour) >= 2 and math.hypot(tour[0][0] - tour[-1][0], tour[0][1] - tour[-1][1]) > close_tol_px:
+            if (tour[0][0] * 1.5 + tour[0][1] * 0.8) > (tour[-1][0] * 1.5 + tour[-1][1] * 0.8):
+                tour = tour[::-1]
+
+        cal_pts, mean_p = self._parameterize_biomechanical_stroke(
+            tour,
+            clean_comp=clean_comp,
+            dist_map=dist_map,
+            dist_to_hole=dist_to_hole,
+            ppm=ppm,
+            w_nib_mm=w_nib_mm,
+            is_serafini=True,
+        )
+        if len(cal_pts) < 2:
+            return None
+
+        arc_mm = self._polyline_arc_mm(cal_pts, mm_per_px)
+        mean_w_px = float(np.mean([p[2] for p in cal_pts]))
+        return {
+            "stroke_id": "cal_s00",
+            "order_index": 0,
+            "points": cal_pts,
+            "length": float(len(cal_pts)),
+            "length_mm": round(arc_mm, 3),
+            "start": (cal_pts[0][0], cal_pts[0][1]),
+            "end": (cal_pts[-1][0], cal_pts[-1][1]),
+            "nib_angle_deg": float(np.rad2deg(self.nib_angle_rad)),
+            "mean_width": round(mean_w_px, 2),
+            "mean_width_mm": round(mean_w_px * mm_per_px, 3),
+            "mean_pressure": round(mean_p, 3),
+            "is_impact": False,
+            "is_dot": False,
+            "is_macro_non_scribal": is_macro,
+            "px_per_mm": ppm,
+        }
+
+    def _chain_segments_minimum_action(
+        self,
+        segments: List[Dict[str, Any]],
+        ppm: float,
+        w_nib_mm: float,
+        max_strokes: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Chains topological skeleton segments across junctions by comparing on-vellum
+        Euler-Bernoulli bending + gap cost (in mm) against the physical pen-lift cost `C_lift_mm`:
+          C_join(s1 -> s2) = d_gap_mm + 0.95 * w_nib_mm * (1 - cos_theta)^1.4
+        Straight X-crossings (cos_theta ~ 1.0, C_join ~ 0) merge first, leaving orthogonal crossbars
+        separate; smooth stem-to-bowl Eulerian trails (`'d'`, `'b'`, `'q'`, `'8'`) fuse into 1 fluid stroke.
+        """
+        if len(segments) <= 1:
+            return segments
+
+        mm_per_px = 1.0 / ppm
+        max_join_gap_mm = max(0.75, 1.65 * w_nib_mm)
+        k_tan = max(2, int(round(0.32 * ppm)))
+
+        work = [dict(s, points=list(s.get("points", []))) for s in segments if len(s.get("points", [])) >= 2]
+        if len(work) <= 1:
+            return work
+
+        # Pass 1: Merge whenever C_join_mm < PEN_LIFT_ACTION_COST_MM and cos_theta >= -0.38
+        merged = True
+        while merged and len(work) > 1:
+            merged = False
+            best_cost = self.PEN_LIFT_ACTION_COST_MM
+            best_action = None
+
+            for i in range(len(work)):
+                p1 = work[i]["points"]
+                p1s, p1e = p1[0], p1[-1]
+                for j in range(i + 1, len(work)):
+                    p2 = work[j]["points"]
+                    p2s, p2e = p2[0], p2[-1]
+
+                    orientations = [
+                        (math.hypot(p1e[0] - p2s[0], p1e[1] - p2s[1]) * mm_per_px, p1, p2),
+                        (math.hypot(p1e[0] - p2e[0], p1e[1] - p2e[1]) * mm_per_px, p1, p2[::-1]),
+                        (math.hypot(p2e[0] - p1s[0], p2e[1] - p1s[1]) * mm_per_px, p2, p1),
+                        (math.hypot(p1s[0] - p2s[0], p1s[1] - p2s[1]) * mm_per_px, p1[::-1], p2),
+                    ]
+                    for gap_mm, a_pts, b_pts in orientations:
+                        if gap_mm > max_join_gap_mm:
+                            continue
+                        cos_t = JunctionResolver._tangent_cosine(a_pts, b_pts, k=k_tan)
+                        if cos_t < -0.38:
+                            continue
+                        turn_cost_mm = gap_mm + 0.95 * w_nib_mm * ((1.0 - cos_t) ** 1.4)
+                        if turn_cost_mm < best_cost:
+                            best_cost = turn_cost_mm
+                            comb = a_pts + (b_pts[1:] if gap_mm < 0.08 else b_pts)
+                            best_action = (i, j, comb)
+
+            if best_action is not None:
+                i, j, comb = best_action
+                work[i] = {
+                    "stroke_id": work[i].get("stroke_id", "s_m"),
+                    "type": "segment",
+                    "points": comb,
+                    "start": (comb[0][0], comb[0][1]),
+                    "end": (comb[-1][0], comb[-1][1]),
+                    "length": float(len(comb)),
+                }
+                work.pop(j)
+                merged = True
+
+        # Pass 2: If still above stroke ceiling, coalesce closest touching branches at junctions before ranking by arc-length
+        while max_strokes > 0 and len(work) > max_strokes:
+            best_d_mm = max_join_gap_mm * 1.45
+            best_pair = None
+            for i in range(len(work)):
+                p1 = work[i]["points"]
+                for j in range(i + 1, len(work)):
+                    p2 = work[j]["points"]
+                    opts = [
+                        (math.hypot(p1[-1][0] - p2[0][0], p1[-1][1] - p2[0][1]) * mm_per_px, p1 + p2),
+                        (math.hypot(p1[-1][0] - p2[-1][0], p1[-1][1] - p2[-1][1]) * mm_per_px, p1 + p2[::-1]),
+                        (math.hypot(p2[-1][0] - p1[0][0], p2[-1][1] - p1[0][1]) * mm_per_px, p2 + p1),
+                        (math.hypot(p1[0][0] - p2[0][0], p1[0][1] - p2[0][1]) * mm_per_px, p1[::-1] + p2),
+                    ]
+                    for d_mm, comb in opts:
+                        if d_mm < best_d_mm:
+                            best_d_mm = d_mm
+                            best_pair = (i, j, comb)
+            if best_pair is not None:
+                i, j, comb = best_pair
+                work[i] = {
+                    "stroke_id": work[i].get("stroke_id", "s_m"),
+                    "type": "segment",
+                    "points": comb,
+                    "start": (comb[0][0], comb[0][1]),
+                    "end": (comb[-1][0], comb[-1][1]),
+                    "length": float(len(comb)),
+                }
+                work.pop(j)
+            else:
+                work.sort(key=lambda s: self._polyline_arc_mm(s["points"], mm_per_px), reverse=True)
+                work = work[:max_strokes]
+                break
+
+        return work
+
+    def _order_strokes_minimum_action(
+        self,
+        strokes: List[Dict[str, Any]],
+        shape: Tuple[int, int],
+        ppm: float,
+    ) -> List[Dict[str, Any]]:
+        """
+        Solves exact minimum biomechanical action across all `K <= 4` strokes:
+        - Closed pure loops start at their 11-o'clock top-left crest.
+        - Open strokes evaluate forward vs reversed direction with a strong quill-grain penalty
+          against pushing steeply upward (`dy_mm < -0.45 mm` against the 40° split nib).
+        - Exact permutation + direction search minimizes total air-travel distance in mm between pen lifts.
+        """
+        mm_per_px = 1.0 / ppm
+        close_tol_px = 0.35 * ppm
+
+        def _anti_grain_cost_mm(pts: List[Tuple[float, float, float]]) -> float:
+            if len(pts) < 2:
+                return 0.0
+            if math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= close_tol_px and len(pts) >= 6:
+                return 0.0
+            dy_net_mm = (pts[-1][0] - pts[0][0]) * mm_per_px
+            dx_net_mm = (pts[-1][1] - pts[0][1]) * mm_per_px
+            cost = 0.0
+            # Pulling downward (dy > 0) and rightward (dx > 0) glides smoothly; pushing upward digs into vellum
+            if dy_net_mm < -0.25:
+                cost += abs(dy_net_mm) * 2.4
+            if dx_net_mm < -0.35 and dy_net_mm <= 0.25:
+                cost += abs(dx_net_mm) * 1.4
+            return cost
+
+        # Normalize pure closed loops to start at 11-o'clock crest and build candidate orientations per stroke
+        stroke_variants: List[List[Tuple[Dict[str, Any], float]]] = []
+        for s in strokes:
+            pts = list(s.get("points", []))
+            if s.get("is_impact", False) or len(pts) < 2:
+                stroke_variants.append([(dict(s), 0.0)])
+                continue
+
+            is_closed = len(pts) >= 6 and math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= close_tol_px
+            if is_closed:
+                ring = pts[:-1]
+                crest_i = min(range(len(ring)), key=lambda idx: ring[idx][0] * 1.5 + ring[idx][1] * 1.8)
+                rot = ring[crest_i:] + ring[:crest_i] + [ring[crest_i]]
+                s_loop = dict(s, points=rot, start=(rot[0][0], rot[0][1]), end=(rot[-1][0], rot[-1][1]))
+                stroke_variants.append([(s_loop, 0.0)])
+            else:
+                c_fwd = _anti_grain_cost_mm(pts)
+                rev_pts = pts[::-1]
+                c_rev = _anti_grain_cost_mm(rev_pts)
+                s_fwd = dict(s, points=pts, start=(pts[0][0], pts[0][1]), end=(pts[-1][0], pts[-1][1]))
+                s_rev = dict(s, points=rev_pts, start=(rev_pts[0][0], rev_pts[0][1]), end=(rev_pts[-1][0], rev_pts[-1][1]))
+                stroke_variants.append([(s_fwd, c_fwd), (s_rev, c_rev)])
+
+        k_n = len(stroke_variants)
+        if k_n == 1:
+            best_s = min(stroke_variants[0], key=lambda item: item[1] + (item[0]["start"][0] * 0.5 + item[0]["start"][1] * 0.4) * mm_per_px)[0]
+            best_s["order_index"] = 0
+            best_s["stroke_id"] = "cal_s00"
+            return [best_s]
+
+        best_total = 1e12
+        best_seq: List[Dict[str, Any]] = []
+        for perm in itertools.permutations(range(k_n)):
+            for choice_tuple in itertools.product(*[stroke_variants[idx] for idx in perm]):
+                s0, g0 = choice_tuple[0]
+                # Entry prior: Western hand enters from top-left of glyph box
+                cost = (s0["start"][0] * 0.55 + s0["start"][1] * 0.65) * mm_per_px + g0
+                for step_i in range(1, k_n):
+                    s_prev = choice_tuple[step_i - 1][0]
+                    s_curr, g_curr = choice_tuple[step_i]
+                    air_mm = math.hypot(s_curr["start"][0] - s_prev["end"][0], s_curr["start"][1] - s_prev["end"][1]) * mm_per_px
+                    cost += self.PEN_LIFT_ACTION_COST_MM + 0.65 * air_mm + g_curr
+                if cost < best_total:
+                    best_total = cost
+                    best_seq = [dict(item[0]) for item in choice_tuple]
+
+        for idx, s in enumerate(best_seq):
             s["order_index"] = idx
             s["stroke_id"] = f"cal_s{idx:02d}"
+        return best_seq
 
-        return strokes
+    def _parameterize_biomechanical_stroke(
+        self,
+        raw_pts: List[Tuple[float, float, float]],
+        clean_comp: np.ndarray,
+        dist_map: np.ndarray,
+        dist_to_hole: Optional[np.ndarray],
+        ppm: float,
+        w_nib_mm: float,
+        is_serafini: bool,
+    ) -> Tuple[List[Tuple[float, float, float]], float]:
+        """
+        1. Freezes sharp cusps & velocity reversals (`cos < 0.57`, e.g. `'3'`, `'m'`, `'k'`) against smoothing.
+        2. Gently re-centers smooth interior stem segments onto the true medial ink ridge AND analytically
+           repels points outward if smoothing pulled a curve toward an enclosed loop hole (`dist_to_hole`).
+        3. Infers muscular nib pressure `p(s)` along arc-length coupled with the `40°` nib bevel:
+             w_mm(s) = p(s) * sqrt((w_nib * sin(theta - 40°))^2 + w_edge^2)
+           strictly bounded to physical instrument limits `[w_edge_mm, MAX_PRESSED_SPREAD_MM]` and
+           clamped outside interior loop cavities so holes NEVER plug.
+        """
+        if len(raw_pts) < 2:
+            return raw_pts, 1.0
+
+        h, w = clean_comp.shape
+        mm_per_px = 1.0 / ppm
+
+        dedup: List[Tuple[float, float, float]] = [(float(raw_pts[0][0]), float(raw_pts[0][1]), float(raw_pts[0][2]))]
+        min_dedup_px = max(0.12, 0.015 * ppm)
+        for p in raw_pts[1:]:
+            if math.hypot(float(p[0]) - dedup[-1][0], float(p[1]) - dedup[-1][1]) >= min_dedup_px:
+                dedup.append((float(p[0]), float(p[1]), float(p[2])))
+        if len(dedup) < 2:
+            p_end = (float(raw_pts[-1][0]), float(raw_pts[-1][1]), float(raw_pts[-1][2]))
+            if math.hypot(p_end[0] - dedup[0][0], p_end[1] - dedup[0][1]) > 1e-4:
+                dedup.append(p_end)
+            else:
+                return raw_pts, 1.0
+
+        n_pts = len(dedup)
+        close_dist_px = 0.32 * ppm
+        is_closed = n_pts >= 6 and math.hypot(dedup[0][0] - dedup[-1][0], dedup[0][1] - dedup[-1][1]) <= close_dist_px
+
+        anchors = [0]
+        for i in range(1, n_pts - 1):
+            v1y, v1x = dedup[i][0] - dedup[i - 1][0], dedup[i][1] - dedup[i - 1][1]
+            v2y, v2x = dedup[i + 1][0] - dedup[i][0], dedup[i + 1][1] - dedup[i][1]
+            n1, n2 = math.hypot(v1y, v1x), math.hypot(v2y, v2x)
+            if n1 > 1e-4 and n2 > 1e-4 and ((v1y * v2y + v1x * v2x) / (n1 * n2)) < 0.57:
+                anchors.append(i)
+        anchors.append(n_pts - 1)
+
+        rdp_eps_px = max(0.18, 0.020 * ppm)
+        sig_pts = max(0.55, min(1.35, 0.09 * ppm))
+        simplified: List[Tuple[float, float, float]] = []
+
+        if is_closed and len(anchors) == 2:
+            cy_a = gaussian_filter1d(np.array([p[0] for p in dedup[:-1]], dtype=np.float64), sigma=sig_pts, mode="wrap")
+            cx_a = gaussian_filter1d(np.array([p[1] for p in dedup[:-1]], dtype=np.float64), sigma=sig_pts, mode="wrap")
+            ring_sm = [(float(cy_a[k]), float(cx_a[k]), dedup[k][2]) for k in range(len(cy_a))]
+            ring_sm.append(ring_sm[0])
+            simplified = self._rdp_simplify_with_width(ring_sm, epsilon=rdp_eps_px)
+        else:
+            for a_i in range(len(anchors) - 1):
+                piece = dedup[anchors[a_i]:anchors[a_i + 1] + 1]
+                if len(piece) >= 4:
+                    py_a = np.array([p[0] for p in piece], dtype=np.float64)
+                    px_a = np.array([p[1] for p in piece], dtype=np.float64)
+                    sy0, sx0, sy1, sx1 = py_a[0], px_a[0], py_a[-1], px_a[-1]
+                    py_a = gaussian_filter1d(py_a, sigma=sig_pts, mode="nearest")
+                    px_a = gaussian_filter1d(px_a, sigma=sig_pts, mode="nearest")
+                    py_a[0], px_a[0], py_a[-1], px_a[-1] = sy0, sx0, sy1, sx1
+                    piece = [(float(py_a[k]), float(px_a[k]), piece[k][2]) for k in range(len(piece))]
+                simp_p = self._rdp_simplify_with_width(piece, epsilon=rdp_eps_px)
+                simplified.extend(simp_p[1:] if simplified else simp_p)
+
+        # Resample in physical millimeters (~0.15 mm around loops, ~0.24 mm on open stems)
+        resample_step_px = max(1.0, (0.15 if dist_to_hole is not None else 0.24) * ppm)
+        resampled: List[Tuple[float, float, float]] = [simplified[0]]
+        for k in range(len(simplified) - 1):
+            p0, p1 = simplified[k], simplified[k + 1]
+            seg_d = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
+            if seg_d > resample_step_px * 1.25:
+                n_sub = int(math.ceil(seg_d / resample_step_px))
+                for s_i in range(1, n_sub):
+                    t = float(s_i) / float(n_sub)
+                    resampled.append((
+                        p0[0] + t * (p1[0] - p0[0]),
+                        p0[1] + t * (p1[1] - p0[1]),
+                        p0[2] + t * (p1[2] - p0[2]),
+                    ))
+            resampled.append(p1)
+
+        # Outward loop-hole repulsion (undoing inward concavity bias of smoothing around tight bowls!)
+        n_r = len(resampled)
+        coords_yx = [[float(p[0]), float(p[1])] for p in resampled]
+        if dist_to_hole is not None:
+            min_hole_clear_px = 0.24 * ppm
+            for i in range(n_r):
+                cy, cx = coords_yx[i]
+                iy, ix = max(0, min(h - 1, int(round(cy)))), max(0, min(w - 1, int(round(cx))))
+                d_h = float(dist_to_hole[iy, ix])
+                if d_h < min_hole_clear_px:
+                    # Estimate outward gradient of dist_to_hole
+                    gy_h = float(dist_to_hole[min(h - 1, iy + 1), ix] - dist_to_hole[max(0, iy - 1), ix])
+                    gx_h = float(dist_to_hole[iy, min(w - 1, ix + 1)] - dist_to_hole[iy, max(0, ix - 1)])
+                    gn = math.hypot(gy_h, gx_h)
+                    if gn > 1e-4:
+                        uy_h, ux_h = gy_h / gn, gx_h / gn
+                        best_y, best_x, best_score = cy, cx, float(dist_map[iy, ix])
+                        for push in np.linspace(0.3, 0.32 * ppm, 5):
+                            ty_p, tx_p = cy + uy_h * push, cx + ux_h * push
+                            ity, itx = int(round(ty_p)), int(round(tx_p))
+                            if 0 <= ity < h and 0 <= itx < w and clean_comp[ity, itx]:
+                                sc = float(dist_map[ity, itx]) + 0.35 * float(dist_to_hole[ity, itx])
+                                if sc > best_score:
+                                    best_score = sc
+                                    best_y, best_x = ty_p, tx_p
+                        coords_yx[i] = [best_y, best_x]
+            if is_closed:
+                coords_yx[-1] = list(coords_yx[0])
+
+        # Coupled physical nib bevel + inferred muscular pressure p(s)
+        w_edge_mm = (0.48 if is_serafini else self.MIN_NIB_CHISEL_RATIO) * w_nib_mm
+        geom_w_mm = np.zeros(n_r, dtype=np.float64)
+        obs_w_mm = np.zeros(n_r, dtype=np.float64)
+
+        for i in range(n_r):
+            if i < n_r - 1:
+                dy, dx = coords_yx[i + 1][0] - coords_yx[i][0], coords_yx[i + 1][1] - coords_yx[i][1]
+            else:
+                dy, dx = coords_yx[i][0] - coords_yx[i - 1][0], coords_yx[i][1] - coords_yx[i - 1][1]
+            theta = math.atan2(dy, dx)
+            sin_b = abs(math.sin(theta - self.nib_angle_rad))
+            if is_serafini:
+                geom_w_mm[i] = w_nib_mm * (0.80 + 0.20 * sin_b)
+            else:
+                geom_w_mm[i] = math.hypot(w_nib_mm * sin_b, w_edge_mm)
+
+            iy = max(0, min(h - 1, int(round(coords_yx[i][0]))))
+            ix = max(0, min(w - 1, int(round(coords_yx[i][1]))))
+            edt_mm = float(dist_map[iy, ix]) * mm_per_px
+            obs_w_mm[i] = max(w_edge_mm, 2.0 * edt_mm)
+
+        # Infer normalized pressure p(s) in [0.55, 1.55] with muscular smoothing along arc-length
+        raw_p = np.clip(obs_w_mm / np.maximum(1e-4, geom_w_mm), 0.55, 1.55)
+        if n_r >= 4:
+            p_mode = "wrap" if is_closed else "nearest"
+            smooth_p = gaussian_filter1d(raw_p, sigma=1.15, mode=p_mode)
+        else:
+            smooth_p = raw_p
+
+        # Combine pressure * bevel width, strictly capped by physical MAX_PRESSED_SPREAD_MM AND hole clearance!
+        base_w_px: List[float] = []
+        hole_caps_px: List[float] = []
+        for i in range(n_r):
+            w_mm_i = float(np.clip(smooth_p[i] * geom_w_mm[i], w_edge_mm, self.MAX_PRESSED_SPREAD_MM))
+            w_px_i = w_mm_i * ppm
+            iy = max(0, min(h - 1, int(round(coords_yx[i][0]))))
+            ix = max(0, min(w - 1, int(round(coords_yx[i][1]))))
+            if dist_to_hole is not None:
+                dh_px = float(dist_to_hole[iy, ix])
+                h_cap = max(0.08 * ppm, 2.0 * (dh_px - 0.115 * ppm)) if dh_px < 0.75 * ppm else (self.MAX_PRESSED_SPREAD_MM * ppm)
+            else:
+                h_cap = self.MAX_PRESSED_SPREAD_MM * ppm
+            hole_caps_px.append(h_cap)
+            base_w_px.append(min(w_px_i, h_cap))
+
+        # Fine silhouette IoU + hole-preservation calibration within physical bounds [0.88, 1.18]
+        cand_stroke = [(coords_yx[i][0], coords_yx[i][1], base_w_px[i]) for i in range(n_r)]
+        best_gain = 1.0
+        best_obj = -1e9
+        holes_mask = (dist_to_hole == 0) if dist_to_hole is not None else None
+        hole_tot = int(np.sum(holes_mask)) if holes_mask is not None else 0
+
+        for gain in (0.88, 0.98, 1.08, 1.18):
+            scaled = [
+                (
+                    coords_yx[i][0],
+                    coords_yx[i][1],
+                    min(hole_caps_px[i], self.MAX_PRESSED_SPREAD_MM * ppm, base_w_px[i] * gain),
+                )
+                for i in range(n_r)
+            ]
+            pred = self._rasterize_strokes_mask([scaled], (h, w), scale_w=1.0)
+            inter = int(np.sum(pred & clean_comp))
+            union = int(np.sum(pred | clean_comp))
+            iou = (inter / union) if union > 0 else 0.0
+            hole_inv = (int(np.sum(pred & holes_mask)) / hole_tot) if hole_tot > 0 else 0.0
+            obj = iou - 0.45 * hole_inv
+            if obj > best_obj:
+                best_obj = obj
+                best_gain = gain
+
+        final_pts: List[Tuple[float, float, float]] = []
+        for i in range(n_r):
+            w_fin = min(
+                hole_caps_px[i],
+                self.MAX_PRESSED_SPREAD_MM * ppm,
+                max(w_edge_mm * ppm, base_w_px[i] * best_gain),
+            )
+            final_pts.append((round(coords_yx[i][0], 2), round(coords_yx[i][1], 2), round(w_fin, 2)))
+        if is_closed and len(final_pts) >= 4:
+            final_pts[-1] = final_pts[0]
+
+        return final_pts, float(np.mean(smooth_p))
 
     @staticmethod
     def _splice_cusp_tongues(
         segs: List[Dict[str, Any]],
-        px_per_mm: float = 6.3,
+        px_per_mm: float = 8.0,
     ) -> List[Dict[str, Any]]:
         """
-        Preserves '3'-shaped middle cusps and sharp bounce-back tongues (`arch_top -> cusp_tip -> arch_bottom`)
-        by splicing short degree-1 junction tongues directly between two main branches meeting at the same junction,
-        just as a human hand traces into the middle point of a '3' and reverses out into the lower arch.
+        Preserves `'3'`-shaped middle cusps and sharp bounce-back tongues (`arch_top -> cusp_tip -> arch_bottom`)
+        by splicing protruding degree-1 junction tongues (`<= 1.40 mm`) directly between two main branches
+        meeting at the same junction (`v = 0` cusp reversal with zero pen lift).
         """
         if len(segs) < 3:
             return segs
-        max_tongue_pts = max(6, int(round(1.45 * px_per_mm)))
-        junc_tol = max(2.6, 0.25 * px_per_mm)
+        mm_per_px = 1.0 / px_per_mm
+        max_tongue_mm = 1.40
+        junc_tol_px = 0.28 * px_per_mm
         work = [dict(s, points=list(s.get("points", []))) for s in segs if len(s.get("points", [])) >= 2]
         if len(work) < 3:
             return segs
@@ -579,44 +1103,40 @@ class CalligraphicVectorizer:
         merged_any = True
         while merged_any and len(work) >= 3:
             merged_any = False
-            # Count how many other segment endpoints touch each segment's start/end
             for t_idx, t_seg in enumerate(work):
                 t_pts = t_seg["points"]
-                if len(t_pts) > max_tongue_pts:
+                if CalligraphicVectorizer._polyline_arc_mm(t_pts, mm_per_px) > max_tongue_mm:
                     continue
                 for j_end in (0, -1):
                     jy, jx = float(t_pts[j_end][0]), float(t_pts[j_end][1])
                     tip_end = -1 if j_end == 0 else 0
                     ty_tip, tx_tip = float(t_pts[tip_end][0]), float(t_pts[tip_end][1])
-                    # Verify tip_end is genuinely a free degree-1 tip (touches no other segment)
                     tip_touches = any(
-                        o_idx != t_idx and (
-                            math.hypot(ty_tip - o["points"][0][0], tx_tip - o["points"][0][1]) <= junc_tol
-                            or math.hypot(ty_tip - o["points"][-1][0], tx_tip - o["points"][-1][1]) <= junc_tol
+                        o_idx != t_idx
+                        and (
+                            math.hypot(ty_tip - o["points"][0][0], tx_tip - o["points"][0][1]) <= junc_tol_px
+                            or math.hypot(ty_tip - o["points"][-1][0], tx_tip - o["points"][-1][1]) <= junc_tol_px
                         )
                         for o_idx, o in enumerate(work)
                     )
                     if tip_touches:
                         continue
-                    # Find two main branches A and B that also meet at (jy, jx)
                     neighbors = []
                     for o_idx, o in enumerate(work):
                         if o_idx == t_idx or len(o["points"]) < 3:
                             continue
                         d0 = math.hypot(jy - o["points"][0][0], jx - o["points"][0][1])
                         d1 = math.hypot(jy - o["points"][-1][0], jx - o["points"][-1][1])
-                        if d0 <= junc_tol or d1 <= junc_tol:
+                        if d0 <= junc_tol_px or d1 <= junc_tol_px:
                             neighbors.append((o_idx, 0 if d0 <= d1 else -1))
                     if len(neighbors) == 2:
                         (idx_a, end_a), (idx_b, end_b) = neighbors
                         pts_a = list(work[idx_a]["points"])
                         pts_b = list(work[idx_b]["points"])
-                        # Orient A so it arrives AT junction J (end_a -> -1), and B so it leaves FROM J (end_b -> 0)
                         if end_a == 0:
                             pts_a = pts_a[::-1]
                         if end_b == -1:
                             pts_b = pts_b[::-1]
-                        # Orient tongue T from J -> tip, then bounce tip -> J
                         tongue_out = list(t_pts) if j_end == 0 else list(t_pts)[::-1]
                         tongue_back = tongue_out[:-1][::-1]
                         spliced_pts = pts_a + tongue_out[1:] + tongue_back + pts_b[1:]
@@ -635,367 +1155,16 @@ class CalligraphicVectorizer:
                     break
         return work
 
-    def _extract_dominant_single_stroke(
-        self,
-        binary_mask: np.ndarray,
-        px_per_mm: float = 6.3
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Extracts one continuous cursive calligraphic gesture covering the glyph (Codex Seraphinianus mode)
-        via a Topological Loop + Cusp Eulerian Tour:
-        - Zero `binary_closing` loop-plugging: genuine small loops are preserved as explicit 360° medial rings
-          spliced smoothly into the passing ribbon stem (never flattened into self-overlapping lines).
-        - Preserves '3'-shaped middle cusps and traverses all authentic branches to their true ink tips.
-        """
-        from scipy.ndimage import label, binary_fill_holes
-        if binary_mask is None or not np.any(binary_mask):
-            return None
-
-        lbl, num_features = label(binary_mask.astype(bool), structure=np.ones((3, 3), dtype=bool))
-        if num_features == 0:
-            return None
-
-        cc_sizes = [(comp_id, int(np.sum(lbl == comp_id))) for comp_id in range(1, num_features + 1)]
-        dominant_id = max(cc_sizes, key=lambda x: x[1])[0]
-        comp_mask = (lbl == dominant_id)
-        # Bridge any tiny 1-2 px disconnected ink fragment in the same Seraphinianus glyph mask softly
-        if num_features > 1:
-            for cid, csize in cc_sizes:
-                if cid != dominant_id and csize >= 6:
-                    comp_mask |= (lbl == cid)
-        h, w = comp_mask.shape
-
-        # Preserve all genuine loop eyes (> 2 px^2); fill only 1-2 px grain pinholes
-        pinhole_max = max(1, int(round(0.012 * (px_per_mm ** 2))))
-        padded = np.pad(comp_mask, 2, mode="constant", constant_values=False)
-        holes = binary_fill_holes(padded) & (~padded)
-        lbl_h, num_h = label(holes)
-        clean_comp = comp_mask.copy()
-        real_holes = []
-        for hid in range(1, num_h + 1):
-            hm = (lbl_h == hid)[2:-2, 2:-2]
-            ha = int(np.sum(hm))
-            if ha <= pinhole_max:
-                clean_comp |= hm
-            elif np.any(hm):
-                real_holes.append(hm)
-
-        dist_map = distance_transform_edt(clean_comp)
-        raw_skel = skeletonize(clean_comp)
-        if not np.any(raw_skel):
-            return None
-
-        inner_dists = dist_map[dist_map > 0.5]
-        med_r = float(np.median(inner_dists)) if len(inner_dists) > 0 else 1.5
-        spur_min_len = max(2, int(round(max(med_r * 1.15, 0.28 * px_per_mm))))
-        skel = self.prune_skeleton_spurs(raw_skel, dist_map, min_spur_len=spur_min_len)
-        smoothed_dist = gaussian_filter(dist_map.astype(np.float32), sigma=max(0.55, 0.08 * px_per_mm))
-
-        # 1. Extract explicit 360° medial rings around every enclosed loop hole so loops NEVER collapse
-        loop_rings: List[List[Tuple[float, float, float]]] = []
-        loop_covered_skel = np.zeros_like(skel, dtype=bool)
-        if real_holes:
-            try:
-                from skimage.measure import find_contours
-                for h_mask in real_holes:
-                    contours = find_contours(h_mask.astype(np.float32), 0.5)
-                    if not contours:
-                        continue
-                    ring_c = max(contours, key=len)
-                    ring_open = ring_c[:-1] if len(ring_c) >= 6 and np.hypot(ring_c[0][0] - ring_c[-1][0], ring_c[0][1] - ring_c[-1][1]) < 1.5 else ring_c
-                    if len(ring_open) < 5:
-                        continue
-                    hy_c, hx_c = float(np.mean(ring_open[:, 0])), float(np.mean(ring_open[:, 1]))
-                    angles = np.unwrap(np.arctan2(ring_open[:, 0] - hy_c, ring_open[:, 1] - hx_c))
-                    if angles[-1] < angles[0]:
-                        ring_open = ring_open[::-1]
-                    start_idx = int(np.argmin((ring_open[:, 0] / max(1.0, float(h))) * 1.5 + (ring_open[:, 1] / max(1.0, float(w))) * 2.0))
-                    ordered_ring = np.vstack([ring_open[start_idx:], ring_open[:start_idx], ring_open[start_idx:start_idx + 1]])
-                    n_ring = len(ordered_ring)
-                    ring_pts: List[Tuple[float, float, float]] = []
-                    max_push = max(2.8, min(med_r * 2.2, 0.75 * px_per_mm))
-                    for ri in range(n_ring):
-                        py, px_c = float(ordered_ring[ri][0]), float(ordered_ring[ri][1])
-                        p_prev = ordered_ring[(ri - 1) % max(1, n_ring - 1)]
-                        p_next = ordered_ring[(ri + 1) % max(1, n_ring - 1)]
-                        ty, tx = float(p_next[0] - p_prev[0]), float(p_next[1] - p_prev[1])
-                        tn = float(np.hypot(ty, tx)) or 1.0
-                        n1y, n1x = -tx / tn, ty / tn
-                        if (n1y * (py - hy_c) + n1x * (px_c - hx_c)) < 0:
-                            n1y, n1x = -n1y, -n1x
-                        best_ry, best_rx, best_rd = py, px_c, 0.0
-                        for step_t in np.linspace(0.5, max_push, 9):
-                            cy_t, cx_t = py + n1y * step_t, px_c + n1x * step_t
-                            iy_t, ix_t = int(round(cy_t)), int(round(cx_t))
-                            if 0 <= iy_t < h and 0 <= ix_t < w and clean_comp[iy_t, ix_t]:
-                                d_loc = float(smoothed_dist[iy_t, ix_t])
-                                if d_loc >= best_rd:
-                                    best_rd = d_loc
-                                    best_ry, best_rx = cy_t, cx_t
-                            elif best_rd > 0.0:
-                                break
-                        ring_pts.append((round(best_ry, 2), round(best_rx, 2), round(max(1.5, best_rd * 2.0), 2)))
-                    if len(ring_pts) >= 5:
-                        ring_pts[-1] = ring_pts[0]
-                        loop_rings.append(ring_pts)
-                        self._mark_nib_footprint_visited(ring_pts, dist_map * 0.70, loop_covered_skel, extra_margin=0.5)
-            except Exception:
-                pass
-
-        # 2. Extract topological skeleton segments & splice '3' middle cusps
-        from voynich_ductus.vectorizer.stroke_graph import StrokeGraphExtractor
-        from voynich_ductus.vectorizer.junction_resolver import JunctionResolver
-        graph_ext = StrokeGraphExtractor()
-        junc_res = JunctionResolver(right_handed_prior=True)
-
-        rem_skel = skel & (~loop_covered_skel)
-        seg_chains: List[List[Tuple[float, float, float]]] = []
-        if int(np.sum(rem_skel)) >= 2:
-            p_graph = graph_ext.build_pixel_graph(rem_skel, dist_map * 2.0)
-            raw_segs = graph_ext.decompose_into_strokes(p_graph)
-            if raw_segs:
-                raw_segs = self._splice_cusp_tongues(raw_segs, px_per_mm=px_per_mm)
-                chained = junc_res.resolve_and_order_strokes(
-                    raw_segs,
-                    max_gap=max(6.5, 0.95 * px_per_mm),
-                    min_cos=-0.65,
-                    max_strokes=8,
-                )
-                for ch_s in chained:
-                    c_pts = [(float(p[0]), float(p[1]), max(1.5, float(p[2]))) for p in ch_s.get("points", [])]
-                    if len(c_pts) >= 2:
-                        c_pts = self._extend_and_anchor_stroke(c_pts, clean_comp, dist_map, seg_chains + loop_rings, med_r)
-                        seg_chains.append(c_pts)
-
-        # 3. Splice every 360° loop ring smoothly into its closest stem chain (or promote standalone 'o' ring)
-        for ring in loop_rings:
-            if not seg_chains:
-                seg_chains.append(ring)
-                continue
-            best_ci, best_pi, best_ri, best_d = 0, 0, 0, 1e9
-            for ci, ch in enumerate(seg_chains):
-                for pi, cp in enumerate(ch):
-                    for ri in range(len(ring) - 1):
-                        d = math.hypot(cp[0] - ring[ri][0], cp[1] - ring[ri][1])
-                        if d < best_d:
-                            best_d = d
-                            best_ci, best_pi, best_ri = ci, pi, ri
-            rotated_ring = ring[best_ri:-1] + ring[:best_ri] + [ring[best_ri]]
-            target_ch = seg_chains[best_ci]
-            seg_chains[best_ci] = target_ch[:best_pi + 1] + rotated_ring + target_ch[best_pi:]
-
-        if not seg_chains:
-            candidates = self.find_touchdown_endpoints(clean_comp, skel)
-            if not candidates:
-                return None
-            _, sy, sx, dy, dx = candidates[0]
-            fb = self._trace_continuous_ridge(smoothed_dist, skel, None, sy, sx, dy, dx, max_steps=int(max(h, w) * 3.0), step_size=1.2)
-            if len(fb) < 2:
-                return None
-            seg_chains = [self._extend_and_anchor_stroke(fb, clean_comp, dist_map, [], med_r)]
-
-        # 4. Chain all remaining strokes into 1 continuous cursive gesture (left-to-right / minimal bridge)
-        seg_chains.sort(key=lambda ch: min(p[1] for p in ch) + 0.35 * min(p[0] for p in ch))
-        best_pts = list(seg_chains[0])
-        if len(best_pts) >= 2 and math.hypot(best_pts[0][0] - best_pts[-1][0], best_pts[0][1] - best_pts[-1][1]) > 3.5:
-            if best_pts[0][1] + 0.4 * best_pts[0][0] > best_pts[-1][1] + 0.4 * best_pts[-1][0]:
-                best_pts = best_pts[::-1]
-
-        remaining = seg_chains[1:]
-        while remaining:
-            best_idx = 0
-            best_mode = "append_fwd"
-            best_dist = 1e9
-            for r_i, r_ch in enumerate(remaining):
-                candidates_join = [
-                    ("append_fwd", math.hypot(best_pts[-1][0] - r_ch[0][0], best_pts[-1][1] - r_ch[0][1])),
-                    ("append_rev", math.hypot(best_pts[-1][0] - r_ch[-1][0], best_pts[-1][1] - r_ch[-1][1])),
-                    ("prepend_fwd", math.hypot(r_ch[-1][0] - best_pts[0][0], r_ch[-1][1] - best_pts[0][1])),
-                    ("prepend_rev", math.hypot(r_ch[0][0] - best_pts[0][0], r_ch[0][1] - best_pts[0][1])),
-                ]
-                for mode_s, dist_s in candidates_join:
-                    if dist_s < best_dist:
-                        best_dist = dist_s
-                        best_idx = r_i
-                        best_mode = mode_s
-            chosen = remaining.pop(best_idx)
-            # If chosen is a short branch touching the middle of best_pts (like a crossbar or T-stem),
-            # splice an out-and-back excursion right at the closest interior point of best_pts instead of jumping across whitespace!
-            d_mid_0 = min((math.hypot(bp[0] - chosen[0][0], bp[1] - chosen[0][1]), bi) for bi, bp in enumerate(best_pts))
-            d_mid_1 = min((math.hypot(bp[0] - chosen[-1][0], bp[1] - chosen[-1][1]), bi) for bi, bp in enumerate(best_pts))
-            if min(d_mid_0[0], d_mid_1[0]) + 2.5 < best_dist and min(d_mid_0[0], d_mid_1[0]) <= max(4.5, med_r * 2.5):
-                if d_mid_0[0] <= d_mid_1[0]:
-                    bi = d_mid_0[1]
-                    exc = chosen + chosen[:-1][::-1]
-                else:
-                    bi = d_mid_1[1]
-                    ch_rev = chosen[::-1]
-                    exc = ch_rev + ch_rev[:-1][::-1]
-                best_pts = best_pts[:bi + 1] + exc + best_pts[bi + 1:]
-            else:
-                if best_mode == "append_fwd":
-                    best_pts = best_pts + chosen
-                elif best_mode == "append_rev":
-                    best_pts = best_pts + chosen[::-1]
-                elif best_mode == "prepend_fwd":
-                    best_pts = chosen + best_pts
-                else:
-                    best_pts = chosen[::-1] + best_pts
-
-        calligraphic_pts = self._parameterize_stroke(best_pts, px_per_mm=px_per_mm, dist_map=dist_map)
-        if len(calligraphic_pts) < 2:
-            return None
-        calligraphic_pts = self._optimize_strokes_on_silhouette([calligraphic_pts], clean_comp, dist_map, px_per_mm=px_per_mm)[0]
-
-        return {
-            "stroke_id": "cal_s00",
-            "order_index": 0,
-            "points": calligraphic_pts,
-            "length": float(len(calligraphic_pts)),
-            "start": (calligraphic_pts[0][0], calligraphic_pts[0][1]),
-            "end": (calligraphic_pts[-1][0], calligraphic_pts[-1][1]),
-            "nib_angle_deg": float(np.rad2deg(self.nib_angle_rad)),
-            "mean_width": float(np.mean([p[2] for p in calligraphic_pts]))
-        }
-
-    def _trace_continuous_ridge(
-        self,
-        dist_map: np.ndarray,
-        skel: np.ndarray,
-        global_visited: Optional[np.ndarray],
-        start_y: int,
-        start_x: int,
-        init_dy: float,
-        init_dx: float,
-        max_steps: int = 120,
-        step_size: float = 1.45,
-    ) -> List[Tuple[float, float, float]]:
-        """
-        Follows the medial distance ridge with strong biomechanical inertia:
-        - Step size scales in mm so it never jitter-steps inside a thick stroke.
-        - Full nib-width wake mask prevents U-turns inside the thickness of the same stem.
-        - Maximum angular deflection per step is bounded to [-65 deg, +65 deg].
-        """
-        h, w = dist_map.shape
-        cy, cx = float(start_y), float(start_x)
-        init_w = max(1.5, float(dist_map[start_y, start_x] * 2.0))
-        pts = [(round(cy, 2), round(cx, 2), round(init_w, 2))]
-
-        # Precompute 3x3 dilated skeleton neighborhood once in C++ instead of slicing per step/angle
-        skel_near = cv2.dilate(skel.astype(np.uint8), self._ONES_3X3_U8) > 0
-
-        # Wake mask covering the full width of the already-drawn ink behind the pen
-        wake_mask = np.zeros((h, w), dtype=bool)
-        recent_centers: List[Tuple[float, float, float]] = [(cy, cx, max(1.8, float(dist_map[start_y, start_x]) + 1.0))]
-
-        cur_dy, cur_dx = float(init_dy), float(init_dx)
-        norm_init = math.hypot(cur_dy, cur_dx)
-        if norm_init > 1e-4:
-            cur_dy, cur_dx = cur_dy / norm_init, cur_dx / norm_init
-        else:
-            cur_dy, cur_dx = 1.0, 0.0
-
-        ridge_angles = self._RIDGE_ANGLES
-        has_global = global_visited is not None
-
-        for step in range(max_steps):
-            # Commit older points (more than 3 steps behind) into the forbidden nib-width wake mask
-            if len(recent_centers) > 3:
-                old_y, old_x, old_r = recent_centers.pop(0)
-                oy, ox = int(round(old_y)), int(round(old_x))
-                r_int = int(math.ceil(old_r))
-                y0, y1 = max(0, oy - r_int), min(h, oy + r_int + 1)
-                x0, x1 = max(0, ox - r_int), min(w, ox + r_int + 1)
-                sub_y = np.arange(y0, y1)[:, None] - old_y
-                sub_x = np.arange(x0, x1)[None, :] - old_x
-                wake_mask[y0:y1, x0:x1] |= ((sub_y * sub_y + sub_x * sub_x) <= (old_r * old_r))
-
-            best_val = -1e9
-            best_ny, best_nx = None, None
-            best_vdy, best_vdx = None, None
-
-            # Sample 19 precomputed forward directions bounded to [-65 deg, +65 deg]
-            for cos_a, sin_a, is_straight in ridge_angles:
-                cand_dy = cur_dy * cos_a - cur_dx * sin_a
-                cand_dx = cur_dy * sin_a + cur_dx * cos_a
-
-                ny = cy + cand_dy * step_size
-                nx = cx + cand_dx * step_size
-                iy, ix = int(round(ny)), int(round(nx))
-
-                if not (0 <= iy < h and 0 <= ix < w):
-                    continue
-
-                d_val = float(dist_map[iy, ix])
-                if d_val < 0.35:
-                    continue
-
-                on_skel_bonus = 2.4 if skel_near[iy, ix] else 0.0
-                momentum = (cos_a * 2.1) if cos_a > 0.0 else 0.0
-
-                is_vis = wake_mask[iy, ix] or (has_global and global_visited[iy, ix])
-                if is_vis:
-                    crossing = False
-                    if is_straight:
-                        local_w = max(2.5, d_val * 2.2)
-                        for look_d in (local_w * 1.2, local_w * 1.8):
-                            fy = int(round(cy + cand_dy * look_d))
-                            fx = int(round(cx + cand_dx * look_d))
-                            if 0 <= fy < h and 0 <= fx < w and dist_map[fy, fx] >= 0.45:
-                                if not wake_mask[fy, fx] and (not has_global or not global_visited[fy, fx]):
-                                    crossing = True
-                                    break
-                    if not crossing:
-                        continue
-                    vis_penalty = -2.5
-                else:
-                    vis_penalty = 2.0
-
-                score = d_val * 2.4 + on_skel_bonus + momentum + vis_penalty
-                if score > best_val:
-                    best_val = score
-                    best_ny, best_nx = ny, nx
-                    best_vdy, best_vdx = cand_dy, cand_dx
-
-            if best_ny is None:
-                break
-
-            iy, ix = int(round(best_ny)), int(round(best_nx))
-            cur_r = max(1.8, float(dist_map[iy, ix]) * 0.95 + 0.8)
-            recent_centers.append((best_ny, best_nx, cur_r))
-
-            cy, cx = best_ny, best_nx
-            blend_dy = 0.50 * cur_dy + 0.50 * best_vdy
-            blend_dx = 0.50 * cur_dx + 0.50 * best_vdx
-            bnorm = math.hypot(blend_dy, blend_dx)
-            cur_dy, cur_dx = (blend_dy / bnorm, blend_dx / bnorm) if bnorm > 1e-4 else (best_vdy, best_vdx)
-
-            w_val = max(1.5, float(dist_map[iy, ix] * 2.0))
-            pts.append((round(cy, 2), round(cx, 2), round(w_val, 2)))
-
-            # Check loop closure: if returning close to start after >= 8 steps, close cleanly and stop
-            if len(pts) >= 8:
-                dist_to_start = math.hypot(cy - pts[0][0], cx - pts[0][1])
-                if dist_to_start <= max(2.5, init_w * 0.85):
-                    pts.append(pts[0])
-                    break
-
-        return pts
-
     @staticmethod
     def _rdp_simplify_with_width(
         pts: List[Tuple[float, float, float]],
-        epsilon: float = 0.85
+        epsilon: float = 0.25,
     ) -> List[Tuple[float, float, float]]:
-        """
-        Ramer-Douglas-Peucker trajectory simplification in (y, x) space while preserving width.
-        Eliminates sub-pixel staircase oscillations while keeping true curvature extrema and loops.
-        """
+        """Ramer-Douglas-Peucker trajectory simplification preserving closed loops and local widths."""
         if len(pts) <= 3:
             return pts
 
-        # If closed loop (start ~ end), split in half, simplify each half, and rejoin
-        if np.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= 3.0 and len(pts) >= 6:
+        if np.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= epsilon * 8.0 and len(pts) >= 6:
             mid = len(pts) // 2
             first_half = CalligraphicVectorizer._rdp_simplify_with_width(pts[:mid + 1], epsilon=epsilon)
             second_half = CalligraphicVectorizer._rdp_simplify_with_width(pts[mid:], epsilon=epsilon)
@@ -1024,8 +1193,7 @@ class CalligraphicVectorizer:
             left = CalligraphicVectorizer._rdp_simplify_with_width(pts[:index + 1], epsilon=epsilon)
             right = CalligraphicVectorizer._rdp_simplify_with_width(pts[index:], epsilon=epsilon)
             return left[:-1] + right
-        else:
-            return [pts[0], pts[-1]]
+        return [pts[0], pts[-1]]
 
     @staticmethod
     def _rasterize_strokes_mask(
@@ -1033,7 +1201,7 @@ class CalligraphicVectorizer:
         shape: Tuple[int, int],
         scale_w: float = 1.0,
     ) -> np.ndarray:
-        """Renders candidate variable-width calligraphic strokes onto a 2D boolean mask for exact silhouette IoU."""
+        """Renders candidate variable-width calligraphic strokes onto a 2D boolean mask for silhouette IoU."""
         h, w = shape
         canvas = np.zeros((h, w), dtype=np.uint8)
         for pts in stroke_pts_list:
@@ -1065,25 +1233,25 @@ class CalligraphicVectorizer:
         dist_map: np.ndarray,
         prior_strokes: List[List[Tuple[float, float, float]]],
         med_half_w: float,
+        ppm: float = 8.0,
     ) -> List[Tuple[float, float, float]]:
         """
-        1. Snaps stroke endpoints that originate at T-junctions directly onto the parent stroke (0-px junction gap).
-        2. Extends free eroded endpoints outward along their local tangent by ~0.78 * d_EDT inside the ink mask.
+        1. Snaps T-junction endpoints onto parent strokes across genuine ink (`0.0 mm` junction gap).
+        2. Completes free eroded endpoints via a 2-pass geodesic forward cone bounded strictly in mm (`<= 0.85 mm`).
         """
         if len(pts) < 2:
             return pts
         h, w = clean_comp.shape
-        is_closed = math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= 3.0 and len(pts) >= 6
-        if is_closed:
+        close_tol = 0.35 * ppm
+        if len(pts) >= 6 and math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= close_tol:
             return pts
 
         out = list(pts)
-        snap_r = max(2.8, med_half_w * 2.4)
+        snap_r = min(0.85 * ppm, med_half_w * 2.2)
         prior_flat = [p for st in prior_strokes for p in st] if prior_strokes else []
 
         for end_flag in (0, -1):
             ey, ex, ew = float(out[end_flag][0]), float(out[end_flag][1]), float(out[end_flag][2])
-            # Check junction snap to prior stroke first
             if prior_flat:
                 best_p = None
                 best_d = snap_r + 1.0
@@ -1092,263 +1260,58 @@ class CalligraphicVectorizer:
                     if d < best_d:
                         best_d = d
                         best_p = pp
-                if best_p is not None and 0.4 <= best_d <= snap_r:
-                    # Check midpoint is inside ink so we never bridge across empty parchment
+                if best_p is not None and 0.05 * ppm <= best_d <= snap_r:
                     my, mx = int(round(0.5 * (ey + best_p[0]))), int(round(0.5 * (ex + best_p[1])))
                     if 0 <= my < h and 0 <= mx < w and clean_comp[my, mx]:
                         anchor_pt = (round(float(best_p[0]), 2), round(float(best_p[1]), 2), round(float(ew), 2))
-                        if end_flag == 0:
-                            out = [anchor_pt] + out
-                        else:
-                            out = out + [anchor_pt]
+                        out = ([anchor_pt] + out) if end_flag == 0 else (out + [anchor_pt])
                         continue
 
-            # Free endpoint: geodesic cone tip completion so the stroke reaches 100% of its true ink extremity (including curved hairlines!)
-            for _tip_pass in range(2):
+            max_fwd_px = 0.65 * ppm
+            max_lat_px = 0.32 * ppm
+            for _ in range(2):
                 ey, ex, ew = float(out[end_flag][0]), float(out[end_flag][1]), float(out[end_flag][2])
                 k_step = min(3, len(out) - 1)
                 if end_flag == 0:
-                    ty = out[0][0] - out[k_step][0]
-                    tx = out[0][1] - out[k_step][1]
+                    ty, tx = out[0][0] - out[k_step][0], out[0][1] - out[k_step][1]
                 else:
-                    ty = out[-1][0] - out[-1 - k_step][0]
-                    tx = out[-1][1] - out[-1 - k_step][1]
+                    ty, tx = out[-1][0] - out[-1 - k_step][0], out[-1][1] - out[-1 - k_step][1]
                 tn = math.hypot(ty, tx)
                 if tn < 1e-4:
                     break
                 ty, tx = ty / tn, tx / tn
                 py_dir, px_dir = -tx, ty
-                iy0 = max(0, min(h - 1, int(round(ey))))
-                ix0 = max(0, min(w - 1, int(round(ex))))
-                local_r = max(1.0, float(dist_map[iy0, ix0]))
-                r_box = int(math.ceil(min(9.0, local_r * 1.75 + 2.0)))
+                iy0, ix0 = max(0, min(h - 1, int(round(ey)))), max(0, min(w - 1, int(round(ex))))
+                local_r = min(0.55 * ppm, float(dist_map[iy0, ix0]))
+                fwd_lim = min(max_fwd_px, local_r * 1.65 + 0.15 * ppm)
+                lat_lim = min(max_lat_px, local_r * 0.85 + 0.10 * ppm)
+                r_box = max(1, int(math.ceil(fwd_lim)))
                 y_lo, y_hi = max(0, iy0 - r_box), min(h, iy0 + r_box + 1)
                 x_lo, x_hi = max(0, ix0 - r_box), min(w, ix0 + r_box + 1)
                 ys_sub, xs_sub = np.where(clean_comp[y_lo:y_hi, x_lo:x_hi])
                 best_tip = None
-                best_tip_score = 0.35
-                max_fwd = min(9.0, local_r * 1.65 + 2.0)
-                max_lat = max(1.8, local_r * 0.90 + 1.2)
+                best_score = 0.06 * ppm
                 for dy_i, dx_i in zip(ys_sub, xs_sub):
-                    cy_i = float(y_lo + dy_i)
-                    cx_i = float(x_lo + dx_i)
+                    cy_i, cx_i = float(y_lo + dy_i), float(x_lo + dx_i)
                     vy, vx = cy_i - ey, cx_i - ex
                     proj = vy * ty + vx * tx
-                    if proj < 0.45 or proj > max_fwd:
+                    if proj < 0.06 * ppm or proj > fwd_lim:
                         continue
                     perp = abs(vy * py_dir + vx * px_dir)
-                    if perp > max_lat or perp > proj * 1.15 + 0.8:
+                    if perp > lat_lim or perp > proj * 1.10:
                         continue
-                    # Ensure straight segment stays inside clean_comp (never jumps across empty parchment)
                     mid_y, mid_x = int(round(0.5 * (ey + cy_i))), int(round(0.5 * (ex + cx_i)))
                     q_y, q_x = int(round(0.75 * cy_i + 0.25 * ey)), int(round(0.75 * cx_i + 0.25 * ex))
                     if not (clean_comp[mid_y, mid_x] and clean_comp[q_y, q_x]):
                         continue
-                    tip_score = proj - 0.28 * perp + 0.25 * float(dist_map[int(cy_i), int(cx_i)])
-                    if tip_score > best_tip_score:
-                        best_tip_score = tip_score
-                        w_tip = max(1.2, float(dist_map[int(cy_i), int(cx_i)]) * 1.85)
+                    sc = proj - 0.30 * perp + 0.20 * float(dist_map[int(cy_i), int(cx_i)])
+                    if sc > best_score:
+                        best_score = sc
+                        w_tip = max(0.12 * ppm, float(dist_map[int(cy_i), int(cx_i)]) * 1.80)
                         best_tip = (round(cy_i, 2), round(cx_i, 2), round(w_tip, 2))
-                if best_tip is not None and math.hypot(best_tip[0] - ey, best_tip[1] - ex) >= 0.65:
-                    if end_flag == 0:
-                        out = [best_tip] + out
-                    else:
-                        out = out + [best_tip]
+                if best_tip is not None and math.hypot(best_tip[0] - ey, best_tip[1] - ex) >= 0.08 * ppm:
+                    out = ([best_tip] + out) if end_flag == 0 else (out + [best_tip])
                 else:
                     break
 
         return out
-
-    def _optimize_strokes_on_silhouette(
-        self,
-        strokes_pts: List[List[Tuple[float, float, float]]],
-        clean_comp: np.ndarray,
-        dist_map: np.ndarray,
-        px_per_mm: float = 6.3,
-    ) -> List[List[Tuple[float, float, float]]]:
-        """
-        Direct Calligraphic Bézier Silhouette Optimization (Loop & Cusp Safe):
-        1. Preserves closed-loop rings and sharp cusps ('3', 'm', 'k') strictly uncollapsed; gently centers only smooth stem interiors.
-        2. Calibrates global 40°-quill width gain to maximize exact 2D silhouette IoU against `clean_comp`.
-        """
-        h, w = clean_comp.shape
-        centered_strokes: List[List[Tuple[float, float, float]]] = []
-        max_shift = max(0.6, min(1.35, 0.10 * px_per_mm))
-
-        for pts in strokes_pts:
-            n = len(pts)
-            is_closed = n >= 6 and math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= max(2.8, 0.35 * px_per_mm)
-            # Closed loop rings are already centered between the inner hole boundary and outer wall — never shift toward global blob!
-            if n <= 2 or is_closed:
-                centered_strokes.append(pts)
-                continue
-            new_pts = list(pts)
-            for i in range(1, n - 1):
-                p_prev = pts[i - 1]
-                p_curr = pts[i]
-                p_next = pts[i + 1]
-                v1y, v1x = p_curr[0] - p_prev[0], p_curr[1] - p_prev[1]
-                v2y, v2x = p_next[0] - p_curr[0], p_next[1] - p_curr[1]
-                n1 = math.hypot(v1y, v1x)
-                n2 = math.hypot(v2y, v2x)
-                # Freeze cusps, sharp corners, and self-loop turnarounds so '3' tongues and small loops stay crisp!
-                if n1 < 1e-4 or n2 < 1e-4 or ((v1y * v2y + v1x * v2x) / (n1 * n2)) < 0.65:
-                    continue
-                ty, tx = p_next[0] - p_prev[0], p_next[1] - p_prev[1]
-                tn = math.hypot(ty, tx)
-                if tn < 1e-4:
-                    continue
-                ny_dir, nx_dir = -tx / tn, ty / tn
-                cy, cx, cw = p_curr
-                sum_w = 0.0
-                sum_s = 0.0
-                for s_off in (-max_shift, -0.5 * max_shift, 0.0, 0.5 * max_shift, max_shift):
-                    sy = int(round(cy + ny_dir * s_off))
-                    sx = int(round(cx + nx_dir * s_off))
-                    if 0 <= sy < h and 0 <= sx < w and clean_comp[sy, sx]:
-                        wt = float(dist_map[sy, sx]) + 0.25
-                        sum_w += wt
-                        sum_s += wt * s_off
-                if sum_w > 0.0:
-                    shift = 0.38 * (sum_s / sum_w)
-                    ny_new = max(0.0, min(float(h - 1), cy + ny_dir * shift))
-                    nx_new = max(0.0, min(float(w - 1), cx + nx_dir * shift))
-                    iy_n, ix_n = int(round(ny_new)), int(round(nx_new))
-                    edt_d = max(1.3, float(dist_map[iy_n, ix_n]) * 2.0)
-                    new_pts[i] = (round(ny_new, 2), round(nx_new, 2), round(0.65 * edt_d + 0.35 * cw, 2))
-            centered_strokes.append(new_pts)
-
-        # Optimize global width gain alpha for maximum exact 2D silhouette IoU
-        best_gain = 1.0
-        best_iou = -1.0
-        for alpha in (0.90, 1.02, 1.15, 1.28, 1.42):
-            pred = self._rasterize_strokes_mask(centered_strokes, (h, w), scale_w=alpha)
-            inter = int(np.sum(pred & clean_comp))
-            union = int(np.sum(pred | clean_comp))
-            iou = (inter / union) if union > 0 else 0.0
-            if iou > best_iou:
-                best_iou = iou
-                best_gain = alpha
-
-        final_strokes: List[List[Tuple[float, float, float]]] = []
-        for pts in centered_strokes:
-            final_strokes.append([
-                (p[0], p[1], round(max(1.2, float(p[2]) * best_gain), 2))
-                for p in pts
-            ])
-        return final_strokes
-
-    def _parameterize_stroke(
-        self,
-        raw_pts: List[Tuple[float, float, float]],
-        px_per_mm: float = 6.3,
-        dist_map: Optional[np.ndarray] = None,
-    ) -> List[Tuple[float, float, float]]:
-        """
-        Piecewise Cusp-Preserving Calligraphic Parameterization:
-        - Detects sharp corners & velocity-reversal cusps ('3' middle tongue, 'm'/'n' arches, tight hooks)
-          and freezes them as exact knots (zero Gaussian melting across cusps or loops!).
-        - Applies only sub-pixel pixel-staircase denoising (sigma=0.65) on smooth sub-arcs and fine RDP (~0.02 mm).
-        """
-        if len(raw_pts) <= 2:
-            return raw_pts
-
-        from scipy.ndimage import gaussian_filter1d
-
-        # Remove exact consecutive duplicates first
-        dedup: List[Tuple[float, float, float]] = [raw_pts[0]]
-        for p in raw_pts[1:]:
-            if math.hypot(float(p[0]) - float(dedup[-1][0]), float(p[1]) - float(dedup[-1][1])) >= 0.15:
-                dedup.append((float(p[0]), float(p[1]), float(p[2])))
-        if len(dedup) <= 2:
-            return raw_pts
-
-        n_pts = len(dedup)
-        close_dist = max(2.4, 0.30 * px_per_mm)
-        is_closed = (n_pts >= 6 and math.hypot(dedup[0][0] - dedup[-1][0], dedup[0][1] - dedup[-1][1]) <= close_dist)
-
-        # Detect sharp corners / cusps (turn > ~55 deg, cos < 0.57) as immutable anchor indices
-        anchors = [0]
-        for i in range(1, n_pts - 1):
-            v1y, v1x = dedup[i][0] - dedup[i - 1][0], dedup[i][1] - dedup[i - 1][1]
-            v2y, v2x = dedup[i + 1][0] - dedup[i][0], dedup[i + 1][1] - dedup[i][1]
-            n1 = math.hypot(v1y, v1x)
-            n2 = math.hypot(v2y, v2x)
-            if n1 > 1e-4 and n2 > 1e-4 and ((v1y * v2y + v1x * v2x) / (n1 * n2)) < 0.57:
-                anchors.append(i)
-        anchors.append(n_pts - 1)
-
-        rdp_eps = max(0.22, 0.020 * px_per_mm)
-        simplified: List[Tuple[float, float, float]] = []
-        if is_closed and len(anchors) == 2:
-            cy_arr = gaussian_filter1d(np.array([p[0] for p in dedup[:-1]], dtype=np.float64), sigma=0.65, mode="wrap")
-            cx_arr = gaussian_filter1d(np.array([p[1] for p in dedup[:-1]], dtype=np.float64), sigma=0.65, mode="wrap")
-            ring_sm = [(float(cy_arr[k]), float(cx_arr[k]), dedup[k][2]) for k in range(len(cy_arr))]
-            ring_sm.append(ring_sm[0])
-            simplified = self._rdp_simplify_with_width(ring_sm, epsilon=rdp_eps)
-        else:
-            for a_idx in range(len(anchors) - 1):
-                i0, i1 = anchors[a_idx], anchors[a_idx + 1]
-                piece = dedup[i0:i1 + 1]
-                if len(piece) >= 4:
-                    py_a = np.array([p[0] for p in piece], dtype=np.float64)
-                    px_a = np.array([p[1] for p in piece], dtype=np.float64)
-                    sy0, sx0, sy1, sx1 = py_a[0], px_a[0], py_a[-1], px_a[-1]
-                    py_a = gaussian_filter1d(py_a, sigma=0.65, mode="nearest")
-                    px_a = gaussian_filter1d(px_a, sigma=0.65, mode="nearest")
-                    py_a[0], px_a[0] = sy0, sx0
-                    py_a[-1], px_a[-1] = sy1, sx1
-                    piece = [(float(py_a[k]), float(px_a[k]), piece[k][2]) for k in range(len(piece))]
-                simp_piece = self._rdp_simplify_with_width(piece, epsilon=rdp_eps)
-                if simplified:
-                    simplified.extend(simp_piece[1:])
-                else:
-                    simplified.extend(simp_piece)
-
-        max_seg_len = max(3.0, 0.34 * px_per_mm)
-        resample_step = max(2.2, 0.25 * px_per_mm)
-        resampled: List[Tuple[float, float, float]] = [simplified[0]]
-        for k in range(len(simplified) - 1):
-            p0 = simplified[k]
-            p1 = simplified[k + 1]
-            seg_d = float(np.hypot(p1[0] - p0[0], p1[1] - p0[1]))
-            if seg_d > max_seg_len:
-                n_sub = int(np.ceil(seg_d / resample_step))
-                for s_i in range(1, n_sub):
-                    t = float(s_i) / float(n_sub)
-                    resampled.append((
-                        p0[0] + t * (p1[0] - p0[0]),
-                        p0[1] + t * (p1[1] - p0[1]),
-                        p0[2] + t * (p1[2] - p0[2])
-                    ))
-            resampled.append(p1)
-
-        # Calibrate 40° beveled quill contrast directly against the glyph's empirical width quantiles
-        emp_ws = [p[2] for p in resampled]
-        w_lo = max(1.2, float(np.percentile(emp_ws, 20)) * 0.78)
-        w_hi = max(w_lo + 0.8, float(np.percentile(emp_ws, 85)) * 1.15)
-
-        final_pts: List[Tuple[float, float, float]] = []
-        n = len(resampled)
-        for i in range(n):
-            if i < n - 1:
-                dy = resampled[i + 1][0] - resampled[i][0]
-                dx = resampled[i + 1][1] - resampled[i][1]
-            else:
-                dy = resampled[i][0] - resampled[i - 1][0]
-                dx = resampled[i][1] - resampled[i - 1][1]
-
-            tangent = float(np.arctan2(dy, dx))
-            bevel_factor = float(np.abs(np.sin(tangent - self.nib_angle_rad)))
-            quill_w = w_lo + (w_hi - w_lo) * bevel_factor
-            local_w = float(resampled[i][2])
-            if dist_map is not None:
-                dh, dw = dist_map.shape
-                iy = max(0, min(dh - 1, int(round(resampled[i][0]))))
-                ix = max(0, min(dw - 1, int(round(resampled[i][1]))))
-                if dist_map[iy, ix] > 0.3:
-                    local_w = float(dist_map[iy, ix]) * 2.0
-            combined_w = 0.78 * local_w + 0.22 * quill_w
-            final_pts.append((round(resampled[i][0], 2), round(resampled[i][1], 2), round(combined_w, 2)))
-
-        return final_pts

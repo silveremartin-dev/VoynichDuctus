@@ -88,3 +88,33 @@ def test_seraphinianus_single_continuous_stroke():
     assert strokes[0]["points"][0][0] <= strokes[0]["points"][-1][0]
 
 
+def test_physical_millimeter_scale_impossibility_and_ceiling():
+    """
+    Verifies that pixels are never treated as dimensionless:
+    - A 0.3 mm x 0.3 mm mark (< physical nib width) cannot sustain a stroke trajectory (`is_impact=True`, `length_mm=0.0`).
+    - A 300 mm x 300 mm giant block with a 20 mm wall never inflates the quill nib beyond physical quill bounds (`<= 0.95 mm`).
+    """
+    from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
+
+    vec = CalligraphicVectorizer(nib_angle_deg=40.0)
+
+    cal_hd = MetricScaleCalibration(manuscript_type="voynich", custom_px_per_mm=14.0)
+    tiny_mask = np.zeros((10, 10), dtype=bool)
+    tiny_mask[3:7, 3:7] = True  # 4 px / 14 px/mm = 0.286 mm x 0.286 mm
+    st_tiny = vec.extract_calligraphic_ductus(tiny_mask, scale_calib=cal_hd)
+    assert len(st_tiny) == 1
+    assert st_tiny[0]["is_impact"] is True
+    assert len(st_tiny[0]["points"]) == 1
+    assert st_tiny[0]["length_mm"] == 0.0
+
+    cal_macro = MetricScaleCalibration(manuscript_type="voynich", custom_px_per_mm=2.0)
+    macro_mask = np.zeros((620, 620), dtype=bool)
+    macro_mask[10:610, 10:610] = True
+    macro_mask[50:570, 50:570] = False  # 300 mm x 300 mm frame with 20 mm thick wall!
+    st_macro = vec.extract_calligraphic_ductus(macro_mask, scale_calib=cal_macro)
+    assert len(st_macro) >= 1
+    assert st_macro[0]["is_macro_non_scribal"] is True
+    assert st_macro[0]["mean_width_mm"] <= 0.95
+
+
+

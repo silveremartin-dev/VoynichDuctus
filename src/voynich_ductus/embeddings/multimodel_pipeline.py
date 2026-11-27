@@ -211,12 +211,15 @@ def _extract_euler_bernoulli_ductus(
         eb_strokes = [{
             "stroke_id": "eb_s00",
             "order_index": 0,
-            "points": [(float(gh * 0.25), float(gw * 0.5), 1.8), (float(gh * 0.75), float(gw * 0.5), 1.8)],
+            "points": [(float(gh * 0.25), float(gw * 0.5), 0.22 * px_per_mm), (float(gh * 0.75), float(gw * 0.5), 0.22 * px_per_mm)],
             "length": 2.0,
             "start": (float(gh * 0.25), float(gw * 0.5)),
             "end": (float(gh * 0.75), float(gw * 0.5)),
+            "px_per_mm": float(px_per_mm),
         }]
-    eb_svg = VectorExporter.to_svg(eb_strokes, max(10, gw), max(10, gh))
+    for s in eb_strokes:
+        s["px_per_mm"] = float(px_per_mm)
+    eb_svg = VectorExporter.to_svg(eb_strokes, max(1, gw), max(1, gh), px_per_mm=px_per_mm, variable_width=False)
     return eb_strokes, eb_svg
 
 
@@ -234,28 +237,37 @@ def _vectorize_glyph_mask(
     graph_ext: StrokeGraphExtractor,
     resolver: JunctionResolver,
 ) -> Tuple[List[Dict[str, Any]], str, List[Dict[str, Any]], str, List[List[int]]]:
-    """Extracts 40° quill ductus strokes, Euler-Bernoulli skeleton ductus, SVGs, and tight ink polygon."""
+    """Extracts biomechanical mm quill/ribbon ductus strokes, Euler-Bernoulli skeleton ductus, SVGs, and tight ink polygon."""
     max_strokes = 1 if is_serafini else 4
+    ppm = float(scale_calib.px_per_mm)
     strokes = tracker.extract_calligraphic_ductus(
         g_mask, single_stroke_mode=is_serafini, max_strokes=max_strokes, scale_calib=scale_calib
     )[:max_strokes]
 
     if not strokes:
+        w_nom = (0.38 if is_serafini else 0.45) * ppm
+        cy, cx = float(gh * 0.5), float(gw * 0.5)
         strokes = [{
             "stroke_id": "cal_s00",
             "order_index": 0,
-            "points": [(float(gh * 0.2), float(gw * 0.5), 2.5), (float(gh * 0.8), float(gw * 0.5), 2.5)],
-            "length": 2.0,
-            "start": (float(gh * 0.2), float(gw * 0.5)),
-            "end": (float(gh * 0.8), float(gw * 0.5)),
+            "points": [(cy, cx, w_nom)],
+            "length": 0.0,
+            "length_mm": 0.0,
+            "start": (cy, cx),
+            "end": (cy, cx),
             "nib_angle_deg": 40.0,
-            "mean_width": 2.5
+            "mean_width": w_nom,
+            "mean_width_mm": round(w_nom / max(1e-4, ppm), 3),
+            "is_impact": True,
+            "is_dot": True,
+            "px_per_mm": ppm,
         }]
 
     for s in strokes:
+        s["px_per_mm"] = ppm
         s["page_points"] = [[float(p[0] + gy0), float(p[1] + gx0), float(p[2])] for p in s.get("points", [])]
 
-    svg = VectorExporter.to_svg(strokes, max(10, gw), max(10, gh))
+    svg = VectorExporter.to_svg(strokes, max(1, gw), max(1, gh), px_per_mm=ppm, variable_width=True)
     eb_strokes, eb_svg = _extract_euler_bernoulli_ductus(
         g_mask, skel_eng, graph_ext, resolver, max_strokes=max_strokes, scale_calib=scale_calib
     )

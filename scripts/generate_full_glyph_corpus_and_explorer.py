@@ -3846,7 +3846,7 @@ def generate_explorer_html(
                         <div><strong>Total Lines:</strong> ${{page.lines ? page.lines.length : page.line_count}} baseline lines</div>
                         <div><strong>Lexical Words:</strong> ${{page.words ? page.words.length : page.word_count}} words (0 overlaps, disjoint partition)</div>
                         <div><strong>Extracted Glyphs:</strong> ${{activeGlyphs.length}} (Generative Typewriter + Viterbi MDL)</div>
-                        <div><strong>Scan Dimensions:</strong> ${{page.image_width}} × ${{page.image_height}} px <span style="color:#38bdf8;">(${{(page.image_width * mmPerPx).toFixed(1)}} × ${{folioPhysHeightMm.toFixed(1)}} mm)</span></div>
+                        <div><strong>Physical Folio Scale:</strong> <span style="color:#38bdf8; font-weight:600;">${{(page.image_width * mmPerPx).toFixed(1)}} × ${{folioPhysHeightMm.toFixed(1)}} mm</span></div>
                     </div>
                 </div>
                 
@@ -4031,14 +4031,14 @@ def generate_explorer_html(
                         <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; max-height:94px; overflow:hidden;">
                             ${{glyphCropSrc ? `<img src="${{glyphCropSrc}}" alt="${{selectedGlyph.glyph_id}}" style="max-height:90px; max-width:100%; object-fit:contain;">` : `<span style="color:var(--text-muted); font-size:0.65rem;">(Scan Crop)</span>`}}
                         </div>
-                        <span style="font-size:0.56rem; color:var(--text-muted); flex-shrink:0;">${{selectedGlyph.width || 0}}×${{selectedGlyph.height || 0}} px</span>
+                        <span style="font-size:0.56rem; color:#38bdf8; flex-shrink:0;">${{selectedGlyph.width_mm ? `${{selectedGlyph.width_mm}}×${{selectedGlyph.height_mm}} mm` : `${{((selectedGlyph.width || 0) * (currentMs === 'voynich' ? 225.0 : 350.0) / Math.max(1, page.image_height || 3200)).toFixed(2)}}×${{((selectedGlyph.height || 0) * (currentMs === 'voynich' ? 225.0 : 350.0) / Math.max(1, page.image_height || 3200)).toFixed(2)}} mm`}}</span>
                     </div>
                     <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:145px; height:145px; background:#000; border:1px solid #38bdf8; border-radius:6px; padding:6px; overflow:hidden;">
-                        <span style="font-size:0.60rem; color:#38bdf8; font-weight:bold; letter-spacing:0.03em; text-transform:uppercase; flex-shrink:0;">🖋️ Quill Ductus (40° Nib)</span>
+                        <span style="font-size:0.60rem; color:#38bdf8; font-weight:bold; letter-spacing:0.03em; text-transform:uppercase; flex-shrink:0;">🖋️ ${{currentMs === 'voynich' ? 'Quill-Bernoulli (40° · mm)' : 'Ribbon-Bernoulli (mm)'}}</span>
                         <div style="flex:1; width:100%; display:flex; align-items:center; justify-content:center; max-height:94px; padding:4px; overflow:hidden;">
                             ${{cleanDuctusSvg}}
                         </div>
-                        <span style="font-size:0.56rem; color:#38bdf8; flex-shrink:0;">${{selectedGlyph.stroke_count || 1}} stroke(s) · Nib Physics</span>
+                        <span style="font-size:0.56rem; color:#38bdf8; flex-shrink:0;">${{(selectedGlyph.strokes && selectedGlyph.strokes[0] && selectedGlyph.strokes[0].is_impact) ? 'Touchdown Impact (v=0 · 0.0 mm)' : `${{selectedGlyph.stroke_count || 1}} stroke(s) · Nib &amp; Pressure (mm)`}}</span>
                     </div>
                     <div class="preview-box-large" style="display:flex; flex-direction:column; justify-content:space-between; align-items:center; min-height:145px; height:145px; background:#040d1a; border:1px solid #a855f7; border-radius:6px; padding:6px; overflow:hidden;">
                         <span style="font-size:0.60rem; color:#c084fc; font-weight:bold; letter-spacing:0.03em; text-transform:uppercase; flex-shrink:0;">📐 Euler-Bernoulli Skeleton</span>
@@ -4289,7 +4289,7 @@ def generate_explorer_html(
                         <div style="background:#111827; border:1px solid #1f2937; border-radius:6px; padding:6px; text-align:center;">
                             <div style="font-size:0.62rem; color:#10b981; font-weight:bold;">Physical Metric Scale</div>
                             <div style="font-size:0.95rem; font-family:monospace; font-weight:bold; color:#fff; margin-top:2px;">${{scaleMm}}</div>
-                            <div style="font-size:0.62rem; color:var(--text-muted);">${{arch.mean_width}}×${{arch.mean_height}} px @ 350 mm page</div>
+                            <div style="font-size:0.62rem; color:var(--text-muted);">${{arch.mean_width_dmm ? `${{arch.mean_width_dmm}}×${{arch.mean_height_dmm}} dmm` : '350 mm folio standard'}}</div>
                         </div>
                     </div>
                 `;
@@ -4381,7 +4381,7 @@ def generate_explorer_html(
                         ${{inst.glyph_id ? inst.glyph_id.split('_').slice(-2).join('_') : 'Glyph'}}
                     </div>
                     <div style="display:flex; justify-content:space-between; font-size:0.62rem; color:var(--text-muted); margin-top:2px;">
-                        <span>${{inst.width}}×${{inst.height}} px ${{inst.width_mm ? `<span style="color:#38bdf8;">(${{inst.width_mm}}×${{inst.height_mm}} mm)</span>` : ''}}</span>
+                        <span style="color:#38bdf8;">${{inst.width_mm ? `${{inst.width_mm}}×${{inst.height_mm}} mm` : `${{(Number(inst.width || 0) * 0.125).toFixed(2)}}×${{(Number(inst.height || 0) * 0.125).toFixed(2)}} mm`}}</span>
                         <span style="color:var(--success); font-weight:600;">${{inst.stroke_count || 1}} stroke(s)</span>
                     </div>
                     <button class="btn-locate" style="margin-top:4px; width:100%;">📍 Locate on ${{inst.page_id}}</button>
