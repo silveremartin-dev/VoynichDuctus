@@ -1877,9 +1877,9 @@ def generate_explorer_html(
                         </div>
                     </div>
                     <div class="stat-card" style="border-left:4px solid #38bdf8; padding:10px;">
-                        <h4 style="color:#38bdf8; margin:0 0 4px 0;">2. Unified Biomechanical Quill-Bernoulli Ductus (mm)</h4>
+                        <h4 style="color:#38bdf8; margin:0 0 4px 0;">2. Closed-Loop Glyph Re-Segmentation from Ductus</h4>
                         <div style="font-size:0.74rem; color:var(--text-muted); line-height:1.45;">
-                            Fuse Euler-Bernoulli minimum-bending topology with fixed-millimeter nib mechanics (<code>0.45 mm</code> at 40°), air-lift motion economy, and variable-width pressure ribbons in SVG.
+                            Automatically rework and re-cut candidate glyphs whenever physical ductus fitting reveals impossible stroke counts or low ink recall, closing the feedback loop between nib kinematics and word segmentation.
                         </div>
                     </div>
                 </div>
@@ -3646,7 +3646,7 @@ def generate_explorer_html(
                         ${{checkExplanation}}
                     </div>
                     <div style="font-size:0.62rem; color:#10b981;">
-                        ✓ 100% ink assigned (${{childGlyphs.length}} isolated glyphs, 0 px ignored)
+                        ✓ 100% ink assigned (${{childGlyphs.length}} isolated glyphs, 0.00 mm² ignored)
                     </div>
                 </div>
             `;
@@ -4445,8 +4445,8 @@ def main():
         (base_out / sub / "glyphs" / "svg").mkdir(parents=True, exist_ok=True)
 
     segmenter = GlyphSegmenter()
-    voynich_catalogue_builder = GlyphCatalogue(target_alphabet_size=28)
-    serafini_catalogue_builder = GlyphCatalogue(target_alphabet_size=52)
+    voynich_catalogue_builder = GlyphCatalogue()
+    serafini_catalogue_builder = GlyphCatalogue()
     rosetta_loader = VoynicheseRosettaLoader()
 
     # 1. Process Voynich Manuscript Pages (Yale Beinecke HD IIIF)

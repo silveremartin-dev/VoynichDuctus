@@ -196,24 +196,27 @@ def rebuild_dual_catalogue_from_pages(
     pages_dir: Path,
     out_cat_path: Path,
     corpus_type: str,
-    target_size: int,
-    min_img_width: int = 0,
+    target_size: Optional[int] = None,
+    min_px_per_mm: float = 0.0,
     preferred_stems: list = None,
 ) -> dict:
     """
-    Rebuilds the unified Canonical Alphabet from all processed folio JSONs meeting
-    `min_img_width` (or `preferred_stems`) and writes back `canonical_type`.
+    Rebuilds the unified Canonical Alphabet via natural Kneedle-Fisher emergence
+    from all processed folio JSONs meeting physical scan density `min_px_per_mm`
+    (or `preferred_stems`) and writes back `canonical_type`.
     """
     from voynich_ductus.clustering.glyph_catalogue import GlyphCatalogue
     from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
 
+    folio_h_mm = MetricScaleCalibration.DEFAULT_FOLIO_HEIGHTS_MM.get(corpus_type.lower(), 225.0)
     all_json = sorted(pages_dir.glob("*.json"))
     selected_files = []
     for jf in all_json:
         if preferred_stems and jf.stem not in preferred_stems:
             continue
         stub = parse_page_stub_fast(jf, corpus_type)
-        if min_img_width > 0 and stub.get("image_width", 0) < min_img_width:
+        ppm = float(stub.get("image_height", 0)) / folio_h_mm
+        if min_px_per_mm > 0.0 and ppm < min_px_per_mm:
             continue
         if stub.get("glyph_count", 0) > 0:
             selected_files.append(jf)
@@ -273,7 +276,7 @@ def compute_live_corpus_statistics(
     serafini_pages_dir: Path,
     v_cat: dict,
     s_cat: dict,
-    v_min_width: int = 2000,
+    v_min_px_per_mm: float = 10.0,
     s_preferred_stems: list = None,
 ) -> dict:
     """
@@ -284,16 +287,16 @@ def compute_live_corpus_statistics(
     from voynich_ductus.generators.baselines import BaselineGenerator
     from voynich_ductus.generators.timm_self_citation import TimmSelfCitationGenerator
     from voynich_ductus.generators.rugg_cardan import RuggCardanGenerator
+    from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
 
-    def _collect_ms_stats(pages_dir: Path, subfolder: str, min_w: int = 0, stems: list = None) -> dict:
+    def _collect_ms_stats(pages_dir: Path, subfolder: str, min_ppm: float = 0.0, stems: list = None) -> dict:
+        folio_h_mm = MetricScaleCalibration.DEFAULT_FOLIO_HEIGHTS_MM.get(subfolder.lower(), 225.0)
         all_files = sorted(pages_dir.glob("*.json"))
         indexed_words = 0
         indexed_glyphs_a = 0
         processed_ids = []
         proc_words = 0
         proc_a = 0
-        proc_b = 0
-        proc_c = 0
         word_token_seqs = []
 
         for jf in all_files:
@@ -304,7 +307,8 @@ def compute_live_corpus_statistics(
             in_scope = True
             if stems and jf.stem not in stems:
                 in_scope = False
-            if min_w > 0 and stub.get("image_width", 0) < min_w:
+            ppm = float(stub.get("image_height", 0)) / folio_h_mm
+            if min_ppm > 0.0 and ppm < min_ppm:
                 in_scope = False
             if in_scope and stub.get("glyph_count", 0) > 0:
                 with open(jf, "r", encoding="utf-8") as f:
@@ -312,11 +316,7 @@ def compute_live_corpus_statistics(
                 processed_ids.append(pd.get("page_id", jf.stem))
                 proc_words += len(pd.get("words", []))
                 ga = pd.get("glyphs", [])
-                gb = pd.get("glyphs_neural_pca", [])
-                gc = pd.get("glyphs_hybrid_consensus", [])
                 proc_a += len(ga)
-                proc_b += len(gb)
-                proc_c += len(gc)
 
                 by_w = {}
                 for g in ga:
@@ -334,12 +334,10 @@ def compute_live_corpus_statistics(
             "processed_page_ids": processed_ids,
             "processed_words": proc_words,
             "processed_glyphs_a": proc_a,
-            "processed_glyphs_b": proc_b,
-            "processed_glyphs_c": proc_c,
             "word_token_seqs": word_token_seqs,
         }
 
-    v_stats = _collect_ms_stats(voynich_pages_dir, "voynich", min_w=v_min_width)
+    v_stats = _collect_ms_stats(voynich_pages_dir, "voynich", min_ppm=v_min_px_per_mm)
     s_stats = _collect_ms_stats(
         serafini_pages_dir,
         "seraphinianus",
@@ -399,14 +397,8 @@ def compute_live_corpus_statistics(
         _summarize_diag("Random Uniform Noise (Baseline)", random_words, f"Seeded baseline ({ctrl_n} words)"),
     ]
 
-    v_m = v_cat.get("models", {})
-    s_m = s_cat.get("models", {})
-    v_stats["alphabet_a_size"] = v_m.get("heuristic_calligraphic", {}).get("canonical_alphabet_size", v_cat.get("canonical_alphabet_size", 0))
-    v_stats["alphabet_b_size"] = v_m.get("neural_word_pca", {}).get("canonical_alphabet_size", 0)
-    v_stats["alphabet_c_size"] = v_m.get("hybrid_consensus", {}).get("canonical_alphabet_size", 0)
-    s_stats["alphabet_a_size"] = s_m.get("heuristic_calligraphic", {}).get("canonical_alphabet_size", s_cat.get("canonical_alphabet_size", 0))
-    s_stats["alphabet_b_size"] = s_m.get("neural_word_pca", {}).get("canonical_alphabet_size", 0)
-    s_stats["alphabet_c_size"] = s_m.get("hybrid_consensus", {}).get("canonical_alphabet_size", 0)
+    v_stats["alphabet_a_size"] = v_cat.get("canonical_alphabet_size", 0)
+    s_stats["alphabet_a_size"] = s_cat.get("canonical_alphabet_size", 0)
 
     from datetime import datetime
     return {
@@ -431,8 +423,6 @@ def parse_page_stub_fast(json_path: Path, subfolder: str) -> dict:
     m_lines = re.search(r'"line_count":\s*(\d+)', head)
     m_words = re.search(r'"word_count":\s*(\d+)', head)
     m_glyphs = re.search(r'"glyph_count":\s*(\d+)', head)
-    m_gn = re.search(r'"glyph_count_neural_pca":\s*(\d+)', head)
-    m_gh = re.search(r'"glyph_count_hybrid_consensus":\s*(\d+)', head)
 
     return {
         "page_id": page_id,
@@ -443,9 +433,7 @@ def parse_page_stub_fast(json_path: Path, subfolder: str) -> dict:
         "line_count": int(m_lines.group(1)) if m_lines else 0,
         "word_count": int(m_words.group(1)) if m_words else 0,
         "glyph_count": int(m_glyphs.group(1)) if m_glyphs else 0,
-        "glyph_count_neural_pca": int(m_gn.group(1)) if m_gn else 0,
-        "glyph_count_hybrid_consensus": int(m_gh.group(1)) if m_gh else 0,
-        "yield_report": {}
+        "yield_report": {},
     }
 
 
@@ -513,17 +501,16 @@ def main(skip_catalogue: bool = False):
         with open(voynich_dir / "voynich_alphabet_catalogue.json", "r", encoding="utf-8") as f:
             v_cat_raw = json.load(f)
     else:
-        print("[*] Rebuilding Unified Canonical Alphabet from Voynich HD pages...")
+        print("[*] Discovering Natural Emergent Canonical Alphabet from Voynich HD pages...")
         v_cat_raw = rebuild_dual_catalogue_from_pages(
             pages_dir=voynich_dir / "pages",
             out_cat_path=voynich_dir / "voynich_alphabet_catalogue.json",
             corpus_type="voynich",
-            target_size=28,
-            min_img_width=2000,
+            min_px_per_mm=10.0,
         )
     v_cat = clean_catalogue_for_embed(v_cat_raw, pages_img_dir=voynich_dir / "pages")
     print(
-        f"  [+] Voynich Canonical Alphabet: {v_cat['canonical_alphabet_size']} archetypes "
+        f"  [+] Voynich Emergent Alphabet: {v_cat['canonical_alphabet_size']} archetypes "
         f"({v_cat['total_glyphs']} glyphs across {v_cat['indexed_pages_count']} HD folios)."
     )
 
@@ -531,12 +518,11 @@ def main(skip_catalogue: bool = False):
         with open(serafini_dir / "seraphinianus_alphabet_catalogue.json", "r", encoding="utf-8") as f:
             s_cat_raw = json.load(f)
     else:
-        print("[*] Rebuilding Unified Canonical Alphabet from Seraphinianus pages...")
+        print("[*] Discovering Natural Emergent Canonical Alphabet from Seraphinianus pages...")
         s_cat_raw = rebuild_dual_catalogue_from_pages(
             pages_dir=serafini_dir / "pages",
             out_cat_path=serafini_dir / "seraphinianus_alphabet_catalogue.json",
             corpus_type="seraphinianus",
-            target_size=45,
             preferred_stems=["serafini_p002", "serafini_p004", "serafini_p006", "serafini_p008", "serafini_p011", "serafini_p030"],
         )
     s_cat = clean_catalogue_for_embed(s_cat_raw, pages_img_dir=serafini_dir / "pages")
@@ -602,7 +588,7 @@ def main(skip_catalogue: bool = False):
         serafini_pages_dir=serafini_dir / "pages",
         v_cat=v_cat,
         s_cat=s_cat,
-        v_min_width=2000,
+        v_min_px_per_mm=10.0,
         s_preferred_stems=["serafini_p002", "serafini_p004", "serafini_p006", "serafini_p008", "serafini_p011", "serafini_p030"],
     )
 

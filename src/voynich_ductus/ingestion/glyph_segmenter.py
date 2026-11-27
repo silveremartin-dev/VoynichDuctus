@@ -48,9 +48,8 @@ class GlyphSegmenter:
         self.min_glyph_area = max(2, int(round(active_c.area_mm2_to_px2(min_glyph_area_mm2))))
         self.max_drawing_area = max(50, int(round(active_c.area_mm2_to_px2(max_drawing_area_mm2))))
 
-        sauv_win = max(5, int(round(active_c.mm_to_px(4.1))) | 1)
         self.normalizer = ColorIlluminationNormalizer()
-        self.binarizer = Binarizer(method="sauvola", window_size=sauv_win, k=0.20)
+        self.binarizer = Binarizer(method="sauvola", window_mm=4.1, k=0.20, scale_calib=active_c)
         self.line_segmenter = LineSegmenter(scale_calib=active_c)
         self.calligraphic_vectorizer = CalligraphicVectorizer(nib_angle_deg=40.0)
         self.skel_engine = Skeletonizer()
@@ -167,12 +166,12 @@ class GlyphSegmenter:
             fig_blob = closed_col | drawing_ink
             fig_blob = binary_closing(fig_blob, structure=struct_col)
 
-            # For macro illustration clusters (area > 500 at 4x downscale = ~8000 px at full scale),
-            # fill their convex hull completely to cover internal white-space between strokes/trees/frames
+            # For macro illustration clusters (area > 180 mm^2), fill convex hull completely
+            macro_hull_area_ds = max(8, int(round(active_c.area_mm2_to_px2(180.0) / float(ds * ds))))
             lbl_pig, num_pig = label(fig_blob)
             props_pig = regionprops(lbl_pig)
             for pp in props_pig:
-                if pp.area > 500:
+                if pp.area > macro_hull_area_ds:
                     r0, c0, r1, c1 = pp.bbox
                     fig_blob[r0:r1, c0:c1] |= pp.image_convex
 
@@ -1453,14 +1452,21 @@ class GlyphSegmenter:
         # across the complete horizontal span of each line from margin to margin (zero dropped words/letters).
         if subfolder == "seraphinianus":
             gray = np.array(image.convert("L"))
-            from skimage.filters import threshold_sauvola
-            sauv_thresh = threshold_sauvola(gray, window_size=25, k=0.2, r=128)
-            sauvola_mask = gray < sauv_thresh
             if was_rotated:
-                sauvola_mask = np.rot90(sauvola_mask, k=3)
+                gray = np.rot90(gray, k=3)
+            H_raw, W_raw = gray.shape
+            s_cal = MetricScaleCalibration(manuscript_type="seraphinianus", image_height_px=H_raw, image_width_px=W_raw)
+            from skimage.filters import threshold_sauvola
+            s_win = max(5, int(round(s_cal.mm_to_px(4.1))) | 1)
+            sauvola_mask = gray < threshold_sauvola(gray, window_size=s_win, k=0.2, r=128)
 
-            H_raw, W_raw = sauvola_mask.shape
-            eff_pitch = max(24, int(H_raw / 65))
+            eff_pitch = max(int(round(s_cal.mm_to_px(3.8))), int(H_raw / 65))
+            max_comp_area = int(round(s_cal.area_mm2_to_px2(200.0)))
+            max_comp_h = int(round(s_cal.mm_to_px(22.0)))
+            max_comp_w = int(round(s_cal.mm_to_px(16.0)))
+            min_comp_area = max(1, int(round(s_cal.area_mm2_to_px2(0.12))))
+            max_h_gap_mm = int(round(s_cal.mm_to_px(28.0)))
+            span_tol = int(round(s_cal.mm_to_px(9.5)))
             lbl_sauv, _ = label(sauvola_mask)
             props_sauv = regionprops(lbl_sauv)
 
@@ -1471,14 +1477,13 @@ class GlyphSegmenter:
                 band_y0 = max(0, int(cy_mid - eff_pitch * 0.9))
                 band_y1 = min(H_raw, int(cy_mid + eff_pitch * 0.9))
 
-                # Collect all text-scale scribal components in this line band across full width
                 candidate_comps = []
                 for p in props_sauv:
                     ph = p.bbox[2] - p.bbox[0]
                     pw = p.bbox[3] - p.bbox[1]
-                    if p.area > 8000 or (ph > 140 and pw > 100) or ph > 160:
+                    if p.area > max_comp_area or (ph > max_comp_h * 0.88 and pw > max_comp_w) or ph > max_comp_h:
                         continue
-                    if p.area < 6:
+                    if p.area < min_comp_area:
                         continue
                     cy = p.centroid[0]
                     if band_y0 <= cy <= band_y1:
@@ -1487,11 +1492,10 @@ class GlyphSegmenter:
                 if not candidate_comps:
                     continue
 
-                # Cluster components horizontally (gap <= 180px accommodates wide title spacing)
                 candidate_comps.sort(key=lambda c: c.bbox[1])
                 h_clusters = []
                 curr_cl = []
-                max_h_gap = max(180, int(eff_pitch * 4.5))
+                max_h_gap = max(max_h_gap_mm, int(eff_pitch * 4.5))
                 for c in candidate_comps:
                     if not curr_cl:
                         curr_cl.append(c)
@@ -1505,12 +1509,11 @@ class GlyphSegmenter:
                 if curr_cl:
                     h_clusters.append(curr_cl)
 
-                # Select cluster(s) that overlap with the seed line's horizontal span
                 line_comps = []
                 for cl in h_clusters:
                     cl_x0 = cl[0].bbox[1]
                     cl_x1 = cl[-1].bbox[3]
-                    if not (cl_x1 < lx0 - 60 or cl_x0 > lx1 + 60):
+                    if not (cl_x1 < lx0 - span_tol or cl_x0 > lx1 + span_tol):
                         line_comps.extend(cl)
 
                 if not line_comps:

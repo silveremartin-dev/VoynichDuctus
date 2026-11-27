@@ -19,7 +19,7 @@ def test_binarization():
     arr = np.ones((50, 50), dtype=np.uint8) * 200
     arr[20:30, :] = 50  # Dark ink bar
 
-    binarizer = Binarizer(method="sauvola", window_size=15)
+    binarizer = Binarizer(method="sauvola", window_mm=2.0)
     binary = binarizer.binarize(arr)
 
     assert binary.shape == (50, 50)

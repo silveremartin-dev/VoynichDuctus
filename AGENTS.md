@@ -24,8 +24,8 @@ When interacting with or extending this codebase, all AI agents must adhere to t
    - Any new generative model (e.g., variant of Timm's algorithm or combinatoric wheels) must be added under `voynich_ductus.generators` and exposed in `voynich_ductus.diagnostics.benchmark_suite`.
    - All tests must be deterministic when random seeds are provided.
 
-4. **Robust Fallbacks**:
-   - Provide clean heuristic / geometric fallbacks for deep learning models (e.g. `InkSightAdapter` must function smoothly with `medial_axis` + `NetworkX` even when GPU/PyTorch dependencies are unavailable).
+4. **Zero Dead Code & Clean Fallbacks**:
+   - Never retain deprecated shims, dead multi-model prototypes, or unimplemented adapter stubs. Keep only active, tested engines with clean deterministic CPU execution when GPU accelerators are unavailable.
 
 5. **Mandatory Live Synchronization (Zero Hardcoded Stats)**:
    - Every regeneration or reprocessing of manuscript pages MUST dynamically rebuild **Unified Canonical Alphabets** and **`live_stats` (`BenchmarkSuite` + real page/word/glyph counts)** via `scripts/build_dynamic_grand_explorer.py` (which calls `rebuild_dual_catalogue_from_pages` + `compute_live_corpus_statistics`).
@@ -102,17 +102,18 @@ When interacting with or extending this codebase, all AI agents must adhere to t
     2. **Stratified `24×24` Visual Sprite Dictionary (`fit_on_word_masks`)**: Induces unsupervised character templates per loop stratum (`0L`, `1L`, `2+L`) across the codex via Ward clustering.
     3. **Viterbi Minimum Description Length (MDL) Decoding (`decompose_word`)**: Globally optimal dynamic programming segmentation balancing sprite reconstruction MSE, metric width priors, and open-prefix coalescence (`ch`, `cth`).
 - **Key Classes**:
-  - `GenerativeTypewriterDecomposer` (in `voynich_ductus.embeddings.word_decomposition`): Closed-loop sprite dictionary + Viterbi MDL word segmenter.
+  - `GenerativeTypewriterDecomposer` (in `voynich_ductus.embeddings.word_decomposition`): Unsupervised sprite dictionary + Viterbi MDL word segmenter.
+  - `WordScribalEncoder`: Deterministic 1D reading-axis trajectory encoder $Z(x) \in \mathbb{R}^{32}$.
   - `GeometricFeatureExtractor`: 16-D invariant descriptors (bounded closed-loop tortuosity, aspect ratio, entry/exit tangents, full-360° 5-bin length-weighted orientation histograms).
-  - `WordScribalEncoder`, `NeuralWordDecomposition` & `HybridConsensusWordDecomposition`: Underlying 1D latent transition features and legacy unit-test baselines.
   - `StrokeLatentProjector`: Normalization and dimensionality reduction (PCA / VAE).
   - `DINOv2EmbeddingEngine`: Meta DINOv2 self-supervised 768-D visual features (with persistent SHA-1 patch cache `dinov2_patch_cache.pkl`) projected via 16-D PCA and combined with physical logarithmic scale invariants ($\log h, \log w, \log \text{area}$).
 
 ### 3.4 `clustering`
-- **Goal**: Unsupervised Dual-Alphabet induction (**Quill/Ribbon** & **Euler-Bernoulli** independently via `build_dual_catalogues`) and tokenization driven jointly by kinematic ductus descriptors and 16-D PCA DINOv2 visual embeddings.
-- **Strict Invariance Rules**:
+- **Goal**: Parameter-free Unsupervised Emergent Alphabet induction (`GlyphCatalogue(target_alphabet_size=None)`) and tokenization driven jointly by kinematic ductus descriptors and 16-D PCA DINOv2 visual embeddings.
+- **Strict Invariance & Natural Emergence Rules**:
   - **Topological Loop Disjointness**: `0L` (loopless), `1L` (single loop), and `2+L` (multiloop) glyphs never collide into the same canonical archetype.
   - **Physical Scale Stratification**: Glyphs are strictly partitioned by physical scale bands (`TINY`, `CORE`, `TALL`, `WIDE`) so specks/diacritics cannot mix with letters, nor minims with tall gallows.
+  - **Parameter-Free Kneedle-Fisher Emergence (`_discover_emergent_clusters`)**: Within each topological stratum, builds exact Ward dendrograms, expands a global priority frontier ordered by the Fisher modal separation-to-dispersion ratio $\rho = \|\mu_L - \mu_R\|_2 / \sigma_{\text{within}}$, and selects the emergent alphabet size $K^*$ at the Kneedle maximum-curvature rate-distortion elbow (zero hardcoded `28` or `45` targets).
   - **Post-Scaled Joint Kinematic & DINOv2 Feature Space (`GlyphCatalogue.extract_glyph_features`)**: Combines kinematic ductus descriptors, metric scale (mm), and $L_2$-normalized **16-D PCA projection of 768-D DINOv2 embeddings**, applying subspace weights **after** `StandardScaler` so coarse 8x8 ink grid pixels cannot overwhelm geometry.
   - **Live Counts & Multi-Folio Sampling (`max_samples=36`)**: Archetype counts reflect real observed occurrences across the active processed pages (zero extrapolated corpus totals). Up to **36 conformant instances sorted by ascending Euclidean distance to cluster medoid** (interleaved round-robin across processed folios) are embedded per archetype.
   - **Transliteration Cross-Referencing (`CorpusCorrespondenceMatcher`)**: On glyph/archetype views, displays `EVA` (morphological match) and `Voynichese 2014 XML` (empirical token-vote purity); `Currier` and `v101` are displayed exclusively at the **word transcription level** (`EVA · Currier · v101`) alongside the emergent retro-transcription sequence.

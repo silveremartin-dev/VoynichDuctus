@@ -105,3 +105,46 @@ def test_corpus_matcher():
     assert match_s["confidence_pct"] > 50
 
 
+def test_emergent_alphabet_discovery_without_fixed_target():
+    """Verifies that GlyphCatalogue() with no target_alphabet_size discovers emergent clusters automatically."""
+    from voynich_ductus.clustering.glyph_catalogue import GlyphCatalogue
+
+    rng = np.random.default_rng(42)
+    glyphs = []
+    # 3 clearly distinct morphological families (10 instances each = 30 glyphs)
+    for k in range(10):
+        # Group A: small closed loops (1L)
+        m_o = np.zeros((28, 28), dtype=bool)
+        yy, xx = np.ogrid[:28, :28]
+        r = np.hypot(yy - 14, xx - 14)
+        m_o[(r >= 6) & (r <= 10)] = True
+        glyphs.append({
+            "glyph_id": f"GO_{k}", "page_id": "f1r", "bbox": [0, 0, 28, 28],
+            "height": 28, "width": 28, "stroke_count": 1, "mask": m_o,
+            "strokes": [{"points": [(4.0, 14.0, 3.0), (14.0, 24.0, 3.0), (24.0, 14.0, 3.0), (14.0, 4.0, 3.0), (4.0, 14.0, 3.0)]}],
+        })
+        # Group B: tall vertical stems (0L, TALL)
+        h_t = int(42 + rng.integers(-2, 3))
+        glyphs.append({
+            "glyph_id": f"GT_{k}", "page_id": "f1r", "bbox": [0, 0, h_t, 12],
+            "height": h_t, "width": 12, "stroke_count": 1,
+            "strokes": [{"points": [(2.0, 6.0, 3.0), (float(h_t - 2), 6.0, 3.0)]}],
+        })
+        # Group C: wide 2-stroke benches (0L, WIDE)
+        w_b = int(38 + rng.integers(-2, 3))
+        glyphs.append({
+            "glyph_id": f"GW_{k}", "page_id": "f1r", "bbox": [0, 0, 18, w_b],
+            "height": 18, "width": w_b, "stroke_count": 2,
+            "strokes": [
+                {"points": [(9.0, 2.0, 3.0), (9.0, float(w_b - 2), 3.0)]},
+                {"points": [(3.0, 10.0, 2.5), (15.0, 10.0, 2.5)]},
+            ],
+        })
+
+    builder = GlyphCatalogue()  # target_alphabet_size=None -> 100% natural emergence!
+    cat = builder.build_catalogue(glyphs, corpus_type="voynich")
+    assert cat["emergence_metadata"]["induction_mode"] == "emergent_kneedle_fisher"
+    assert 3 <= cat["canonical_alphabet_size"] <= 10
+
+
+

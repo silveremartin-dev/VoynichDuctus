@@ -250,10 +250,11 @@ class LineSegmenter:
 
     def estimate_line_pitch_fft(self, binary_ink: np.ndarray) -> float:
         """
-        Estimates the dominant scribal line pitch (interline distance in px) via 1D FFT spectral analysis
-        of the horizontal projection profile. Distinguishes regular ruled text lines from chaotic illustrations.
+        Estimates the dominant scribal line pitch via 1D FFT spectral analysis
+        within realistic physical manuscript ruling pitches [1.85 mm .. 22.5 mm].
         """
-        if binary_ink.shape[0] < 50:
+        calib = self._calib_for_page(binary_ink)
+        if binary_ink.shape[0] < calib.mm_to_px(6.0):
             return float(self.min_line_pitch)
 
         proj = np.sum(binary_ink, axis=1).astype(float)
@@ -265,9 +266,8 @@ class LineSegmenter:
         fft_vals = np.abs(np.fft.rfft(proj))
         freqs = np.fft.rfftfreq(n, d=1.0)
 
-        # Restrict to realistic manuscript line pitches [15px .. 180px]
-        min_freq = 1.0 / 180.0
-        max_freq = 1.0 / 15.0
+        min_freq = 1.0 / max(2.0, calib.mm_to_px(22.5))
+        max_freq = 1.0 / max(1.0, calib.mm_to_px(1.85))
         valid_idx = np.where((freqs >= min_freq) & (freqs <= max_freq))[0]
 
         if len(valid_idx) == 0:
@@ -276,74 +276,82 @@ class LineSegmenter:
         peak_idx = valid_idx[np.argmax(fft_vals[valid_idx])]
         peak_freq = freqs[peak_idx]
         if peak_freq > 0:
-            pitch = 1.0 / peak_freq
-            return round(float(pitch), 2)
+            return round(float(1.0 / peak_freq), 2)
         return float(self.min_line_pitch)
 
-    def detect_text_macro_blocks(self, binary_ink: np.ndarray, h_radius: int = 30, v_radius: int = 12, min_area: int = 400) -> List[Dict[str, Any]]:
+    def detect_text_macro_blocks(
+        self,
+        binary_ink: np.ndarray,
+        h_radius_mm: float = 3.75,
+        v_radius_mm: float = 1.50,
+        min_area_mm2: float = 6.25,
+    ) -> List[Dict[str, Any]]:
         """
-        Detects coherent rectangular text paragraph macro-blocks using anisotropic morphological closing,
-        separating compact text bodies from sprawling botanical illustrations and marginal annotations.
+        Detects coherent rectangular text paragraph macro-blocks using metric-calibrated
+        anisotropic morphological closing (expressed strictly in mm / mm^2).
         """
         from scipy.ndimage import binary_closing
-        H, W = binary_ink.shape
-        # Anisotropic structuring element matching horizontal scribal line flow
-        struct_elem = np.ones((v_radius, h_radius), dtype=bool)
+        calib = self._calib_for_page(binary_ink)
+        h_rad = max(2, int(round(calib.mm_to_px(h_radius_mm))))
+        v_rad = max(2, int(round(calib.mm_to_px(v_radius_mm))))
+        min_area = max(4, int(round(calib.area_mm2_to_px2(min_area_mm2))))
+
+        struct_elem = np.ones((v_rad, h_rad), dtype=bool)
         closed_mask = binary_closing(binary_ink, structure=struct_elem)
 
-        labeled_blocks, num_blocks = label(closed_mask)
+        labeled_blocks, _ = label(closed_mask)
         props = regionprops(labeled_blocks)
 
         macro_blocks = []
         for idx, p in enumerate(props):
-            # Macro-block must have sufficient area and contain genuine text density
             if p.area >= min_area:
                 by0, bx0, by1, bx1 = p.bbox
                 block_ink = binary_ink[by0:by1, bx0:bx1]
                 density = np.sum(block_ink) / max(1, (by1 - by0) * (bx1 - bx0))
-                if density >= 0.03:  # True paragraph block
+                if density >= 0.03:
                     macro_blocks.append({
                         "block_id": f"MB{idx:02d}",
                         "bbox": (int(by0), int(bx0), int(by1), int(bx1)),
                         "area": int(p.area),
                         "density": round(float(density), 3),
-                        "aspect_ratio": round(float((bx1 - bx0) / max(1, by1 - by0)), 2)
+                        "aspect_ratio": round(float((bx1 - bx0) / max(1, by1 - by0)), 2),
                     })
 
         return sorted(macro_blocks, key=lambda b: (b["bbox"][0], b["bbox"][1]))
 
-    def filter_nib_width_consistency(self, binary_ink: np.ndarray, min_radius: float = 0.6, max_radius: float = 4.5) -> np.ndarray:
+    def filter_nib_width_consistency(
+        self,
+        binary_ink: np.ndarray,
+        min_radius_mm: float = 0.08,
+        max_radius_mm: float = 0.56,
+    ) -> np.ndarray:
         """
-        Filters out non-pen strokes by measuring local Euclidean distance radius r(x,y):
-        - Discards thick brush strokes (r > 4.5 px, e.g. colored washes or outer drawing contours)
-        - Discards sub-nib parchment grain (r < 0.6 px)
+        Filters out non-scribal painted washes whose physical half-width exceeds `max_radius_mm`.
         """
-        from scipy.ndimage import distance_transform_edt
+        from scipy.ndimage import binary_dilation, distance_transform_edt
         if not np.any(binary_ink):
             return binary_ink
 
+        calib = self._calib_for_page(binary_ink)
+        max_rad = max(1.0, calib.mm_to_px(max_radius_mm))
         edt = distance_transform_edt(binary_ink)
-        # Identify regions that are excessively thick for a 15th-century pen nib
-        too_thick = edt > max_radius
-        from scipy.ndimage import binary_dilation
-        thick_blobs = binary_dilation(too_thick, iterations=int(max_radius * 1.5))
+        too_thick = edt > max_rad
+        thick_blobs = binary_dilation(too_thick, iterations=max(1, int(round(max_rad * 1.5))))
+        return binary_ink & (~thick_blobs)
 
-        clean_ink = binary_ink & (~thick_blobs)
-        return clean_ink
-
-    def extract_connected_components(self, binary_ink: np.ndarray) -> List[Dict[str, Any]]:
-        """
-        Extracts individual connected glyph/ligature components with bounding boxes.
-        """
-        labeled_arr, num_features = label(binary_ink)
+    def extract_connected_components(self, binary_ink: np.ndarray, min_area_mm2: float = 0.09) -> List[Dict[str, Any]]:
+        """Extracts individual connected glyph/ligature components above `min_area_mm2`."""
+        calib = self._calib_for_page(binary_ink)
+        min_a = max(1, int(round(calib.area_mm2_to_px2(min_area_mm2))))
+        labeled_arr, _ = label(binary_ink)
         props = regionprops(labeled_arr)
         components = []
 
         for idx, prop in enumerate(props):
-            if prop.area < 6:  # Skip single pixel specks
+            if prop.area < min_a:
                 continue
             min_row, min_col, max_row, max_col = prop.bbox
-            comp_mask = (labeled_arr[min_row:max_row, min_col:max_col] == prop.label)
+            comp_mask = labeled_arr[min_row:max_row, min_col:max_col] == prop.label
             components.append({
                 "component_id": f"CC{idx:05d}",
                 "bbox": (int(min_row), int(min_col), int(max_row), int(max_col)),

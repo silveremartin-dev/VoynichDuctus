@@ -79,7 +79,10 @@ class GeminiPaleographyAdapter:
         # Loop heuristic: check bounding box fill density
         fill = area / max(1, h * w)
         has_loop = bool(0.18 <= fill <= 0.35 and 0.7 <= aspect <= 1.4)
-        is_lig = bool(w > 1.8 * h and w >= 45)
+        from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
+        cal = MetricScaleCalibration(manuscript_type="voynich")
+        w_mm, h_mm = round(cal.px_to_mm(w), 2), round(cal.px_to_mm(h), 2)
+        is_lig = bool(w > 1.8 * h and w_mm >= 5.6)
         stroke_cnt = 2 if (is_lig or h > 1.5 * w) else 1
 
         return {
@@ -90,7 +93,7 @@ class GeminiPaleographyAdapter:
             "has_closed_loop": has_loop,
             "is_multi_character_ligature": is_lig,
             "ductus_confidence_pct": 92,
-            "paleographic_notes": f"High-contrast scribal glyph ({w}x{h}px), fill factor: {round(fill, 2)}."
+            "paleographic_notes": f"High-contrast scribal glyph ({w_mm}x{h_mm} mm), fill factor: {round(fill, 2)}."
         }
 
     def compare_scribal_hands(

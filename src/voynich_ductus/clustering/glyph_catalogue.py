@@ -18,27 +18,15 @@ from voynich_ductus.clustering.corpus_matcher import CorpusCorrespondenceMatcher
 from voynich_ductus.vectorizer.comparative_vectorizers import DINOv2EmbeddingEngine
 from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
 
-# Full-corpus paleographic occurrence census across all 225 Voynich XML folios (37,886 words, 162,333 glyphs)
-VOYNICH_CORPUS_CENSUS = {
-    "o": 25468, "y": 17655, "a": 14281, "d": 12973, "ch": 11008,
-    "e": 10574, "l": 10518, "k": 10026, "r": 7456, "n": 6141,
-    "t": 5994, "q": 5423, "ee": 4748, "sh": 4501, "ii": 4321,
-    "s": 2886, "i": 2586, "p": 1413, "m": 1116, "cth": 950,
-    "cph": 542, "g": 412, "f": 387, "ckh": 362, "cfh": 148,
-    "x": 84
-}
-TOTAL_VOYNICH_CORPUS_GLYPHS = 162333
-TOTAL_SERAPHINIANUS_CORPUS_GLYPHS = 456943
-
-
 class GlyphCatalogue:
     """
-    Groups extracted individual glyphs into an objective canonical alphabet inventory
-    via unsupervised geometric clustering and DINOv2 self-supervised visual features,
-    preserving all instance occurrences and coordinates.
+    Groups extracted individual glyphs into an objective, naturally emergent canonical alphabet
+    via unsupervised topological stratification, kinematic ductus features, and DINOv2 visual
+    embeddings (selected automatically via Fisher separation + Kneedle rate-distortion curvature,
+    with zero hardcoded target alphabet size).
     """
 
-    def __init__(self, target_alphabet_size: int = 28, distance_threshold: Optional[float] = None):
+    def __init__(self, target_alphabet_size: Optional[int] = None, distance_threshold: Optional[float] = None):
         self.target_alphabet_size = target_alphabet_size
         self.distance_threshold = distance_threshold
         self.feature_extractor = GeometricFeatureExtractor()
@@ -129,9 +117,9 @@ class GlyphCatalogue:
                 pts_xy = np.array([[float(p[0]), float(p[1])] for p in l_pts], dtype=np.float32)
                 seg_lens = np.linalg.norm(np.diff(pts_xy, axis=0), axis=1)
                 cum_s = np.concatenate([[0.0], np.cumsum(seg_lens)])
-                if cum_s[-1] >= 18.0:
+                if cum_s[-1] >= 2.25 * est_ppm:
                     p0, pend = pts_xy[0], pts_xy[-1]
-                    if float(np.linalg.norm(p0 - pend)) <= 5.5:
+                    if float(np.linalg.norm(p0 - pend)) <= 0.68 * est_ppm:
                         vec_loops = max(vec_loops, 1)
 
         total_loops = max(pre_loops if pre_loops >= 0 else 0, mask_loops, vec_loops)
@@ -496,6 +484,177 @@ class GlyphCatalogue:
 
         return f"VERTICAL_MINIM__{scale_band}"
 
+    @staticmethod
+    def _discover_emergent_clusters(
+        glyphs: List[Dict[str, Any]],
+        X_scaled: np.ndarray,
+        topo_groups: Dict[str, List[int]],
+    ) -> Tuple[List[Tuple[int, List[int], List[Dict[str, Any]]]], Dict[str, Any]]:
+        """
+        Parameter-free unsupervised emergent alphabet induction:
+        1. Consolidates ultra-sparse sub-family tags (`< min_support`) into their strict
+           `(loop_count, scale_band)` parent stratum so 1-glyph border splinters cannot
+           inflate cluster counts, while keeping `0L / 1L / 2+L` and `TINY / CORE / TALL / WIDE`
+           100% disjoint.
+        2. Builds exact Ward dendrograms within each topological stratum and expands a global
+           priority frontier ordered by the dimensionless Fisher modal separation-to-dispersion
+           ratio `rho = ||mu_L - mu_R||_2 / sigma_within`.
+        3. Automatically selects the emergent alphabet size `K*` at the Kneedle maximum-curvature
+           elbow of the normalized rate-distortion curve `WCSS(K) / TSS` (zero hardcoded target size).
+        """
+        import heapq
+        import math
+        from scipy.cluster.hierarchy import linkage
+
+        debris_groups: Dict[str, List[int]] = {}
+        raw_lexical: Dict[str, List[int]] = {}
+        for tg, idxs in topo_groups.items():
+            if tg == "PUNCTUATION_OR_SPECK" or tg.startswith("DRAWING_DEBRIS"):
+                debris_groups[tg] = idxs
+            else:
+                raw_lexical[tg] = idxs
+
+        N_lex = sum(len(idxs) for idxs in raw_lexical.values())
+        min_support = max(4, int(round(0.0035 * N_lex))) if N_lex >= 20 else max(1, N_lex // 4)
+
+        # Merge tiny sub-family edge buckets (< min_support) into their strict (loop, scale_band) parent bucket
+        lexical_strata: Dict[str, List[int]] = {}
+        sparse_pool: Dict[str, List[int]] = {}
+        for tg, idxs in raw_lexical.items():
+            if len(idxs) >= min_support or N_lex < 20:
+                lexical_strata[tg] = list(idxs)
+            else:
+                scale_suffix = tg.split("__")[-1] if "__" in tg else "CORE"
+                loops_val = min(2, int(glyphs[idxs[0]].get("loop_count", 0)))
+                parent_key = f"CONSOLIDATED_{loops_val}L__{scale_suffix}"
+                sparse_pool.setdefault(parent_key, []).extend(idxs)
+
+        for pk, s_idxs in sparse_pool.items():
+            # Attach to matching loop+scale largest stratum if one exists, else keep consolidated loop+scale stratum
+            loops_prefix = pk.split("__")[0].replace("CONSOLIDATED_", "")
+            scale_suf = pk.split("__")[-1]
+            matching = [
+                k_st for k_st, v_st in lexical_strata.items()
+                if k_st.endswith(f"__{scale_suf}")
+                and min(2, int(glyphs[v_st[0]].get("loop_count", 0))) == int(loops_prefix[0])
+            ]
+            if matching:
+                best_target = max(matching, key=lambda k_m: len(lexical_strata[k_m]))
+                lexical_strata[best_target].extend(s_idxs)
+            else:
+                lexical_strata[pk] = s_idxs
+
+        raw_clusters: List[Tuple[int, List[int], List[Dict[str, Any]]]] = []
+        cid = 0
+
+        if N_lex < 8 or len(lexical_strata) == 0:
+            for _, idxs in lexical_strata.items():
+                raw_clusters.append((cid, idxs, [glyphs[i] for i in idxs]))
+                cid += 1
+            for _, idxs in debris_groups.items():
+                raw_clusters.append((cid, idxs, [glyphs[i] for i in idxs]))
+                cid += 1
+            return raw_clusters, {"induction_mode": "emergent_small_sample", "lexical_archetypes": len(lexical_strata)}
+
+        all_lex_idx = [i for idxs in lexical_strata.values() for i in idxs]
+        X_lex = X_scaled[all_lex_idx]
+        tss = max(1e-6, float(np.sum((X_lex - np.mean(X_lex, axis=0, keepdims=True)) ** 2)))
+
+        def _stats(g_idxs: List[int]) -> Tuple[np.ndarray, float]:
+            pts = X_scaled[g_idxs]
+            mu = np.mean(pts, axis=0)
+            return mu, float(np.sum((pts - mu) ** 2))
+
+        trees: Dict[str, Tuple[Dict[int, List[int]], Dict[int, Tuple[int, int]]]] = {}
+        leaves: List[Tuple[str, int, List[int], float]] = []
+        pq: List[Tuple[float, int, str, int, int, int, float, float, float]] = []
+        uid = 0
+
+        for tg, idxs in lexical_strata.items():
+            m = len(idxs)
+            _, w0 = _stats(idxs)
+            if m < 2 * min_support:
+                leaves.append((tg, 0, idxs, w0))
+                continue
+            Z = linkage(X_scaled[idxs], method="ward")
+            nm = {k: [idxs[k]] for k in range(m)}
+            nc = {}
+            for s_i in range(m - 1):
+                c1, c2 = int(Z[s_i, 0]), int(Z[s_i, 1])
+                nm[m + s_i] = nm[c1] + nm[c2]
+                nc[m + s_i] = (c1, c2)
+            root = 2 * m - 2
+            trees[tg] = (nm, nc)
+            leaves.append((tg, root, nm[root], w0))
+
+            c1, c2 = nc[root]
+            m1, m2 = nm[c1], nm[c2]
+            if len(m1) >= min_support and len(m2) >= min_support:
+                mu1, w1 = _stats(m1)
+                mu2, w2 = _stats(m2)
+                sep = float(np.linalg.norm(mu1 - mu2))
+                sig_w = math.sqrt(max(1e-6, (w1 + w2) / float(len(m1) + len(m2))))
+                rho = sep / sig_w
+                sc = rho * ((len(m1) + len(m2)) / float(N_lex)) ** 0.18
+                uid += 1
+                heapq.heappush(pq, (-sc, uid, tg, root, c1, c2, w1, w2, rho))
+
+        # Expand natural Ward-Fisher frontier up to natural support horizon (no fixed target K)
+        max_horizon = min(140, max(45, N_lex // max(1, min_support)))
+        snapshots: List[Tuple[int, float, float, List[Tuple[str, int, List[int], float]]]] = [
+            (len(leaves), sum(x[3] for x in leaves) / tss, 9.99, list(leaves))
+        ]
+
+        while pq and len(leaves) < max_horizon:
+            _, _, tg_k, nid, c1, c2, w1, w2, rho = heapq.heappop(pq)
+            pos = next((i for i, x in enumerate(leaves) if x[0] == tg_k and x[1] == nid), -1)
+            if pos < 0:
+                continue
+            nm_l, nc_l = trees[tg_k]
+            leaves.pop(pos)
+            leaves.append((tg_k, c1, nm_l[c1], w1))
+            leaves.append((tg_k, c2, nm_l[c2], w2))
+            for ch in (c1, c2):
+                if ch in nc_l:
+                    cc1, cc2 = nc_l[ch]
+                    m1, m2 = nm_l[cc1], nm_l[cc2]
+                    if len(m1) >= min_support and len(m2) >= min_support:
+                        mu1, cw1 = _stats(m1)
+                        mu2, cw2 = _stats(m2)
+                        sep = float(np.linalg.norm(mu1 - mu2))
+                        sig_w = math.sqrt(max(1e-6, (cw1 + cw2) / float(len(m1) + len(m2))))
+                        r_c = sep / sig_w
+                        sc_c = r_c * ((len(m1) + len(m2)) / float(N_lex)) ** 0.18
+                        uid += 1
+                        heapq.heappush(pq, (-sc_c, uid, tg_k, ch, cc1, cc2, cw1, cw2, r_c))
+            snapshots.append((len(leaves), sum(x[3] for x in leaves) / tss, rho, list(leaves)))
+
+        if len(snapshots) >= 3:
+            ks = np.array([s[0] for s in snapshots], dtype=np.float64)
+            ds = np.array([s[1] for s in snapshots], dtype=np.float64)
+            k_norm = (ks - ks[0]) / max(1.0, ks[-1] - ks[0])
+            d_norm = (ds - ds[-1]) / max(1e-6, ds[0] - ds[-1])
+            elbow_idx = int(np.argmax(1.0 - k_norm - d_norm))
+        else:
+            elbow_idx = len(snapshots) - 1
+
+        chosen_k, chosen_wcss_ratio, chosen_rho, chosen_leaves = snapshots[elbow_idx]
+        for _, _, member_idxs, _ in chosen_leaves:
+            raw_clusters.append((cid, member_idxs, [glyphs[i] for i in member_idxs]))
+            cid += 1
+        for _, idxs in debris_groups.items():
+            raw_clusters.append((cid, idxs, [glyphs[i] for i in idxs]))
+            cid += 1
+
+        meta = {
+            "induction_mode": "emergent_kneedle_fisher",
+            "lexical_archetypes": int(chosen_k),
+            "debris_bins": int(len(debris_groups)),
+            "kneedle_wcss_ratio": round(float(chosen_wcss_ratio), 4),
+            "fisher_rho_at_elbow": round(float(chosen_rho), 3),
+        }
+        return raw_clusters, meta
+
     def build_catalogue(
         self,
         glyphs: List[Dict[str, Any]],
@@ -505,10 +664,9 @@ class GlyphCatalogue:
         tag_field: str = "canonical_type"
     ) -> Dict[str, Any]:
         """
-        Clusters glyphs into canonical alphabet types using Tripartite Hybrid Clustering:
-        1. Strict Topological Partitioning (0-loop, 1-loop, 2+-loop, tall ascenders, core, bench never mix).
-        2. Metric-Weighted Kinematic + Morphological + 16-D DINOv2 Clustering within each topological family.
-        3. Consensus Medoid Verification + Historical Corpus Cross-Referencing, using true observed counts.
+        Induces the Canonical Alphabet via unsupervised topological stratification,
+        joint kinematic + DINOv2 feature clustering, and natural Kneedle-Fisher emergence
+        (when `target_alphabet_size is None`) or explicit target partitioning (for unit tests).
         """
         if not glyphs:
             return {"total_glyphs": 0, "canonical_alphabet_size": 0, "alphabet": []}
@@ -518,50 +676,45 @@ class GlyphCatalogue:
 
         X_scaled = self.extract_glyph_features(glyphs, stroke_key=stroke_key)
 
-        # 1. Strict Topological Partitioning across ALL manuscripts (Voynich & Seraphinianus)
         for g in glyphs:
             g["topology_group"] = self.classify_glyph_topology(g, scale_calib=scale_calib, stroke_key=stroke_key)
 
         topo_groups: Dict[str, List[int]] = {}
         for idx, g in enumerate(glyphs):
-            tg = g["topology_group"]
-            if tg not in topo_groups:
-                topo_groups[tg] = []
-            topo_groups[tg].append(idx)
+            topo_groups.setdefault(g["topology_group"], []).append(idx)
 
-        raw_clusters = []
-        cluster_id_counter = 0
+        emergence_meta: Dict[str, Any] = {"induction_mode": "explicit_target"}
+        if self.target_alphabet_size is None:
+            raw_clusters, emergence_meta = self._discover_emergent_clusters(glyphs, X_scaled, topo_groups)
+        else:
+            raw_clusters = []
+            cluster_id_counter = 0
+            non_debris_total = sum(
+                len(idxs) for tg, idxs in topo_groups.items()
+                if tg != "PUNCTUATION_OR_SPECK" and not tg.startswith("DRAWING_DEBRIS")
+            )
+            effective_total = max(1, non_debris_total)
 
-        # Allocate target clusters proportionally across genuine topological families
-        non_debris_total = sum(
-            len(idxs) for tg, idxs in topo_groups.items()
-            if tg != "PUNCTUATION_OR_SPECK" and not tg.startswith("DRAWING_DEBRIS")
-        )
-        effective_total = max(1, non_debris_total)
-
-        for tg, indices in topo_groups.items():
-            if tg == "PUNCTUATION_OR_SPECK" or tg.startswith("DRAWING_DEBRIS") or len(indices) <= 2:
-                cluster_glyphs = [glyphs[i] for i in indices]
-                raw_clusters.append((cluster_id_counter, indices, cluster_glyphs))
-                cluster_id_counter += 1
-                continue
-
-            sub_X = X_scaled[indices]
-            prop = len(indices) / float(effective_total)
-            k_sub = max(1, min(int(round(self.target_alphabet_size * prop)), len(indices)))
-
-            if k_sub == 1:
-                cluster_glyphs = [glyphs[i] for i in indices]
-                raw_clusters.append((cluster_id_counter, indices, cluster_glyphs))
-                cluster_id_counter += 1
-            else:
-                clusterer = AgglomerativeClustering(n_clusters=k_sub, metric="euclidean", linkage="ward")
-                sub_labels = clusterer.fit_predict(sub_X)
-                for sl in sorted(set(sub_labels)):
-                    sub_idx = [indices[i] for i in np.where(sub_labels == sl)[0]]
-                    cluster_glyphs = [glyphs[i] for i in sub_idx]
-                    raw_clusters.append((cluster_id_counter, sub_idx, cluster_glyphs))
+            for tg, indices in topo_groups.items():
+                if tg == "PUNCTUATION_OR_SPECK" or tg.startswith("DRAWING_DEBRIS") or len(indices) <= 2:
+                    raw_clusters.append((cluster_id_counter, indices, [glyphs[i] for i in indices]))
                     cluster_id_counter += 1
+                    continue
+
+                sub_X = X_scaled[indices]
+                prop = len(indices) / float(effective_total)
+                k_sub = max(1, min(int(round(self.target_alphabet_size * prop)), len(indices)))
+
+                if k_sub == 1:
+                    raw_clusters.append((cluster_id_counter, indices, [glyphs[i] for i in indices]))
+                    cluster_id_counter += 1
+                else:
+                    clusterer = AgglomerativeClustering(n_clusters=k_sub, metric="euclidean", linkage="ward")
+                    sub_labels = clusterer.fit_predict(sub_X)
+                    for sl in sorted(set(sub_labels)):
+                        sub_idx = [indices[i] for i in np.where(sub_labels == sl)[0]]
+                        raw_clusters.append((cluster_id_counter, sub_idx, [glyphs[i] for i in sub_idx]))
+                        cluster_id_counter += 1
 
         # Sort raw clusters: genuine letterforms first (by frequency desc), debris/specks at the end
         def cluster_sort_key(item):
@@ -891,7 +1044,8 @@ class GlyphCatalogue:
         return {
             "total_glyphs": len(glyphs),
             "canonical_alphabet_size": len(alphabet_entries),
-            "alphabet": alphabet_entries
+            "emergence_metadata": emergence_meta,
+            "alphabet": alphabet_entries,
         }
 
     def build_dual_catalogues(

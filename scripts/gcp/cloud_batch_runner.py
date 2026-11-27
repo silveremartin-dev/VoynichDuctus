@@ -447,7 +447,7 @@ def main():
 
         print(f"[*] Inducing Voynich Alphabet Catalogue across {len(all_voynich_glyphs)} extracted glyphs...")
         v_scale = MetricScaleCalibration(manuscript_type="voynich", image_height_px=1800, image_width_px=1272)
-        builder_v = GlyphCatalogue(target_alphabet_size=35)
+        builder_v = GlyphCatalogue()
         voynich_catalogue = builder_v.build_catalogue(all_voynich_glyphs, corpus_type="voynich", scale_calib=v_scale)
         builder_v.export_catalogue_json(voynich_catalogue, base_out / "voynich" / "voynich_alphabet_catalogue.json")
         print(f"  [+] Voynich Alphabet: {voynich_catalogue['canonical_alphabet_size']} canonical archetypes.")
@@ -522,7 +522,7 @@ def main():
 
             print(f"[*] Inducing Seraphinianus Alphabet Catalogue across {len(all_serafini_glyphs)} sample glyphs...")
             s_scale = MetricScaleCalibration(manuscript_type="seraphinianus", image_height_px=2206, image_width_px=1600)
-            builder_s = GlyphCatalogue(target_alphabet_size=52)
+            builder_s = GlyphCatalogue()
             serafini_catalogue = builder_s.build_catalogue(all_serafini_glyphs, corpus_type="seraphinianus", scale_calib=s_scale)
             builder_s.export_catalogue_json(serafini_catalogue, base_out / "seraphinianus" / "seraphinianus_alphabet_catalogue.json")
             print(f"  [+] Seraphinianus Alphabet: {serafini_catalogue['canonical_alphabet_size']} canonical archetypes.")

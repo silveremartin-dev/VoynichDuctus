@@ -1,11 +1,10 @@
 """
-Comparative Vectorization and Embedding Framework (5-Way Comparative Ductus Suite).
-Unifies, benchmarks, and contrasts 5 foundational paleographic approaches:
-1. Native Calligraphic Ridge Tracker (Formule Maison: Biseau 40°, crêtes EDT, boucle continue)
-2. Euler-Bernoulli Topological Skeleton (Squelette 1D + graphe NetworkX + énergie de courbure)
-3. Scribal Kinematic Flow Net (U-Net de champ vectoriel tangent u(x,y), amorces P(t=0), levées P(t=1))
-4. Meta DINOv2 Self-Supervised Vision Transformer (Tokens 768-D ViT invariants au parchemin)
-5. Google InkSight Offline-to-Online Handwriting Transformer (Déréférencement autorégressif x,y,t,p)
+Comparative Vectorization and Embedding Framework (4-Way Paleographic Suite).
+Unifies, benchmarks, and contrasts the 4 active paleographic approaches:
+1. Biomechanical Millimeter Quill-Bernoulli Vectorizer (40° nib bevel, pressure & motion economy)
+2. Bare Euler-Bernoulli Topological Skeleton (1D skeleton + NetworkX graph + bending energy)
+3. Scribal Kinematic Flow Net (Tangent flow U-Net u(x,y) trained on Gallica codices)
+4. Meta DINOv2 Self-Supervised Vision Transformer (768-D ViT patch embeddings)
 """
 
 import time
@@ -18,7 +17,6 @@ from voynich_ductus.vectorizer.skeleton import Skeletonizer
 from voynich_ductus.vectorizer.stroke_graph import StrokeGraphExtractor
 from voynich_ductus.vectorizer.junction_resolver import JunctionResolver
 from voynich_ductus.vectorizer.export_format import VectorExporter
-from voynich_ductus.vectorizer.inksight_adapter import InkSightAdapter
 from voynich_ductus.embeddings.scribal_neural_net import ScribalKinematicFlowNet
 
 
@@ -253,38 +251,10 @@ class DINOv2EmbeddingEngine:
         }
 
 
-class InkSightVectorEngine:
-    """
-    Method 5: Offline-to-Online Handwriting Transformer (Google InkSight).
-    End-to-end autoregressive trajectory prediction (x, y, t, lift) from 2D pixel patches.
-    """
-
-    def __init__(self):
-        self.adapter = InkSightAdapter()
-
-    def process(self, binary_mask: np.ndarray, raw_patch: Optional[np.ndarray] = None) -> Dict[str, Any]:
-        t0 = time.perf_counter()
-        patch_to_use = raw_patch if raw_patch is not None else (binary_mask.astype(np.uint8) * 255)
-        strokes = self.adapter.derender(patch_to_use)
-        h, w = binary_mask.shape
-        svg_content = VectorExporter.to_svg(strokes, width=w, height=h, output_path=None)
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-
-        return {
-            "method": "InkSight (Handwriting Transformer)",
-            "method_code": "inksight",
-            "stroke_count": len(strokes),
-            "strokes": strokes,
-            "svg_content": svg_content,
-            "latency_ms": round(elapsed_ms, 2),
-            "trajectory_fidelity": 0.94
-        }
-
-
 class ComparativeVectorizerBenchmark:
     """
-    Unified 5-Way Comparative Benchmark Suite evaluating all 5 paleographic vectorization
-    and vision paradigms on the exact same scribal glyph crop.
+    Unified 4-Way Comparative Benchmark Suite evaluating the 4 active paleographic
+    vectorization and vision paradigms on the exact same scribal glyph crop.
     """
 
     def __init__(self):
@@ -292,29 +262,25 @@ class ComparativeVectorizerBenchmark:
         self.geometric_engine = GeometricVectorEngine()
         self.scribal_flow_engine = ScribalFlowVectorEngine()
         self.dinov2_engine = DINOv2EmbeddingEngine()
-        self.inksight_engine = InkSightVectorEngine()
 
     def evaluate_glyph(self, binary_mask: np.ndarray, raw_patch: Optional[np.ndarray] = None) -> Dict[str, Any]:
         res_cal = self.calligraphic_engine.process(binary_mask)
         res_geom = self.geometric_engine.process(binary_mask)
         res_flow = self.scribal_flow_engine.process(binary_mask, raw_patch=raw_patch)
         res_dino = self.dinov2_engine.process(binary_mask, raw_patch=raw_patch)
-        res_inksight = self.inksight_engine.process(binary_mask, raw_patch=raw_patch)
 
         return {
             "calligraphic": res_cal,
             "geometric": res_geom,
             "scribal_flow": res_flow,
             "dinov2": res_dino,
-            "inksight": res_inksight,
             "summary": {
                 "fastest_method": min(
-                    [res_cal, res_geom, res_flow, res_dino, res_inksight],
+                    [res_cal, res_geom, res_flow, res_dino],
                     key=lambda x: x["latency_ms"]
                 )["method_code"],
                 "recommended_for_calligraphic_ductus": "calligraphic",
                 "recommended_for_alphabet_clustering": "dinov2",
-                "recommended_for_kinematic_ordering": "inksight",
-                "recommended_for_deterministic_baseline": "geometric"
-            }
+                "recommended_for_deterministic_baseline": "geometric",
+            },
         }
