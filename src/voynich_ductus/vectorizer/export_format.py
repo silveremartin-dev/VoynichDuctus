@@ -98,42 +98,119 @@ class VectorExporter:
     @staticmethod
     def _build_variable_width_ribbon_d(pts: List[Tuple[float, float, float]]) -> str:
         """
-        Builds a closed SVG polygon path representing the physical variable-width nib + pressure
-        calligraphic footprint along `pts = [(y, x, width_px), ...]`.
+        Builds a smooth, swallowtail-free SVG variable-width calligraphic ribbon path along
+        `pts = [(y, x, width_px), ...]` by sampling the exact Catmull-Rom cubic Bézier spine
+        and clamping inner concave normal offsets against focal-radius self-intersection.
         """
         import math
         if len(pts) < 2:
             return ""
 
-        # Deduplicate ultra-close points while keeping start/end and width profile
-        clean: List[Tuple[float, float, float]] = [pts[0]]
+        clean: List[Tuple[float, float, float]] = [(float(pts[0][1]), float(pts[0][0]), max(0.35, float(pts[0][2])))]
         for p in pts[1:]:
-            if math.hypot(p[1] - clean[-1][1], p[0] - clean[-1][0]) >= 0.25:
-                clean.append(p)
-        if len(clean) == 1 and math.hypot(pts[-1][1] - clean[0][1], pts[-1][0] - clean[0][0]) > 1e-3:
-            clean.append(pts[-1])
+            x_c, y_c, w_c = float(p[1]), float(p[0]), max(0.35, float(p[2]))
+            if math.hypot(x_c - clean[-1][0], y_c - clean[-1][1]) >= 0.35:
+                clean.append((x_c, y_c, w_c))
+        end_cand = (float(pts[-1][1]), float(pts[-1][0]), max(0.35, float(pts[-1][2])))
+        if len(clean) == 1 and math.hypot(end_cand[0] - clean[0][0], end_cand[1] - clean[0][1]) > 1e-3:
+            clean.append(end_cand)
         if len(clean) < 2:
             return ""
 
+        is_closed = len(clean) >= 5 and math.hypot(clean[0][0] - clean[-1][0], clean[0][1] - clean[-1][1]) <= 3.0
+        if is_closed:
+            clean[-1] = clean[0]
+
+        def _turn_cos_xy(pa: Tuple[float, float, float], pb: Tuple[float, float, float], pc: Tuple[float, float, float]) -> float:
+            v1x, v1y = pb[0] - pa[0], pb[1] - pa[1]
+            v2x, v2y = pc[0] - pb[0], pc[1] - pb[1]
+            n1, n2 = math.hypot(v1x, v1y), math.hypot(v2x, v2y)
+            if n1 < 1e-5 or n2 < 1e-5:
+                return 1.0
+            return (v1x * v2x + v1y * v2y) / (n1 * n2)
+
+        # Sample smooth cubic Bézier spine (4 subdivisions per segment) so ribbon matches stroke centerline 1:1
+        samples: List[Tuple[float, float, float]] = []
+        n_k = len(clean)
+        if n_k == 2:
+            samples = [clean[0], clean[1]]
+        elif is_closed and n_k >= 5:
+            m = n_k - 1
+            for i in range(m):
+                p0, p1, p2, p3 = clean[(i - 1) % m], clean[i], clean[(i + 1) % m], clean[(i + 2) % m]
+                t1 = 0.0 if _turn_cos_xy(p0, p1, p2) < 0.0 else (1.0 / 6.0)
+                t2 = 0.0 if _turn_cos_xy(p1, p2, p3) < 0.0 else (1.0 / 6.0)
+                cp1x, cp1y = p1[0] + (p2[0] - p0[0]) * t1, p1[1] + (p2[1] - p0[1]) * t1
+                cp2x, cp2y = p2[0] - (p3[0] - p1[0]) * t2, p2[1] - (p3[1] - p1[1]) * t2
+                steps = 4
+                for s_i in range(steps):
+                    u = float(s_i) / float(steps)
+                    um = 1.0 - u
+                    bx = (um ** 3) * p1[0] + 3 * (um ** 2) * u * cp1x + 3 * um * (u ** 2) * cp2x + (u ** 3) * p2[0]
+                    by = (um ** 3) * p1[1] + 3 * (um ** 2) * u * cp1y + 3 * um * (u ** 2) * cp2y + (u ** 3) * p2[1]
+                    bw = p1[2] + u * (p2[2] - p1[2])
+                    samples.append((bx, by, bw))
+            samples.append(samples[0])
+        else:
+            for i in range(n_k - 1):
+                p0, p1, p2, p3 = clean[max(0, i - 1)], clean[i], clean[i + 1], clean[min(n_k - 1, i + 2)]
+                t1 = 0.0 if (i > 0 and _turn_cos_xy(p0, p1, p2) < 0.0) else (1.0 / 6.0)
+                t2 = 0.0 if (i + 1 < n_k - 1 and _turn_cos_xy(p1, p2, p3) < 0.0) else (1.0 / 6.0)
+                cp1x, cp1y = p1[0] + (p2[0] - p0[0]) * t1, p1[1] + (p2[1] - p0[1]) * t1
+                cp2x, cp2y = p2[0] - (p3[0] - p1[0]) * t2, p2[1] - (p3[1] - p1[1]) * t2
+                steps = 4
+                for s_i in range(steps):
+                    u = float(s_i) / float(steps)
+                    um = 1.0 - u
+                    bx = (um ** 3) * p1[0] + 3 * (um ** 2) * u * cp1x + 3 * um * (u ** 2) * cp2x + (u ** 3) * p2[0]
+                    by = (um ** 3) * p1[1] + 3 * (um ** 2) * u * cp1y + 3 * um * (u ** 2) * cp2y + (u ** 3) * p2[1]
+                    bw = p1[2] + u * (p2[2] - p1[2])
+                    samples.append((bx, by, bw))
+            samples.append(clean[-1])
+
         left_side: List[Tuple[float, float]] = []
         right_side: List[Tuple[float, float]] = []
-        n = len(clean)
-        for i in range(n):
-            y, x, w = float(clean[i][0]), float(clean[i][1]), max(0.35, float(clean[i][2]))
+        ns = len(samples)
+        for i in range(ns):
+            x, y, w = samples[i]
             r = 0.5 * w
-            if i == 0:
-                dy, dx = clean[1][0] - y, clean[1][1] - x
-            elif i == n - 1:
-                dy, dx = y - clean[i - 1][0], x - clean[i - 1][1]
-            else:
-                dy, dx = clean[i + 1][0] - clean[i - 1][0], clean[i + 1][1] - clean[i - 1][1]
+            p_prev = samples[(i - 2) % (ns - 1)] if is_closed else samples[max(0, i - 1)]
+            p_next = samples[(i + 2) % (ns - 1)] if is_closed else samples[min(ns - 1, i + 1)]
+            dx, dy = p_next[0] - p_prev[0], p_next[1] - p_prev[1]
             norm = math.hypot(dx, dy)
             if norm < 1e-5:
                 nx_perp, ny_perp = 0.0, 1.0
             else:
                 nx_perp, ny_perp = -dy / norm, dx / norm
-            left_side.append((x + nx_perp * r, y + ny_perp * r))
-            right_side.append((x - nx_perp * r, y - ny_perp * r))
+
+            # Clamp inner concave offset against local focal radius so tight bowls never swallowtail
+            r_left, r_right = r, r
+            if 0 < i < ns - 1 or is_closed:
+                v1x, v1y = x - p_prev[0], y - p_prev[1]
+                v2x, v2y = p_next[0] - x, p_next[1] - y
+                l1, l2 = math.hypot(v1x, v1y), math.hypot(v2x, v2y)
+                if l1 > 1e-4 and l2 > 1e-4:
+                    cross = v1x * v2y - v1y * v2x
+                    chord = math.hypot(p_next[0] - p_prev[0], p_next[1] - p_prev[1])
+                    kappa_signed = (2.0 * cross) / max(1e-5, l1 * l2 * max(chord, 0.25))
+                    if kappa_signed > 1e-3:
+                        r_left = min(r, max(0.25 * r, 0.78 / kappa_signed))
+                    elif kappa_signed < -1e-3:
+                        r_right = min(r, max(0.25 * r, 0.78 / abs(kappa_signed)))
+
+            left_side.append((x + nx_perp * r_left, y + ny_perp * r_left))
+            right_side.append((x - nx_perp * r_right, y - ny_perp * r_right))
+
+        if is_closed and len(left_side) >= 4:
+            tokens = [f"M {left_side[0][0]:.2f} {left_side[0][1]:.2f}"]
+            for lx, ly in left_side[1:]:
+                tokens.append(f"L {lx:.2f} {ly:.2f}")
+            tokens.append("Z")
+            tokens.append(f"M {right_side[0][0]:.2f} {right_side[0][1]:.2f}")
+            for rx, ry in reversed(right_side[:-1]):
+                tokens.append(f"L {rx:.2f} {ry:.2f}")
+            tokens.append("Z")
+            return " ".join(tokens)
 
         tokens = [f"M {left_side[0][0]:.2f} {left_side[0][1]:.2f}"]
         for lx, ly in left_side[1:]:
@@ -242,7 +319,7 @@ class VectorExporter:
                 ribbon_d = VectorExporter._build_variable_width_ribbon_d(norm_pts)
                 if ribbon_d:
                     svg_lines.append(
-                        f'    <path d="{ribbon_d}" fill="{color}" fill-opacity="0.34" stroke="none"/>'
+                        f'    <path d="{ribbon_d}" fill="{color}" fill-rule="evenodd" fill-opacity="0.34" stroke="none"/>'
                     )
 
             # 2. Crisp kinematic centerline trajectory (true physical scale, never glyph_dim-scaled)

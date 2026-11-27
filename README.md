@@ -299,19 +299,19 @@ In Panel 4 of the Explorer, the number of physical components $N$ extracted insi
 Every execution of `scripts/build_dynamic_grand_explorer.py` dynamically recomputes and injects the exact corpus counts and `BenchmarkSuite` diagnostics from `data/processed/atlas_dataset/` into both `grand_glyph_explorer.html` and the block below (zero hardcoded statistics):
 
 <!-- LIVE_CORPUS_STATS_START -->
-*Auto-synchronized from `data/processed/atlas_dataset/` on `2026-11-27 17:40:07` via `scripts/build_dynamic_grand_explorer.py`:*
+*Auto-synchronized from `data/processed/atlas_dataset/` on `2026-11-27 21:05:12` via `scripts/build_dynamic_grand_explorer.py`:*
 
 | Metric / Database Scope | Voynich Manuscript (Beinecke MS 408 · 225 mm) | Codex Seraphinianus (1981 · 350 mm) |
 | :--- | :--- | :--- |
-| **Indexed Dataset Pages (Canvas Stubs)** | **225** folios (37,601 words, 199,091 glyphs) | **371** pages (63,999 words, 456,214 glyphs) |
+| **Indexed Dataset Pages (Canvas Stubs)** | **225** folios (37,601 words, 199,083 glyphs) | **371** pages (63,999 words, 456,310 glyphs) |
 | **Active HD Reprocessed Set** | **5** HD folios (`f1r, f1v, f2r, f2v, f3r`) | **6** HD plates (`serafini_p002, serafini_p004, serafini_p006, serafini_p008, serafini_p011, serafini_p030`) |
-| **Processed Words & Glyphs (`GenerativeTypewriterDecomposer`)** | **575** words · **2,236** isolated glyphs | **515** words · **3,106** isolated glyphs |
-| **Live Canonical Alphabet Size (100% Coverage)** | **52** emergent archetypes | **39** emergent archetypes |
+| **Processed Words & Glyphs (`GenerativeTypewriterDecomposer`)** | **575** words · **2,228** isolated glyphs | **515** words · **3,202** isolated glyphs |
+| **Live Canonical Alphabet Size (100% Coverage)** | **44** emergent archetypes | **58** emergent archetypes |
 
 | Corpus / Seeded Control (`BenchmarkSuite`) | Evaluated Scope | $H_1$ (bits) | $H_2$ Cond. (bits) | Hurst $H$ (DFA) | LZMA Ratio | Markov Top-1 |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
-| **Voynich (HD Ductus G-Tokens)** | 5 HD folios (575 words) | 5.38 | 4.29 | 0.660 | 0.250 | O1=14% / O2=54% |
-| **Codex Seraphinianus (Ribbon G-Tokens)** | 6 text pages (515 words) | 4.63 | 3.99 | 0.700 | 0.210 | O1=18% / O2=37% |
+| **Voynich (HD Ductus G-Tokens)** | 5 HD folios (575 words) | 4.90 | 4.11 | 0.630 | 0.240 | O1=16% / O2=44% |
+| **Codex Seraphinianus (Ribbon G-Tokens)** | 6 text pages (515 words) | 5.20 | 4.24 | 0.730 | 0.230 | O1=16% / O2=44% |
 | **Natural Latin Herbal (Control)** | Seeded baseline (574 words) | 4.04 | 3.28 | 0.860 | 0.200 | O1=22% / O2=48% |
 | **Timm Self-Citation (Baseline)** | Seeded baseline (574 words) | 3.18 | 2.29 | 0.600 | 0.130 | O1=38% / O2=65% |
 | **Rugg Cardan Grille (Baseline)** | Seeded baseline (574 words) | 3.74 | 2.38 | 0.700 | 0.280 | O1=37% / O2=47% |

@@ -374,10 +374,11 @@ class CalligraphicVectorizer:
         self, comp_mask: np.ndarray, ppm: float
     ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
         """
-        Fills only microscopic vellum grain pinholes (`<= 0.020 mm^2`), preserving 100% of genuine
-        enclosed loop cavities (`o`, `a`, `e`, `d`, `8`, `sh`) and precomputing `dist_to_hole_px`.
+        Fills microscopic vellum grain pores (`<= 0.045 mm^2` or inscribed radius `<= 0.115 mm` < quarter nib),
+        preserving 100% of genuine enclosed loop cavities (`o`, `a`, `e`, `d`, `8`, `sh`) and precomputing `dist_to_hole_px`.
         """
-        pinhole_max_px = max(1, int(round(0.020 * (ppm ** 2))))
+        pinhole_max_px = max(1, int(round(0.045 * (ppm ** 2))))
+        max_pore_rad_px = 0.115 * ppm
         padded = np.pad(comp_mask, 2, mode="constant", constant_values=False)
         holes = binary_fill_holes(padded) & (~padded)
         lbl_h, num_h = label(holes)
@@ -387,6 +388,8 @@ class CalligraphicVectorizer:
             hm = (lbl_h == hid)[2:-2, 2:-2]
             ha = int(np.sum(hm))
             if ha <= pinhole_max_px:
+                clean_comp |= hm
+            elif ha <= int(round(0.070 * (ppm ** 2))) and float(np.max(distance_transform_edt(hm))) <= max_pore_rad_px:
                 clean_comp |= hm
             elif np.any(hm):
                 holes_union |= hm
@@ -417,7 +420,7 @@ class CalligraphicVectorizer:
             pts_c = np.argwhere(clean_comp)
             return [self._make_impact_stroke(pts_c, 0, ppm, w_nib_mm)] if len(pts_c) > 0 else []
 
-        spur_min_px = max(2, int(round(0.30 * ppm)))
+        spur_min_px = max(2, int(round(0.38 * ppm)))
         skel = self.prune_skeleton_spurs(raw_skel, dist_map, min_spur_len=spur_min_px)
 
         p_graph = graph_ext.build_pixel_graph(skel, dist_map * 2.0)
@@ -426,11 +429,11 @@ class CalligraphicVectorizer:
             pts_c = np.argwhere(clean_comp)
             return [self._make_impact_stroke(pts_c, 0, ppm, w_nib_mm)] if len(pts_c) > 0 else []
 
-        # 1. Splice protruding '3'-cusp bounce-back tongues (zero air-lift cusp reversal)
+        # 1. Splice genuine protruding '3'-cusp bounce-back tongues (>= 0.50 mm physical protrusion)
         raw_segs = self._splice_cusp_tongues(raw_segs, px_per_mm=ppm)
 
-        # 2. Drop tiny 1-2 node junction-triangle slivers (< 0.22 mm) only when main branches exist
-        min_sliver_mm = 0.22
+        # 2. Drop tiny sub-nib junction-triangle slivers (< 0.30 mm) only when main branches exist
+        min_sliver_mm = 0.30
         if len(raw_segs) > 1:
             substantive = [
                 s for s in raw_segs
@@ -445,7 +448,7 @@ class CalligraphicVectorizer:
             raw_segs, ppm=ppm, w_nib_mm=w_nib_mm, max_strokes=max_strokes
         )
 
-        # 4. Complete free eroded endpoints to true ink extremities (bounded to <= 0.85 mm forward cone)
+        # 4. Complete free eroded endpoints to true ink extremities (bounded narrow forward cone in mm)
         med_half_w = float(np.median(dist_map[clean_comp])) if np.any(clean_comp) else (0.5 * w_nib_mm * ppm)
         raw_polylines: List[List[Tuple[float, float, float]]] = []
         for s in chained_segs:
@@ -454,10 +457,13 @@ class CalligraphicVectorizer:
                 pts = self._extend_and_anchor_stroke(pts, clean_comp, dist_map, raw_polylines, med_half_w, ppm=ppm)
                 raw_polylines.append(pts)
 
-        # 5. Residual ink limb recovery: if an authentic branch (>= 0.04 mm^2) remained uncovered
-        min_res_px = max(3, int(round(0.040 * (ppm ** 2))))
+        # 5. Residual ink limb recovery: ONLY if an authentic uncovered stroke limb exists
+        #    beyond physical nib footprint (area >= max(0.22, 1.10 * w_nib^2) mm^2 AND arc >= 1.30 * w_nib mm)
+        min_res_mm2 = max(0.22, 1.10 * (w_nib_mm ** 2))
+        min_res_px = max(4, int(round(min_res_mm2 * (ppm ** 2))))
+        min_limb_arc_mm = max(0.55, 1.30 * w_nib_mm)
         while len(raw_polylines) < max_strokes and raw_polylines:
-            pred_m = self._rasterize_strokes_mask(raw_polylines, (h, w), scale_w=0.90)
+            pred_m = self._rasterize_strokes_mask(raw_polylines, (h, w), scale_w=1.05)
             uncov = clean_comp & (~pred_m)
             if int(np.sum(uncov)) < min_res_px:
                 break
@@ -483,8 +489,10 @@ class CalligraphicVectorizer:
                 break
             u_pts = [(float(p[0]), float(p[1]), max(0.5, float(p[2]))) for p in u_ch[0]["points"]]
             u_pts = self._extend_and_anchor_stroke(u_pts, clean_comp, dist_map, raw_polylines, med_half_w, ppm=ppm)
+            if self._polyline_arc_mm(u_pts, mm_per_px) < min_limb_arc_mm:
+                break
             raw_polylines.append(u_pts)
-            new_pred = self._rasterize_strokes_mask(raw_polylines, (h, w), scale_w=0.90)
+            new_pred = self._rasterize_strokes_mask(raw_polylines, (h, w), scale_w=1.05)
             if int(np.sum(clean_comp & (~new_pred))) >= int(np.sum(uncov)) - 1:
                 break
 
@@ -554,7 +562,7 @@ class CalligraphicVectorizer:
         if not np.any(raw_skel):
             return None
 
-        spur_min_px = max(2, int(round(0.28 * ppm)))
+        spur_min_px = max(2, int(round(0.36 * ppm)))
         skel = self.prune_skeleton_spurs(raw_skel, dist_map, min_spur_len=spur_min_px)
         graph_ext = StrokeGraphExtractor()
         raw_segs = graph_ext.decompose_into_strokes(graph_ext.build_pixel_graph(skel, dist_map * 2.0))
@@ -575,10 +583,12 @@ class CalligraphicVectorizer:
         if not chains:
             return None
 
-        # Recover any uncovered cursive flourish (>= 0.045 mm^2) before single-tour assembly
-        min_res_px = max(3, int(round(0.045 * (ppm ** 2))))
+        # Recover any genuine uncovered cursive flourish (>= nib footprint) before single-tour assembly
+        min_res_mm2 = max(0.20, 1.05 * (w_nib_mm ** 2))
+        min_res_px = max(4, int(round(min_res_mm2 * (ppm ** 2))))
+        min_limb_arc_mm = max(0.52, 1.25 * w_nib_mm)
         for _ in range(2):
-            pred_m = self._rasterize_strokes_mask(chains, (h, w), scale_w=0.90)
+            pred_m = self._rasterize_strokes_mask(chains, (h, w), scale_w=1.05)
             uncov = clean_comp & (~pred_m)
             if int(np.sum(uncov)) < min_res_px:
                 break
@@ -601,7 +611,11 @@ class CalligraphicVectorizer:
             u_ch = self._chain_segments_minimum_action(u_segs, ppm=ppm, w_nib_mm=w_nib_mm, max_strokes=1)
             if u_ch and len(u_ch[0].get("points", [])) >= 2:
                 u_pts = [(float(p[0]), float(p[1]), max(0.5, float(p[2]))) for p in u_ch[0]["points"]]
-                chains.append(self._extend_and_anchor_stroke(u_pts, clean_comp, dist_map, chains, med_half_w, ppm=ppm))
+                u_ext = self._extend_and_anchor_stroke(u_pts, clean_comp, dist_map, chains, med_half_w, ppm=ppm)
+                if self._polyline_arc_mm(u_ext, mm_per_px) >= min_limb_arc_mm:
+                    chains.append(u_ext)
+                else:
+                    break
 
         # Assemble all chains into 1 minimum-action continuous cursive tour (splicing T-branches in-place)
         chains.sort(key=lambda ch: (min(p[0] for p in ch) * 1.2 + min(p[1] for p in ch)) * mm_per_px)
@@ -887,13 +901,14 @@ class CalligraphicVectorizer:
         is_serafini: bool,
     ) -> Tuple[List[Tuple[float, float, float]], float]:
         """
-        1. Freezes sharp cusps & velocity reversals (`cos < 0.57`, e.g. `'3'`, `'m'`, `'k'`) against smoothing.
-        2. Gently re-centers smooth interior stem segments onto the true medial ink ridge AND analytically
-           repels points outward if smoothing pulled a curve toward an enclosed loop hole (`dist_to_hole`).
+        1. Enforces physical nib-scale intra-stroke bandwidth (`w_nib_mm`): freezes ONLY genuine
+           velocity-reversal cusps (`cos < -0.20` measured over physical chords `>= 0.42 mm`, never 1-px grid stairs).
+        2. Smooths trajectory coordinates with physical hand inertia (`sigma_mm = 0.22 mm`) and simplifies
+           sub-nib jitter (`rdp_eps_mm = 0.052 mm`) without discrete per-point jumps.
         3. Infers muscular nib pressure `p(s)` along arc-length coupled with the `40°` nib bevel:
              w_mm(s) = p(s) * sqrt((w_nib * sin(theta - 40°))^2 + w_edge^2)
            strictly bounded to physical instrument limits `[w_edge_mm, MAX_PRESSED_SPREAD_MM]` and
-           clamped outside interior loop cavities so holes NEVER plug.
+           smoothly clamped outside interior loop cavities so holes NEVER plug.
         """
         if len(raw_pts) < 2:
             return raw_pts, 1.0
@@ -902,7 +917,7 @@ class CalligraphicVectorizer:
         mm_per_px = 1.0 / ppm
 
         dedup: List[Tuple[float, float, float]] = [(float(raw_pts[0][0]), float(raw_pts[0][1]), float(raw_pts[0][2]))]
-        min_dedup_px = max(0.12, 0.015 * ppm)
+        min_dedup_px = 0.020 * ppm
         for p in raw_pts[1:]:
             if math.hypot(float(p[0]) - dedup[-1][0], float(p[1]) - dedup[-1][1]) >= min_dedup_px:
                 dedup.append((float(p[0]), float(p[1]), float(p[2])))
@@ -914,25 +929,59 @@ class CalligraphicVectorizer:
                 return raw_pts, 1.0
 
         n_pts = len(dedup)
-        close_dist_px = 0.32 * ppm
+        close_dist_px = 0.35 * ppm
         is_closed = n_pts >= 6 and math.hypot(dedup[0][0] - dedup[-1][0], dedup[0][1] - dedup[-1][1]) <= close_dist_px
 
+        # Cumulative arc-length in mm to evaluate cusps strictly at >= nib-width chord scale (never 1-px staircase!)
+        cum_mm = np.zeros(n_pts, dtype=np.float64)
+        for i in range(1, n_pts):
+            cum_mm[i] = cum_mm[i - 1] + math.hypot(dedup[i][0] - dedup[i - 1][0], dedup[i][1] - dedup[i - 1][1]) * mm_per_px
+
+        cusp_chord_mm = max(0.42, 0.95 * w_nib_mm)
+        min_anchor_sep_mm = max(0.55, 1.20 * w_nib_mm)
+        cand_cusps: List[Tuple[int, float]] = []
+        if cum_mm[-1] >= 2.0 * cusp_chord_mm:
+            for i in range(1, n_pts - 1):
+                if cum_mm[i] < cusp_chord_mm or (cum_mm[-1] - cum_mm[i]) < cusp_chord_mm:
+                    continue
+                i_prev = int(np.searchsorted(cum_mm, cum_mm[i] - cusp_chord_mm, side="right")) - 1
+                i_prev = max(0, i_prev)
+                i_next = int(np.searchsorted(cum_mm, cum_mm[i] + cusp_chord_mm, side="left"))
+                i_next = min(n_pts - 1, i_next)
+                v1y, v1x = dedup[i][0] - dedup[i_prev][0], dedup[i][1] - dedup[i_prev][1]
+                v2y, v2x = dedup[i_next][0] - dedup[i][0], dedup[i_next][1] - dedup[i][1]
+                n1, n2 = math.hypot(v1y, v1x), math.hypot(v2y, v2x)
+                if n1 >= 0.35 * ppm and n2 >= 0.35 * ppm:
+                    cos_t = (v1y * v2y + v1x * v2x) / (n1 * n2)
+                    if cos_t < -0.20:
+                        cand_cusps.append((i, cos_t))
+
         anchors = [0]
-        for i in range(1, n_pts - 1):
-            v1y, v1x = dedup[i][0] - dedup[i - 1][0], dedup[i][1] - dedup[i - 1][1]
-            v2y, v2x = dedup[i + 1][0] - dedup[i][0], dedup[i + 1][1] - dedup[i][1]
-            n1, n2 = math.hypot(v1y, v1x), math.hypot(v2y, v2x)
-            if n1 > 1e-4 and n2 > 1e-4 and ((v1y * v2y + v1x * v2x) / (n1 * n2)) < 0.57:
-                anchors.append(i)
+        for idx_c, cos_c in cand_cusps:
+            if len(anchors) == 1 or (cum_mm[idx_c] - cum_mm[anchors[-1]]) >= min_anchor_sep_mm:
+                anchors.append(idx_c)
+            else:
+                prev_idx = anchors[-1]
+                prev_cos = next((c for k, c in cand_cusps if k == prev_idx), 0.0)
+                if cos_c < prev_cos:
+                    anchors[-1] = idx_c
         anchors.append(n_pts - 1)
 
-        rdp_eps_px = max(0.18, 0.020 * ppm)
-        sig_pts = max(0.55, min(1.35, 0.09 * ppm))
+        # Physical hand-inertia smoothing scale (0.22 mm) and sub-nib RDP simplification (0.052 mm)
+        py_all = np.array([p[0] for p in dedup], dtype=np.float64)
+        px_all = np.array([p[1] for p in dedup], dtype=np.float64)
+        step_ds = float(np.median(np.hypot(np.diff(py_all), np.diff(px_all)))) if n_pts >= 3 else (0.08 * ppm)
+        step_ds = max(0.04 * ppm, step_ds)
+        sig_pts = max(1.0, min(4.5, (0.22 * ppm) / max(1e-3, step_ds)))
+        rdp_eps_px = 0.052 * ppm
         simplified: List[Tuple[float, float, float]] = []
 
         if is_closed and len(anchors) == 2:
-            cy_a = gaussian_filter1d(np.array([p[0] for p in dedup[:-1]], dtype=np.float64), sigma=sig_pts, mode="wrap")
-            cx_a = gaussian_filter1d(np.array([p[1] for p in dedup[:-1]], dtype=np.float64), sigma=sig_pts, mode="wrap")
+            cy_g1 = gaussian_filter1d(py_all[:-1], sigma=sig_pts, mode="wrap")
+            cx_g1 = gaussian_filter1d(px_all[:-1], sigma=sig_pts, mode="wrap")
+            # Taubin zero-shrinkage fairing: removes staircase jitter without shrinking tight bowls inward
+            cy_a = cy_g1 + 0.58 * (cy_g1 - gaussian_filter1d(cy_g1, sigma=sig_pts, mode="wrap"))
+            cx_a = cx_g1 + 0.58 * (cx_g1 - gaussian_filter1d(cx_g1, sigma=sig_pts, mode="wrap"))
             ring_sm = [(float(cy_a[k]), float(cx_a[k]), dedup[k][2]) for k in range(len(cy_a))]
             ring_sm.append(ring_sm[0])
             simplified = self._rdp_simplify_with_width(ring_sm, epsilon=rdp_eps_px)
@@ -943,20 +992,24 @@ class CalligraphicVectorizer:
                     py_a = np.array([p[0] for p in piece], dtype=np.float64)
                     px_a = np.array([p[1] for p in piece], dtype=np.float64)
                     sy0, sx0, sy1, sx1 = py_a[0], px_a[0], py_a[-1], px_a[-1]
-                    py_a = gaussian_filter1d(py_a, sigma=sig_pts, mode="nearest")
-                    px_a = gaussian_filter1d(px_a, sigma=sig_pts, mode="nearest")
+                    py_g1 = gaussian_filter1d(py_a, sigma=sig_pts, mode="nearest")
+                    px_g1 = gaussian_filter1d(px_a, sigma=sig_pts, mode="nearest")
+                    py_a = py_g1 + 0.55 * (py_g1 - gaussian_filter1d(py_g1, sigma=sig_pts, mode="nearest"))
+                    px_a = px_g1 + 0.55 * (px_g1 - gaussian_filter1d(px_g1, sigma=sig_pts, mode="nearest"))
                     py_a[0], px_a[0], py_a[-1], px_a[-1] = sy0, sx0, sy1, sx1
                     piece = [(float(py_a[k]), float(px_a[k]), piece[k][2]) for k in range(len(piece))]
                 simp_p = self._rdp_simplify_with_width(piece, epsilon=rdp_eps_px)
                 simplified.extend(simp_p[1:] if simplified else simp_p)
 
-        # Resample in physical millimeters (~0.15 mm around loops, ~0.24 mm on open stems)
-        resample_step_px = max(1.0, (0.15 if dist_to_hole is not None else 0.24) * ppm)
+        # Resample at half-nib physical cadence (~0.24 mm) for smooth bevel/pressure profiling
+        # followed by gentle C^2 curve fairing so resampled knots follow a smooth arc rather than flat chords
+        resample_step_px = max(0.8, 0.24 * ppm)
         resampled: List[Tuple[float, float, float]] = [simplified[0]]
+        cusp_coords = [(dedup[a][0], dedup[a][1]) for a in anchors[1:-1]]
         for k in range(len(simplified) - 1):
             p0, p1 = simplified[k], simplified[k + 1]
             seg_d = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
-            if seg_d > resample_step_px * 1.25:
+            if seg_d > resample_step_px * 1.35:
                 n_sub = int(math.ceil(seg_d / resample_step_px))
                 for s_i in range(1, n_sub):
                     t = float(s_i) / float(n_sub)
@@ -967,34 +1020,23 @@ class CalligraphicVectorizer:
                     ))
             resampled.append(p1)
 
-        # Outward loop-hole repulsion (undoing inward concavity bias of smoothing around tight bowls!)
         n_r = len(resampled)
         coords_yx = [[float(p[0]), float(p[1])] for p in resampled]
-        if dist_to_hole is not None:
-            min_hole_clear_px = 0.24 * ppm
-            for i in range(n_r):
-                cy, cx = coords_yx[i]
-                iy, ix = max(0, min(h - 1, int(round(cy)))), max(0, min(w - 1, int(round(cx))))
-                d_h = float(dist_to_hole[iy, ix])
-                if d_h < min_hole_clear_px:
-                    # Estimate outward gradient of dist_to_hole
-                    gy_h = float(dist_to_hole[min(h - 1, iy + 1), ix] - dist_to_hole[max(0, iy - 1), ix])
-                    gx_h = float(dist_to_hole[iy, min(w - 1, ix + 1)] - dist_to_hole[iy, max(0, ix - 1)])
-                    gn = math.hypot(gy_h, gx_h)
-                    if gn > 1e-4:
-                        uy_h, ux_h = gy_h / gn, gx_h / gn
-                        best_y, best_x, best_score = cy, cx, float(dist_map[iy, ix])
-                        for push in np.linspace(0.3, 0.32 * ppm, 5):
-                            ty_p, tx_p = cy + uy_h * push, cx + ux_h * push
-                            ity, itx = int(round(ty_p)), int(round(tx_p))
-                            if 0 <= ity < h and 0 <= itx < w and clean_comp[ity, itx]:
-                                sc = float(dist_map[ity, itx]) + 0.35 * float(dist_to_hole[ity, itx])
-                                if sc > best_score:
-                                    best_score = sc
-                                    best_y, best_x = ty_p, tx_p
-                        coords_yx[i] = [best_y, best_x]
+        if n_r >= 5 and not cusp_coords:
+            ry_a = np.array([c[0] for c in coords_yx], dtype=np.float64)
+            rx_a = np.array([c[1] for c in coords_yx], dtype=np.float64)
             if is_closed:
+                ry_s = gaussian_filter1d(ry_a[:-1], sigma=0.75, mode="wrap")
+                rx_s = gaussian_filter1d(rx_a[:-1], sigma=0.75, mode="wrap")
+                for i in range(n_r - 1):
+                    coords_yx[i] = [float(ry_s[i]), float(rx_s[i])]
                 coords_yx[-1] = list(coords_yx[0])
+            else:
+                ry_s = gaussian_filter1d(ry_a, sigma=0.75, mode="nearest")
+                rx_s = gaussian_filter1d(rx_a, sigma=0.75, mode="nearest")
+                ry_s[0], rx_s[0], ry_s[-1], rx_s[-1] = ry_a[0], rx_a[0], ry_a[-1], rx_a[-1]
+                for i in range(n_r):
+                    coords_yx[i] = [float(ry_s[i]), float(rx_s[i])]
 
         # Coupled physical nib bevel + inferred muscular pressure p(s)
         w_edge_mm = (0.48 if is_serafini else self.MIN_NIB_CHISEL_RATIO) * w_nib_mm
@@ -1002,10 +1044,12 @@ class CalligraphicVectorizer:
         obs_w_mm = np.zeros(n_r, dtype=np.float64)
 
         for i in range(n_r):
-            if i < n_r - 1:
-                dy, dx = coords_yx[i + 1][0] - coords_yx[i][0], coords_yx[i + 1][1] - coords_yx[i][1]
-            else:
+            if i == 0:
+                dy, dx = coords_yx[1][0] - coords_yx[0][0], coords_yx[1][1] - coords_yx[0][1]
+            elif i == n_r - 1:
                 dy, dx = coords_yx[i][0] - coords_yx[i - 1][0], coords_yx[i][1] - coords_yx[i - 1][1]
+            else:
+                dy, dx = coords_yx[i + 1][0] - coords_yx[i - 1][0], coords_yx[i + 1][1] - coords_yx[i - 1][1]
             theta = math.atan2(dy, dx)
             sin_b = abs(math.sin(theta - self.nib_angle_rad))
             if is_serafini:
@@ -1022,28 +1066,31 @@ class CalligraphicVectorizer:
         raw_p = np.clip(obs_w_mm / np.maximum(1e-4, geom_w_mm), 0.55, 1.55)
         if n_r >= 4:
             p_mode = "wrap" if is_closed else "nearest"
-            smooth_p = gaussian_filter1d(raw_p, sigma=1.15, mode=p_mode)
+            smooth_p = gaussian_filter1d(raw_p, sigma=1.25, mode=p_mode)
         else:
             smooth_p = raw_p
 
-        # Combine pressure * bevel width, strictly capped by physical MAX_PRESSED_SPREAD_MM AND hole clearance!
+        # Combine pressure * bevel width, strictly capped by physical MAX_PRESSED_SPREAD_MM AND smooth hole clearance!
         base_w_px: List[float] = []
-        hole_caps_px: List[float] = []
+        hole_caps_arr = np.full(n_r, self.MAX_PRESSED_SPREAD_MM * ppm, dtype=np.float64)
         for i in range(n_r):
-            w_mm_i = float(np.clip(smooth_p[i] * geom_w_mm[i], w_edge_mm, self.MAX_PRESSED_SPREAD_MM))
-            w_px_i = w_mm_i * ppm
             iy = max(0, min(h - 1, int(round(coords_yx[i][0]))))
             ix = max(0, min(w - 1, int(round(coords_yx[i][1]))))
             if dist_to_hole is not None:
                 dh_px = float(dist_to_hole[iy, ix])
-                h_cap = max(0.08 * ppm, 2.0 * (dh_px - 0.115 * ppm)) if dh_px < 0.75 * ppm else (self.MAX_PRESSED_SPREAD_MM * ppm)
-            else:
-                h_cap = self.MAX_PRESSED_SPREAD_MM * ppm
-            hole_caps_px.append(h_cap)
-            base_w_px.append(min(w_px_i, h_cap))
+                if dh_px < 0.75 * ppm:
+                    hole_caps_arr[i] = max(0.10 * ppm, 2.0 * (dh_px - 0.035 * ppm))
+        if dist_to_hole is not None and n_r >= 4:
+            hole_caps_arr = np.minimum(
+                hole_caps_arr,
+                gaussian_filter1d(hole_caps_arr, sigma=0.90, mode="wrap" if is_closed else "nearest"),
+            )
+        hole_caps_px = [float(v) for v in hole_caps_arr]
+        for i in range(n_r):
+            w_mm_i = float(np.clip(smooth_p[i] * geom_w_mm[i], w_edge_mm, self.MAX_PRESSED_SPREAD_MM))
+            base_w_px.append(min(w_mm_i * ppm, hole_caps_px[i]))
 
         # Fine silhouette IoU + hole-preservation calibration within physical bounds [0.88, 1.18]
-        cand_stroke = [(coords_yx[i][0], coords_yx[i][1], base_w_px[i]) for i in range(n_r)]
         best_gain = 1.0
         best_obj = -1e9
         holes_mask = (dist_to_hole == 0) if dist_to_hole is not None else None
@@ -1068,14 +1115,27 @@ class CalligraphicVectorizer:
                 best_obj = obj
                 best_gain = gain
 
-        final_pts: List[Tuple[float, float, float]] = []
-        for i in range(n_r):
-            w_fin = min(
-                hole_caps_px[i],
-                self.MAX_PRESSED_SPREAD_MM * ppm,
-                max(w_edge_mm * ppm, base_w_px[i] * best_gain),
+        w_arr = np.array(
+            [
+                min(
+                    hole_caps_px[i],
+                    self.MAX_PRESSED_SPREAD_MM * ppm,
+                    max(w_edge_mm * ppm, base_w_px[i] * best_gain),
+                )
+                for i in range(n_r)
+            ],
+            dtype=np.float64,
+        )
+        if n_r >= 4:
+            w_arr = np.minimum(
+                hole_caps_arr,
+                gaussian_filter1d(w_arr, sigma=0.80, mode="wrap" if is_closed else "nearest"),
             )
-            final_pts.append((round(coords_yx[i][0], 2), round(coords_yx[i][1], 2), round(w_fin, 2)))
+
+        final_pts: List[Tuple[float, float, float]] = [
+            (round(coords_yx[i][0], 2), round(coords_yx[i][1], 2), round(float(w_arr[i]), 2))
+            for i in range(n_r)
+        ]
         if is_closed and len(final_pts) >= 4:
             final_pts[-1] = final_pts[0]
 
@@ -1087,15 +1147,18 @@ class CalligraphicVectorizer:
         px_per_mm: float = 8.0,
     ) -> List[Dict[str, Any]]:
         """
-        Preserves `'3'`-shaped middle cusps and sharp bounce-back tongues (`arch_top -> cusp_tip -> arch_bottom`)
-        by splicing protruding degree-1 junction tongues (`<= 1.40 mm`) directly between two main branches
-        meeting at the same junction (`v = 0` cusp reversal with zero pen lift).
+        Preserves genuine `'3'`-shaped middle cusps (`arch_top -> cusp_tip -> arch_bottom`)
+        by splicing protruding degree-1 junction tongues strictly within `[0.50 mm, 1.40 mm]`
+        ONLY when the two flanking branches do NOT already form a smooth straight stem (`cos < 0.45`).
+        Sub-nib `< 0.50 mm` corner bumps along `'a'`/`'o'` bowls are never spliced as cusps.
         """
         if len(segs) < 3:
             return segs
         mm_per_px = 1.0 / px_per_mm
+        min_tongue_mm = 0.50
         max_tongue_mm = 1.40
         junc_tol_px = 0.28 * px_per_mm
+        k_tan = max(2, int(round(0.32 * px_per_mm)))
         work = [dict(s, points=list(s.get("points", []))) for s in segs if len(s.get("points", [])) >= 2]
         if len(work) < 3:
             return segs
@@ -1105,12 +1168,15 @@ class CalligraphicVectorizer:
             merged_any = False
             for t_idx, t_seg in enumerate(work):
                 t_pts = t_seg["points"]
-                if CalligraphicVectorizer._polyline_arc_mm(t_pts, mm_per_px) > max_tongue_mm:
+                arc_mm = CalligraphicVectorizer._polyline_arc_mm(t_pts, mm_per_px)
+                if arc_mm < min_tongue_mm or arc_mm > max_tongue_mm:
                     continue
                 for j_end in (0, -1):
                     jy, jx = float(t_pts[j_end][0]), float(t_pts[j_end][1])
                     tip_end = -1 if j_end == 0 else 0
                     ty_tip, tx_tip = float(t_pts[tip_end][0]), float(t_pts[tip_end][1])
+                    if math.hypot(ty_tip - jy, tx_tip - jx) * mm_per_px < min_tongue_mm:
+                        continue
                     tip_touches = any(
                         o_idx != t_idx
                         and (
@@ -1131,12 +1197,21 @@ class CalligraphicVectorizer:
                             neighbors.append((o_idx, 0 if d0 <= d1 else -1))
                     if len(neighbors) == 2:
                         (idx_a, end_a), (idx_b, end_b) = neighbors
+                        if idx_a == idx_b:
+                            continue
+                        if work[idx_a].get("type") == "loop" or work[idx_b].get("type") == "loop":
+                            continue
                         pts_a = list(work[idx_a]["points"])
                         pts_b = list(work[idx_b]["points"])
                         if end_a == 0:
                             pts_a = pts_a[::-1]
                         if end_b == -1:
                             pts_b = pts_b[::-1]
+                        # Never splice an out-and-back spike into a closed loop ('a'/'d'/'q') or smooth stem!
+                        if math.hypot(pts_a[0][0] - pts_b[-1][0], pts_a[0][1] - pts_b[-1][1]) * mm_per_px < 0.85:
+                            continue
+                        if JunctionResolver._tangent_cosine(pts_a, pts_b, k=k_tan) >= 0.45:
+                            continue
                         tongue_out = list(t_pts) if j_end == 0 else list(t_pts)[::-1]
                         tongue_back = tongue_out[:-1][::-1]
                         spliced_pts = pts_a + tongue_out[1:] + tongue_back + pts_b[1:]
@@ -1267,51 +1342,47 @@ class CalligraphicVectorizer:
                         out = ([anchor_pt] + out) if end_flag == 0 else (out + [anchor_pt])
                         continue
 
-            max_fwd_px = 0.65 * ppm
-            max_lat_px = 0.32 * ppm
-            for _ in range(2):
-                ey, ex, ew = float(out[end_flag][0]), float(out[end_flag][1]), float(out[end_flag][2])
-                k_step = min(3, len(out) - 1)
-                if end_flag == 0:
-                    ty, tx = out[0][0] - out[k_step][0], out[0][1] - out[k_step][1]
-                else:
-                    ty, tx = out[-1][0] - out[-1 - k_step][0], out[-1][1] - out[-1 - k_step][1]
-                tn = math.hypot(ty, tx)
-                if tn < 1e-4:
-                    break
+            max_fwd_px = 0.55 * ppm
+            max_lat_px = 0.20 * ppm
+            ey, ex, ew = float(out[end_flag][0]), float(out[end_flag][1]), float(out[end_flag][2])
+            k_step = min(len(out) - 1, max(1, int(round(0.35 * ppm))))
+            if end_flag == 0:
+                ty, tx = out[0][0] - out[k_step][0], out[0][1] - out[k_step][1]
+            else:
+                ty, tx = out[-1][0] - out[-1 - k_step][0], out[-1][1] - out[-1 - k_step][1]
+            tn = math.hypot(ty, tx)
+            if tn >= 1e-4:
                 ty, tx = ty / tn, tx / tn
                 py_dir, px_dir = -tx, ty
                 iy0, ix0 = max(0, min(h - 1, int(round(ey)))), max(0, min(w - 1, int(round(ex))))
-                local_r = min(0.55 * ppm, float(dist_map[iy0, ix0]))
-                fwd_lim = min(max_fwd_px, local_r * 1.65 + 0.15 * ppm)
-                lat_lim = min(max_lat_px, local_r * 0.85 + 0.10 * ppm)
+                local_r = min(0.50 * ppm, float(dist_map[iy0, ix0]))
+                fwd_lim = min(max_fwd_px, local_r * 1.45 + 0.12 * ppm)
+                lat_lim = min(max_lat_px, local_r * 0.55 + 0.06 * ppm)
                 r_box = max(1, int(math.ceil(fwd_lim)))
                 y_lo, y_hi = max(0, iy0 - r_box), min(h, iy0 + r_box + 1)
                 x_lo, x_hi = max(0, ix0 - r_box), min(w, ix0 + r_box + 1)
                 ys_sub, xs_sub = np.where(clean_comp[y_lo:y_hi, x_lo:x_hi])
                 best_tip = None
-                best_score = 0.06 * ppm
+                best_score = 0.08 * ppm
                 for dy_i, dx_i in zip(ys_sub, xs_sub):
                     cy_i, cx_i = float(y_lo + dy_i), float(x_lo + dx_i)
                     vy, vx = cy_i - ey, cx_i - ex
                     proj = vy * ty + vx * tx
-                    if proj < 0.06 * ppm or proj > fwd_lim:
+                    if proj < 0.08 * ppm or proj > fwd_lim:
                         continue
                     perp = abs(vy * py_dir + vx * px_dir)
-                    if perp > lat_lim or perp > proj * 1.10:
+                    if perp > lat_lim or perp > proj * 0.45:
                         continue
                     mid_y, mid_x = int(round(0.5 * (ey + cy_i))), int(round(0.5 * (ex + cx_i)))
                     q_y, q_x = int(round(0.75 * cy_i + 0.25 * ey)), int(round(0.75 * cx_i + 0.25 * ex))
                     if not (clean_comp[mid_y, mid_x] and clean_comp[q_y, q_x]):
                         continue
-                    sc = proj - 0.30 * perp + 0.20 * float(dist_map[int(cy_i), int(cx_i)])
+                    sc = proj - 0.55 * perp + 0.20 * float(dist_map[int(cy_i), int(cx_i)])
                     if sc > best_score:
                         best_score = sc
                         w_tip = max(0.12 * ppm, float(dist_map[int(cy_i), int(cx_i)]) * 1.80)
                         best_tip = (round(cy_i, 2), round(cx_i, 2), round(w_tip, 2))
-                if best_tip is not None and math.hypot(best_tip[0] - ey, best_tip[1] - ex) >= 0.08 * ppm:
+                if best_tip is not None and math.hypot(best_tip[0] - ey, best_tip[1] - ex) >= 0.10 * ppm:
                     out = ([best_tip] + out) if end_flag == 0 else (out + [best_tip])
-                else:
-                    break
 
         return out

@@ -470,13 +470,22 @@ def generate_explorer_html(
             color: #fff;
             border: 1px solid var(--border);
             border-radius: 4px;
-            width: 26px;
-            height: 26px;
-            display: flex;
+            min-width: 26px;
+            min-height: 26px;
+            width: auto;
+            height: auto;
+            padding: 2px 6px;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
             font-size: 0.9rem;
             cursor: pointer;
+            box-sizing: border-box;
+        }}
+        .canvas-toolbar .btn-tool {{
+            width: 26px;
+            height: 26px;
+            padding: 0;
         }}
         .btn-tool:hover {{ background: var(--accent); color: #000; }}
         .zoom-level-text {{
@@ -4004,7 +4013,7 @@ def generate_explorer_html(
             ins.innerHTML = `
                 <!-- 1. Sleek Glyph Navigation Toolbar -->
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; background:#0f172a; border:1px solid #334155; border-radius:6px; padding:6px 10px; margin-bottom:6px;">
-                    <button class="btn-tool" onclick="goToPrevGlyph()" style="padding:4px 10px; font-size:0.74rem; background:#1e293b; color:#38bdf8; font-weight:bold; border:1px solid #38bdf8; border-radius:4px; cursor:pointer; white-space:nowrap; flex-shrink:0;" title="${{hasPrevG ? 'Previous Glyph (wraps across words)' : 'Previous Folio in active order (last glyph)'}}">◀ Prev Glyph</button>
+                    <button class="btn-tool" onclick="goToPrevGlyph()" style="width:auto; height:auto; padding:4px 8px; font-size:0.70rem; background:#1e293b; color:#38bdf8; font-weight:bold; border:1px solid #38bdf8; border-radius:4px; cursor:pointer; white-space:nowrap; flex-shrink:0;" title="${{hasPrevG ? 'Previous Glyph (wraps across words)' : 'Previous Folio in active order (last glyph)'}}">◀ Prev Glyph</button>
                     <div style="text-align:center; flex:1; min-width:0; overflow:hidden;">
                         <div style="display:flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
                             <span style="font-size:0.82rem; color:#38bdf8; font-weight:bold; overflow:hidden; text-overflow:ellipsis;">🔵 ${{glyphShortLabel}}</span>
@@ -4012,7 +4021,7 @@ def generate_explorer_html(
                         </div>
                         <span style="font-size:0.62rem; color:var(--text-muted); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${{glyphPosLabel}} · ${{page.page_id}} (${{globalGIdx + 1}}/${{allGlyphs.length}})</span>
                     </div>
-                    <button class="btn-tool" onclick="goToNextGlyph()" style="padding:4px 10px; font-size:0.74rem; background:#1e293b; color:#38bdf8; font-weight:bold; border:1px solid #38bdf8; border-radius:4px; cursor:pointer; white-space:nowrap; flex-shrink:0;" title="${{hasNextG ? 'Next Glyph (wraps across words)' : 'Next Folio in active order (first glyph)'}}">Next Glyph ▶</button>
+                    <button class="btn-tool" onclick="goToNextGlyph()" style="width:auto; height:auto; padding:4px 8px; font-size:0.70rem; background:#1e293b; color:#38bdf8; font-weight:bold; border:1px solid #38bdf8; border-radius:4px; cursor:pointer; white-space:nowrap; flex-shrink:0;" title="${{hasNextG ? 'Next Glyph (wraps across words)' : 'Next Folio in active order (first glyph)'}}">Next Glyph ▶</button>
                 </div>
 
                 ${{activeWord ? `

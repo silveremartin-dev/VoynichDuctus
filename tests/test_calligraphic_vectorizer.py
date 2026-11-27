@@ -117,4 +117,54 @@ def test_physical_millimeter_scale_impossibility_and_ceiling():
     assert st_macro[0]["mean_width_mm"] <= 0.95
 
 
+def test_small_looped_glyph_no_sub_nib_sawtooth_tremor():
+    """
+    Regression test for 2.1 mm x 1.6 mm looped minims (e.g. Voynich 'a' on f1r_L22_W00_G01):
+    With a 0.45 mm quill at 14 px/mm, pixel-staircase vellum roughness around a tight enclosed
+    bowl + right leg must NEVER trigger sub-nib sawtooth oscillations or parasitic corner strokes.
+    """
+    import math
+    from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
+    from voynich_ductus.vectorizer.export_format import VectorExporter
+
+    ppm = 14.0
+    cal = MetricScaleCalibration(manuscript_type="voynich", custom_px_per_mm=ppm)
+    vec = CalligraphicVectorizer(nib_angle_deg=40.0)
+
+    # Build a 2.14 mm x 1.64 mm (23 x 30 px) looped 'a' with staircase border roughness
+    mask = np.zeros((23, 30), dtype=bool)
+    yy, xx = np.ogrid[:23, :30]
+    bowl_outer = ((yy - 11.0) / 7.2) ** 2 + ((xx - 11.5) / 8.0) ** 2 <= 1.0
+    bowl_hole = ((yy - 11.0) / 2.4) ** 2 + ((xx - 10.5) / 2.6) ** 2 <= 1.0
+    mask[bowl_outer & (~bowl_hole)] = True
+    # Descending right leg with rough 1-px vellum bumps
+    for r_y in range(5, 20):
+        x_c = 16.5 + 0.45 * (r_y - 5)
+        x_lo = int(round(x_c - 2.8 - (r_y % 2) * 0.6))
+        x_hi = int(round(x_c + 2.8 + ((r_y + 1) % 2) * 0.6))
+        mask[r_y, max(0, x_lo):min(30, x_hi)] = True
+    mask[bowl_hole] = False
+
+    strokes = vec.extract_calligraphic_ductus(mask, scale_calib=cal)
+    assert 1 <= len(strokes) <= 2
+
+    total_pts = sum(len(s["points"]) for s in strokes)
+    assert total_pts <= 32
+
+    for s in strokes:
+        pts = s["points"]
+        for i in range(1, len(pts) - 1):
+            dy1, dx1 = pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]
+            dy2, dx2 = pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]
+            d1_mm = math.hypot(dy1, dx1) / ppm
+            d2_mm = math.hypot(dy2, dx2) / ppm
+            if 1e-4 < d1_mm < 0.40 and 1e-4 < d2_mm < 0.40:
+                cos_turn = (dy1 * dy2 + dx1 * dx2) / (math.hypot(dy1, dx1) * math.hypot(dy2, dx2))
+                assert cos_turn > -0.15, f"Sub-nib sawtooth reversal detected: cos={cos_turn:.3f}"
+
+    svg = VectorExporter.to_svg(strokes, 30, 23, px_per_mm=ppm, variable_width=True)
+    assert 'fill-rule="evenodd"' in svg
+
+
+
 

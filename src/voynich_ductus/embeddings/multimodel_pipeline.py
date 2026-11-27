@@ -137,7 +137,7 @@ def _extract_euler_bernoulli_ductus(
     px_per_mm = float(scale_calib.px_per_mm) if scale_calib is not None else max(4.5, max(gh, gw) / 4.5)
     try:
         from scipy.ndimage import binary_fill_holes, gaussian_filter1d, label as nd_label
-        pinhole_max = max(2, int(round(0.025 * (px_per_mm ** 2))))
+        pinhole_max = max(2, int(round(0.045 * (px_per_mm ** 2))))
         padded = np.pad(g_mask.astype(bool), 2, mode="constant", constant_values=False)
         holes = binary_fill_holes(padded) & (~padded)
         lbl_h, num_h = nd_label(holes)
@@ -169,19 +169,19 @@ def _extract_euler_bernoulli_ductus(
             else []
         )
 
-        # Metric smoothing & RDP simplification preserving curved ovals and arcs
-        rdp_eps = max(0.45, 0.055 * px_per_mm)
+        # Metric smoothing & RDP simplification preserving curved ovals and arcs (100% pure mm)
+        rdp_eps = 0.055 * px_per_mm
         for s in eb_strokes:
             pts = s.get("points", [])
             if len(pts) >= 4:
                 cy = np.array([float(p[0]) for p in pts], dtype=np.float64)
                 cx = np.array([float(p[1]) for p in pts], dtype=np.float64)
-                ws = [float(p[2]) if len(p) > 2 else 1.8 for p in pts]
+                ws = [float(p[2]) if len(p) > 2 else 0.22 * px_per_mm for p in pts]
                 sy0, sx0, sy1, sx1 = cy[0], cx[0], cy[-1], cx[-1]
-                closed = np.hypot(sy0 - sy1, sx0 - sx1) <= max(2.8, 0.35 * px_per_mm)
-                step_ds = float(np.median(np.hypot(np.diff(cy), np.diff(cx)))) if len(pts) >= 3 else 1.2
-                step_ds = max(0.8, step_ds)
-                sig_pts = max(1.0, min(4.2, (0.22 * px_per_mm) / step_ds))
+                closed = np.hypot(sy0 - sy1, sx0 - sx1) <= 0.35 * px_per_mm
+                step_ds = float(np.median(np.hypot(np.diff(cy), np.diff(cx)))) if len(pts) >= 3 else (0.08 * px_per_mm)
+                step_ds = max(0.05 * px_per_mm, step_ds)
+                sig_pts = max(1.0, min(4.2, (0.22 * px_per_mm) / max(1e-3, step_ds)))
                 if closed and len(cy) >= 6:
                     cy = gaussian_filter1d(cy[:-1], sigma=sig_pts, mode="wrap")
                     cx = gaussian_filter1d(cx[:-1], sigma=sig_pts, mode="wrap")
@@ -198,12 +198,20 @@ def _extract_euler_bernoulli_ductus(
                 s["end"] = (s["points"][-1][0], s["points"][-1][1])
                 s["length"] = float(len(s["points"]))
         if len(eb_strokes) > 1:
+            min_arc_px = 0.28 * px_per_mm
             long_eb = [
                 s for s in eb_strokes
-                if len(s.get("points", [])) >= 3 or np.hypot(s["start"][0] - s["end"][0], s["start"][1] - s["end"][1]) >= max(5.0, 0.5 * px_per_mm)
+                for pts in [s.get("points", [])]
+                if sum(
+                    float(np.hypot(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]))
+                    for k in range(len(pts) - 1)
+                ) >= min_arc_px
             ]
             if long_eb:
                 eb_strokes = long_eb
+        for idx_eb, s in enumerate(eb_strokes):
+            s["order_index"] = idx_eb
+            s["stroke_id"] = f"eb_s{idx_eb:02d}"
     except Exception:
         eb_strokes = []
 
