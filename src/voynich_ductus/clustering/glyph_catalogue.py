@@ -292,6 +292,8 @@ class GlyphCatalogue:
 
         patch_keys = [hashlib.sha1(p.tobytes()).digest() for p in mini_patches]
         missing_idx = [i for i, k in enumerate(patch_keys) if k not in self._dino_patch_cache]
+        runtime_distilled: Dict[bytes, np.ndarray] = {}
+        max_vit_cap = 3500
         if missing_idx:
             # Deduplicate identical missing patches before running ViT forward passes
             unique_missing = {}
@@ -301,9 +303,36 @@ class GlyphCatalogue:
                     unique_missing[k] = mini_patches[i]
             u_keys = list(unique_missing.keys())
             u_patches = list(unique_missing.values())
-            u_embs = self.dinov2_engine.extract_batch_embeddings(u_patches, batch_size=128)
-            for k, emb in zip(u_keys, u_embs):
-                self._dino_patch_cache[k] = np.asarray(emb, dtype=np.float32)
+            if len(u_keys) <= max_vit_cap:
+                u_embs = self.dinov2_engine.extract_batch_embeddings(u_patches, batch_size=128)
+                for k, emb in zip(u_keys, u_embs):
+                    self._dino_patch_cache[k] = np.asarray(emb, dtype=np.float32)
+            else:
+                # Stratified ViT inference on max_vit_cap exemplars + Ridge distillation on CPU for full-codex scale
+                from sklearn.linear_model import Ridge
+                step_u = max(1, len(u_keys) // max_vit_cap)
+                sel_pos = list(range(0, len(u_keys), step_u))[:max_vit_cap]
+                sel_set = set(sel_pos)
+                sel_keys = [u_keys[j] for j in sel_pos]
+                sel_patches = [u_patches[j] for j in sel_pos]
+                sel_embs = np.asarray(self.dinov2_engine.extract_batch_embeddings(sel_patches, batch_size=128), dtype=np.float32)
+                for k, emb in zip(sel_keys, sel_embs):
+                    self._dino_patch_cache[k] = emb
+
+                def _patch_to_16x16(arr_list: List[np.ndarray]) -> np.ndarray:
+                    stacked = np.asarray(arr_list, dtype=np.float32) / 255.0
+                    return stacked.reshape(len(arr_list), 16, 2, 16, 2).mean(axis=(2, 4)).reshape(len(arr_list), 256)
+
+                X_tr = _patch_to_16x16(sel_patches)
+                ridge = Ridge(alpha=2.0, random_state=42)
+                ridge.fit(X_tr, sel_embs)
+                rem_keys = [u_keys[j] for j in range(len(u_keys)) if j not in sel_set]
+                rem_patches = [u_patches[j] for j in range(len(u_keys)) if j not in sel_set]
+                for b0 in range(0, len(rem_patches), 8192):
+                    preds = ridge.predict(_patch_to_16x16(rem_patches[b0:b0 + 8192])).astype(np.float32)
+                    for rk, p_emb in zip(rem_keys[b0:b0 + 8192], preds):
+                        runtime_distilled[rk] = p_emb
+
             try:
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(cache_path, "wb") as f_dc:
@@ -311,7 +340,11 @@ class GlyphCatalogue:
             except Exception:
                 pass
 
-        dino_batch_embs = np.vstack([self._dino_patch_cache[k] for k in patch_keys]) if patch_keys else np.zeros((0, 16), dtype=np.float32)
+        dino_batch_embs = (
+            np.vstack([self._dino_patch_cache.get(k, runtime_distilled.get(k)) for k in patch_keys])
+            if patch_keys
+            else np.zeros((0, 16), dtype=np.float32)
+        )
         if len(dino_batch_embs) > 0 and dino_batch_embs.shape[1] > 16:
             from sklearn.decomposition import PCA
             n_comp = min(16, dino_batch_embs.shape[0], dino_batch_embs.shape[1])
@@ -565,10 +598,12 @@ class GlyphCatalogue:
             mu = np.mean(pts, axis=0)
             return mu, float(np.sum((pts - mu) ** 2))
 
-        trees: Dict[str, Tuple[Dict[int, List[int]], Dict[int, Tuple[int, int]]]] = {}
+        trees: Dict[str, Tuple[Dict[int, List[int]], Dict[int, Tuple[int, int]], float]] = {}
+        coreset_overflow: Dict[str, List[int]] = {}
         leaves: List[Tuple[str, int, List[int], float]] = []
         pq: List[Tuple[float, int, str, int, int, int, float, float, float]] = []
         uid = 0
+        max_ward_n = 3600
 
         for tg, idxs in lexical_strata.items():
             m = len(idxs)
@@ -576,28 +611,41 @@ class GlyphCatalogue:
             if m < 2 * min_support:
                 leaves.append((tg, 0, idxs, w0))
                 continue
-            Z = linkage(X_scaled[idxs], method="ward")
-            nm = {k: [idxs[k]] for k in range(m)}
+            if m > max_ward_n:
+                sel_pos = np.linspace(0, m - 1, max_ward_n, dtype=int)
+                sel_set = set(int(v) for v in sel_pos)
+                active_idxs = [idxs[k] for k in sel_pos]
+                coreset_overflow[tg] = [idxs[k] for k in range(m) if k not in sel_set]
+                w_scale = float(m) / float(len(active_idxs))
+                min_sup_eff = max(4, int(round(min_support / w_scale)))
+            else:
+                active_idxs = idxs
+                w_scale = 1.0
+                min_sup_eff = min_support
+
+            mc = len(active_idxs)
+            Z = linkage(X_scaled[active_idxs], method="ward")
+            nm = {k: [active_idxs[k]] for k in range(mc)}
             nc = {}
-            for s_i in range(m - 1):
+            for s_i in range(mc - 1):
                 c1, c2 = int(Z[s_i, 0]), int(Z[s_i, 1])
-                nm[m + s_i] = nm[c1] + nm[c2]
-                nc[m + s_i] = (c1, c2)
-            root = 2 * m - 2
-            trees[tg] = (nm, nc)
+                nm[mc + s_i] = nm[c1] + nm[c2]
+                nc[mc + s_i] = (c1, c2)
+            root = 2 * mc - 2
+            trees[tg] = (nm, nc, w_scale)
             leaves.append((tg, root, nm[root], w0))
 
             c1, c2 = nc[root]
             m1, m2 = nm[c1], nm[c2]
-            if len(m1) >= min_support and len(m2) >= min_support:
+            if len(m1) >= min_sup_eff and len(m2) >= min_sup_eff:
                 mu1, w1 = _stats(m1)
                 mu2, w2 = _stats(m2)
                 sep = float(np.linalg.norm(mu1 - mu2))
                 sig_w = math.sqrt(max(1e-6, (w1 + w2) / float(len(m1) + len(m2))))
                 rho = sep / sig_w
-                sc = rho * ((len(m1) + len(m2)) / float(N_lex)) ** 0.18
+                sc = rho * (((len(m1) + len(m2)) * w_scale) / float(N_lex)) ** 0.18
                 uid += 1
-                heapq.heappush(pq, (-sc, uid, tg, root, c1, c2, w1, w2, rho))
+                heapq.heappush(pq, (-sc, uid, tg, root, c1, c2, w1 * w_scale, w2 * w_scale, rho))
 
         # Expand natural Ward-Fisher frontier up to natural support horizon (no fixed target K)
         max_horizon = min(140, max(45, N_lex // max(1, min_support)))
@@ -610,7 +658,8 @@ class GlyphCatalogue:
             pos = next((i for i, x in enumerate(leaves) if x[0] == tg_k and x[1] == nid), -1)
             if pos < 0:
                 continue
-            nm_l, nc_l = trees[tg_k]
+            nm_l, nc_l, w_sc_l = trees[tg_k]
+            min_sup_l = max(4, int(round(min_support / w_sc_l)))
             leaves.pop(pos)
             leaves.append((tg_k, c1, nm_l[c1], w1))
             leaves.append((tg_k, c2, nm_l[c2], w2))
@@ -618,15 +667,15 @@ class GlyphCatalogue:
                 if ch in nc_l:
                     cc1, cc2 = nc_l[ch]
                     m1, m2 = nm_l[cc1], nm_l[cc2]
-                    if len(m1) >= min_support and len(m2) >= min_support:
+                    if len(m1) >= min_sup_l and len(m2) >= min_sup_l:
                         mu1, cw1 = _stats(m1)
                         mu2, cw2 = _stats(m2)
                         sep = float(np.linalg.norm(mu1 - mu2))
                         sig_w = math.sqrt(max(1e-6, (cw1 + cw2) / float(len(m1) + len(m2))))
                         r_c = sep / sig_w
-                        sc_c = r_c * ((len(m1) + len(m2)) / float(N_lex)) ** 0.18
+                        sc_c = r_c * (((len(m1) + len(m2)) * w_sc_l) / float(N_lex)) ** 0.18
                         uid += 1
-                        heapq.heappush(pq, (-sc_c, uid, tg_k, ch, cc1, cc2, cw1, cw2, r_c))
+                        heapq.heappush(pq, (-sc_c, uid, tg_k, ch, cc1, cc2, cw1 * w_sc_l, cw2 * w_sc_l, r_c))
             snapshots.append((len(leaves), sum(x[3] for x in leaves) / tss, rho, list(leaves)))
 
         if len(snapshots) >= 3:
@@ -639,8 +688,29 @@ class GlyphCatalogue:
             elbow_idx = len(snapshots) - 1
 
         chosen_k, chosen_wcss_ratio, chosen_rho, chosen_leaves = snapshots[elbow_idx]
-        for _, _, member_idxs, _ in chosen_leaves:
-            raw_clusters.append((cid, member_idxs, [glyphs[i] for i in member_idxs]))
+        # Re-attach any coreset overflow members in large strata to their exact nearest chosen leaf centroid
+        leaf_lists_by_tg: Dict[str, List[List[int]]] = {}
+        ordered_leaf_lists: List[List[int]] = []
+        for tg_l, _, member_idxs, _ in chosen_leaves:
+            mlist = list(member_idxs)
+            ordered_leaf_lists.append(mlist)
+            leaf_lists_by_tg.setdefault(tg_l, []).append(mlist)
+
+        for tg_ov, ov_idxs in coreset_overflow.items():
+            tg_leaves = leaf_lists_by_tg.get(tg_ov, [])
+            if len(tg_leaves) == 1:
+                tg_leaves[0].extend(ov_idxs)
+            elif len(tg_leaves) > 1 and ov_idxs:
+                leaf_mus = np.vstack([np.mean(X_scaled[ll], axis=0) for ll in tg_leaves])
+                for b0 in range(0, len(ov_idxs), 4096):
+                    b_idxs = ov_idxs[b0:b0 + 4096]
+                    d_mat = pairwise_distances(X_scaled[b_idxs], leaf_mus)
+                    nearest = np.argmin(d_mat, axis=1)
+                    for bi, li in zip(b_idxs, nearest):
+                        tg_leaves[int(li)].append(bi)
+
+        for mlist in ordered_leaf_lists:
+            raw_clusters.append((cid, mlist, [glyphs[i] for i in mlist]))
             cid += 1
         for _, idxs in debris_groups.items():
             raw_clusters.append((cid, idxs, [glyphs[i] for i in idxs]))

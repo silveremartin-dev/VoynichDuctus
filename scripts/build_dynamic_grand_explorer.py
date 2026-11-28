@@ -227,7 +227,7 @@ def rebuild_dual_catalogue_from_pages(
                 return json.load(f)
         return {"total_glyphs": 0, "canonical_alphabet_size": 0, "alphabet": []}
 
-    loaded_pages = []
+    page_files_used = []
     pool = []
     calib_ref = None
     for jf in selected_files:
@@ -242,8 +242,31 @@ def rebuild_dual_catalogue_from_pages(
                 image_width_px=pdata.get("image_width", 2400),
                 image_height_px=pdata.get("image_height", 3200),
             )
-        loaded_pages.append((jf, pdata))
-        pool.extend(gs)
+        page_files_used.append(jf)
+        # Keep lightweight feature-clustering records in memory so 596 full page JSONs never exceed ~450 MB RAM
+        for g in gs:
+            pool.append({
+                "glyph_id": g.get("glyph_id", ""),
+                "page_id": g.get("page_id", jf.stem),
+                "line_id": g.get("line_id", ""),
+                "word_id": g.get("word_id", ""),
+                "bbox": g.get("bbox", [0, 0, 0, 0]),
+                "width": g.get("width", 20),
+                "height": g.get("height", 20),
+                "height_mm": g.get("height_mm", 0.0),
+                "width_mm": g.get("width_mm", 0.0),
+                "height_dmm": g.get("height_dmm", 0.0),
+                "width_dmm": g.get("width_dmm", 0.0),
+                "area": g.get("area", 100),
+                "area_mm2": g.get("area_mm2", 0.0),
+                "fill_factor": g.get("fill_factor", 0.35),
+                "loop_count": g.get("loop_count", -1),
+                "stroke_count": g.get("stroke_count", 1),
+                "euler_stroke_count": g.get("euler_stroke_count", len(g.get("euler_strokes", []))),
+                "eva_char": g.get("eva_char", ""),
+                "strokes": [{"points": s.get("points", [])} for s in g.get("strokes", [])],
+            })
+        del pdata
 
     if not pool:
         return {"total_glyphs": 0, "canonical_alphabet_size": 0, "alphabet": []}
@@ -256,16 +279,73 @@ def rebuild_dual_catalogue_from_pages(
         stroke_key="strokes",
         tag_field="canonical_type",
     )
-    cat["indexed_pages_count"] = len(loaded_pages)
+    cat["indexed_pages_count"] = len(page_files_used)
 
-    # Persist induced canonical_type back onto processed page JSONs (and strip legacy multi-model arrays)
-    for jf, pdata in loaded_pages:
+    # Build fast lookup maps from induced pool and identify sample/exemplar IDs needing full SVG/polygon hydration
+    assigned_map = {
+        g["glyph_id"]: (
+            g.get("canonical_type", "G01"),
+            g.get("topology_group", ""),
+            int(g.get("loop_count", 0)),
+            bool(g.get("is_outlier", False)),
+            g.get("outlier_bin", "INLIER_CONFORMANT"),
+            g.get("medoid_distance", 0.0),
+        )
+        for g in pool
+    }
+    del pool
+
+    needed_rich_ids = set()
+    for arch in cat.get("alphabet", []):
+        if arch.get("exemplar_id"):
+            needed_rich_ids.add(arch["exemplar_id"])
+        for s_inst in arch.get("sample_instances", []):
+            if isinstance(s_inst, dict) and s_inst.get("glyph_id"):
+                needed_rich_ids.add(s_inst["glyph_id"])
+
+    rich_lookup = {}
+    # Stream one page JSON at a time: persist canonical_type back to disk & hydrate sample SVGs/polygons
+    for jf in page_files_used:
+        with open(jf, "r", encoding="utf-8") as f:
+            pdata = json.load(f)
         pdata.pop("glyphs_neural_pca", None)
         pdata.pop("glyphs_hybrid_consensus", None)
         pdata.pop("glyph_count_neural_pca", None)
         pdata.pop("glyph_count_hybrid_consensus", None)
+        for g in pdata.get("glyphs", []):
+            gid = g.get("glyph_id", "")
+            if gid in assigned_map:
+                ct, tg, lc, io, ob, md = assigned_map[gid]
+                g["canonical_type"] = ct
+                g["topology_group"] = tg
+                g["loop_count"] = lc
+                g["is_outlier"] = io
+                g["outlier_bin"] = ob
+                g["medoid_distance"] = md
+            if gid in needed_rich_ids:
+                rich_lookup[gid] = {
+                    "polygon": g.get("polygon", []),
+                    "hole_polygons": g.get("hole_polygons", []),
+                    "svg_content": g.get("svg_content", g.get("ductus_svg", "")),
+                    "euler_svg_content": g.get("euler_svg_content", ""),
+                }
         with open(jf, "w", encoding="utf-8") as f:
-            json.dump(pdata, f)
+            json.dump(pdata, f, ensure_ascii=False)
+        del pdata
+
+    for arch in cat.get("alphabet", []):
+        ex_id = arch.get("exemplar_id", "")
+        if ex_id in rich_lookup:
+            arch["exemplar_svg_content"] = rich_lookup[ex_id]["svg_content"]
+            arch["exemplar_euler_svg_content"] = rich_lookup[ex_id]["euler_svg_content"]
+        for s_inst in arch.get("sample_instances", []):
+            if isinstance(s_inst, dict):
+                sid = s_inst.get("glyph_id", "")
+                if sid in rich_lookup:
+                    s_inst["polygon"] = rich_lookup[sid]["polygon"]
+                    s_inst["hole_polygons"] = rich_lookup[sid]["hole_polygons"]
+                    s_inst["svg_content"] = rich_lookup[sid]["svg_content"]
+                    s_inst["euler_svg_content"] = rich_lookup[sid]["euler_svg_content"]
 
     builder.export_catalogue_json(cat, out_cat_path)
     return cat
@@ -341,7 +421,7 @@ def compute_live_corpus_statistics(
     s_stats = _collect_ms_stats(
         serafini_pages_dir,
         "seraphinianus",
-        stems=s_preferred_stems or ["serafini_p002", "serafini_p004", "serafini_p006", "serafini_p008", "serafini_p011", "serafini_p030"],
+        stems=s_preferred_stems,
     )
 
     suite = BenchmarkSuite()
@@ -501,17 +581,17 @@ def main(skip_catalogue: bool = False):
         with open(voynich_dir / "voynich_alphabet_catalogue.json", "r", encoding="utf-8") as f:
             v_cat_raw = json.load(f)
     else:
-        print("[*] Discovering Natural Emergent Canonical Alphabet from Voynich HD pages...")
+        print("[*] Discovering Natural Emergent Canonical Alphabet from Voynich pages...")
         v_cat_raw = rebuild_dual_catalogue_from_pages(
             pages_dir=voynich_dir / "pages",
             out_cat_path=voynich_dir / "voynich_alphabet_catalogue.json",
             corpus_type="voynich",
-            min_px_per_mm=10.0,
+            min_px_per_mm=0.0,
         )
     v_cat = clean_catalogue_for_embed(v_cat_raw, pages_img_dir=voynich_dir / "pages")
     print(
         f"  [+] Voynich Emergent Alphabet: {v_cat['canonical_alphabet_size']} archetypes "
-        f"({v_cat['total_glyphs']} glyphs across {v_cat['indexed_pages_count']} HD folios)."
+        f"({v_cat['total_glyphs']} glyphs across {v_cat['indexed_pages_count']} folios)."
     )
 
     if skip_catalogue and (serafini_dir / "seraphinianus_alphabet_catalogue.json").exists():
@@ -523,7 +603,7 @@ def main(skip_catalogue: bool = False):
             pages_dir=serafini_dir / "pages",
             out_cat_path=serafini_dir / "seraphinianus_alphabet_catalogue.json",
             corpus_type="seraphinianus",
-            preferred_stems=["serafini_p002", "serafini_p004", "serafini_p006", "serafini_p008", "serafini_p011", "serafini_p030"],
+            preferred_stems=None,
         )
     s_cat = clean_catalogue_for_embed(s_cat_raw, pages_img_dir=serafini_dir / "pages")
     print(
@@ -588,8 +668,8 @@ def main(skip_catalogue: bool = False):
         serafini_pages_dir=serafini_dir / "pages",
         v_cat=v_cat,
         s_cat=s_cat,
-        v_min_px_per_mm=10.0,
-        s_preferred_stems=["serafini_p002", "serafini_p004", "serafini_p006", "serafini_p008", "serafini_p011", "serafini_p030"],
+        v_min_px_per_mm=0.0,
+        s_preferred_stems=None,
     )
 
     # 3. Call official generator (Python f-string correctly unescapes all CSS and JS braces!)

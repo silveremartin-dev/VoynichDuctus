@@ -1794,8 +1794,9 @@ def generate_explorer_html(
             const s = ls.seraphinianus || {{}};
             const diags = Array.isArray(ls.diagnostics) ? ls.diagnostics : [];
             const fmt = (n) => Number(n || 0).toLocaleString();
-            const vIds = (v.processed_page_ids || []).join(', ') || 'None';
-            const sIds = (s.processed_page_ids || []).join(', ') || 'None';
+            const fmtIds = (arr) => (!arr || arr.length === 0) ? 'None' : (arr.length <= 12 ? arr.join(', ') : `${{arr.slice(0, 8).join(', ')}} … (+${{arr.length - 8}} more)`);
+            const vIds = fmtIds(v.processed_page_ids);
+            const sIds = fmtIds(s.processed_page_ids);
 
             const fmtNum = (val, suffix = '') => (val !== null && val !== undefined && Number.isFinite(Number(val))) ? `${{Number(val).toFixed(2)}}${{suffix}}` : '—';
             const diagRows = diags.length > 0 ? diags.map((d, idx) => {{

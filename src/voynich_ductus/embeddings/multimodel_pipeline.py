@@ -416,7 +416,7 @@ def enrich_page_multimodel(
     resolver = JunctionResolver()
     typewriter_decomposer = GenerativeTypewriterDecomposer(is_serafini=is_serafini)
 
-    if not is_serafini and restore_rosetta_boxes:
+    if not is_serafini and restore_rosetta_boxes and W_img >= 2000:
         try:
             from voynich_ductus.ingestion.voynichese_rosetta import VoynicheseRosettaLoader
             rosetta_loader = VoynicheseRosettaLoader()
