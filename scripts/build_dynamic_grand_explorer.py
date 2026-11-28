@@ -625,6 +625,7 @@ def main(skip_catalogue: bool = False):
         c_info = cod_reg.get(stub["page_id"], {})
         stub["quire_id"] = c_info.get("quire", "")
         stub["section"] = c_info.get("section", "")
+        stub["davis_scribe"] = c_info.get("davis_scribe", 1)
         stub["singulion_id"] = c_info.get("singulion_id", "")
         stub["conjoint_leaf"] = c_info.get("conjoint_leaf")
         stub["codex_index"] = c_info.get("codex_index", idx + 1)

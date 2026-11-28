@@ -84,3 +84,73 @@ def test_build_folio_codicology_registry():
     assert reg["f105r"]["quire"] == "Q20"
     assert reg["f105r"]["singulion_id"] == "105|114"
     assert reg["f105r"]["section"] == "Marginal Stars / Recipes"
+    assert reg["f1r"]["davis_scribe"] == 1
+    assert reg["f77r"]["davis_scribe"] == 2
+    assert reg["f105r"]["davis_scribe"] == 3
+
+
+def test_davis_five_scribes_and_forensics():
+    """Verifies Lisa Fagin Davis (2022) 5-scribe folio attributions, forensic ductus tells, and closed-loop recutting."""
+    import numpy as np
+    from voynich_ductus.ingestion.codicology import (
+        DAVIS_FIVE_SCRIBES_CITATION,
+        get_davis_scribe_attribution,
+        extract_davis_scribal_forensics,
+    )
+    from voynich_ductus.embeddings.word_decomposition import GenerativeTypewriterDecomposer
+    from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
+    from voynich_ductus.vectorizer.calligraphic_tracker import CalligraphicVectorizer
+
+    assert DAVIS_FIVE_SCRIBES_CITATION["year"] == 2022
+    assert get_davis_scribe_attribution("f1r") == 1
+    assert get_davis_scribe_attribution("f26r") == 2
+    assert get_davis_scribe_attribution("f103r") == 3
+    assert get_davis_scribe_attribution("f68r1") == 4
+    assert get_davis_scribe_attribution("f57r") == 5
+    assert get_davis_scribe_attribution("f57v") == 1
+
+    mock_glyphs = [
+        {
+            "glyph_id": "g_n",
+            "eva_char": "n",
+            "width_mm": 2.1,
+            "height_mm": 1.8,
+            "loop_count": 0,
+            "strokes": [{"points": [(8.0, 12.0, 3.0), (22.0, 18.0, 3.5), (24.0, 24.0, 2.5), (10.0, 6.0, 2.0)], "px_per_mm": 10.0}],
+        },
+        {
+            "glyph_id": "g_bridge",
+            "eva_char": "cth",
+            "width_mm": 6.2,
+            "height_mm": 3.8,
+            "loop_count": 2,
+            "strokes": [],
+        },
+    ]
+    forensics = extract_davis_scribal_forensics(mock_glyphs)
+    assert forensics["n_count"] == 1
+    assert forensics["n_single_stroke_ratio"] == 1.0
+    assert forensics["n_mean_left_reach_mm"] > 0.0
+    assert forensics["bridge_gallows_count"] == 1
+
+    # Verify closed-loop Ductus -> Word Re-Segmentation splits an over-wide 5-minim fused compound
+    cal = MetricScaleCalibration(manuscript_type="voynich", custom_px_per_mm=10.0)
+    decomp = GenerativeTypewriterDecomposer(is_serafini=False)
+    vec = CalligraphicVectorizer()
+    wide_mask = np.zeros((24, 56), dtype=bool)
+    for idx_m, cx in enumerate((5, 15, 25, 38, 48)):
+        wide_mask[4:20, cx : cx + 3] = True
+    wide_mask[18:20, 5:50] = True  # Thin baseline ligature connecting two multi-minim glyphs
+    wide_mask[18:20, 28:35] = False
+    wide_mask[19, 28:35] = True    # 1-px hairline valley at x=31
+    slices = [{
+        "mask": wide_mask,
+        "bbox_local": (0, 0, 24, 56),
+        "area": int(np.sum(wide_mask)),
+        "diacritics": [],
+        "is_dot": False,
+        "typewriter_proto_id": "TW_00",
+    }]
+    recut = decomp.refine_glyph_slices_with_ductus(slices, vectorizer=vec, scale_calib=cal)
+    assert len(recut) == 2
+

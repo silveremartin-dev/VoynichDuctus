@@ -539,6 +539,10 @@ def enrich_page_multimodel(
 
         if recompute_option_a or not old_w_glyphs:
             assembled = typewriter_decomposer.decompose_word(w_mask, scale_calib=scale_calib)
+            if not is_serafini and len(assembled) >= 1:
+                assembled = typewriter_decomposer.refine_glyph_slices_with_ductus(
+                    assembled, vectorizer=tracker, scale_calib=scale_calib
+                )
             g_idx = 0
             for comp in assembled:
                 raw_g_mask = comp["mask"].astype(bool)

@@ -638,3 +638,102 @@ class GenerativeTypewriterDecomposer:
             cur = prev_i
         out_glyphs.reverse()
         return out_glyphs
+
+    def refine_glyph_slices_with_ductus(
+        self,
+        glyph_slices: List[Dict[str, Any]],
+        vectorizer: Any,
+        scale_calib: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Closed-Loop Ductus -> Word Re-Segmentation Feedback:
+        Inspects wide candidate glyph slices (`width >= 3.10 mm` on Voynich). If a single slice
+        saturates the physical 4-stroke quill ceiling (`len(strokes) >= 4`) while STILL leaving
+        substantial uncovered ink residue (`uncovered_ratio >= 0.28` and `uncovered_mm2 >= 0.48`),
+        it cannot physically be a single 1-4 stroke Voynich character (e.g. fused ligature or
+        multi-glyph compound) and is split at its deepest hole-safe interior ink valley!
+        """
+        if self.is_serafini or not glyph_slices or vectorizer is None:
+            return glyph_slices
+
+        from scipy.ndimage import binary_fill_holes
+        from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
+
+        calib = scale_calib or MetricScaleCalibration(manuscript_type="voynich")
+        ppm = float(calib.px_per_mm)
+        mm_per_px = 1.0 / max(1e-3, ppm)
+        min_split_w_px = max(10, int(round(3.10 * ppm)))
+        min_child_w_px = max(4, int(round(0.95 * ppm)))
+        min_child_area = max(3, int(round(calib.min_glyph_area_px)))
+
+        refined: List[Dict[str, Any]] = []
+        for g_obj in glyph_slices:
+            cm = g_obj.get("mask")
+            if cm is None or cm.shape[1] < min_split_w_px:
+                refined.append(g_obj)
+                continue
+
+            strokes = vectorizer.extract_calligraphic_ductus(
+                cm, single_stroke_mode=False, max_strokes=4, scale_calib=calib
+            )
+            if len(strokes) < 4:
+                refined.append(g_obj)
+                continue
+
+            pts_list = [s.get("points", []) for s in strokes if s.get("points")]
+            pred_m = vectorizer._rasterize_strokes_mask(pts_list, cm.shape, scale_w=1.10)
+            tot_ink = max(1, int(np.sum(cm)))
+            uncov_px = int(np.sum(cm & (~pred_m)))
+            uncov_ratio = float(uncov_px) / float(tot_ink)
+            uncov_mm2 = float(uncov_px) * (mm_per_px ** 2)
+
+            if uncov_ratio < 0.14 or uncov_mm2 < 0.35:
+                refined.append(g_obj)
+                continue
+
+            # Locate deepest hole-safe interior column valley within [24%..76%] of slice width
+            gh, gw = cm.shape
+            pad_c = np.pad(cm.astype(bool), 1, mode="constant", constant_values=False)
+            holes_c = (binary_fill_holes(pad_c) & (~pad_c))[1:-1, 1:-1]
+            hole_cols = np.any(holes_c, axis=0)
+            col_ink = np.sum(cm, axis=0).astype(np.float32)
+
+            x_lo = max(min_child_w_px, int(round(0.24 * gw)))
+            x_hi = min(gw - min_child_w_px, int(round(0.76 * gw)))
+            best_cut = -1
+            best_val = 1e9
+            med_col = float(np.median(col_ink[col_ink > 0])) if np.any(col_ink > 0) else float(gh)
+            for cx in range(x_lo, x_hi + 1):
+                if hole_cols[cx]:
+                    continue
+                if col_ink[cx] < best_val:
+                    best_val = float(col_ink[cx])
+                    best_cut = cx
+
+            # Accept cut only if valley is genuinely thin (`<= 0.58 * median_ink` or `<= 1.15 * w_nib`)
+            if best_cut > 0 and best_val <= max(0.58 * med_col, 0.55 * ppm):
+                by0, bx0, _, _ = g_obj["bbox_local"]
+                split_ok = []
+                for x_a, x_b in ((0, best_cut), (best_cut, gw)):
+                    sub = cm[:, x_a:x_b]
+                    ys_s, xs_s = np.where(sub)
+                    if len(xs_s) >= min_child_area:
+                        sr0, sr1 = int(ys_s.min()), int(ys_s.max()) + 1
+                        sc0, sc1 = int(xs_s.min()), int(xs_s.max()) + 1
+                        split_ok.append({
+                            "mask": sub[sr0:sr1, sc0:sc1].copy(),
+                            "bbox_local": (by0 + sr0, bx0 + x_a + sc0, by0 + sr1, bx0 + x_a + sc1),
+                            "area": int(len(xs_s)),
+                            "diacritics": [],
+                            "is_dot": False,
+                            "typewriter_proto_id": g_obj.get("typewriter_proto_id", "TW_00"),
+                            "segmentation_type": "GENERATIVE_TYPEWRITER_DUCTUS_RECUT",
+                            "word_decomposition": "generative_typewriter",
+                        })
+                if len(split_ok) == 2:
+                    refined.extend(split_ok)
+                    continue
+
+            refined.append(g_obj)
+
+        return refined

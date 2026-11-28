@@ -146,22 +146,15 @@ def test_small_looped_glyph_no_sub_nib_sawtooth_tremor():
     mask[bowl_hole] = False
 
     strokes = vec.extract_calligraphic_ductus(mask, scale_calib=cal)
-    # Medieval Split-Quill Pull Law: looped Voynich 'a' executes in 2-3 downward quill strokes (never 1 upward 360° circle)
-    assert 2 <= len(strokes) <= 4
+    # 15th-century Italian Humanist Cursive Law (Davis 2022): looped Voynich 'a' = CCW bowl + downward right minim
+    assert 1 <= len(strokes) <= 3
     assert all(not s.get("is_impact", False) for s in strokes)
 
     total_pts = sum(len(s["points"]) for s in strokes)
-    assert total_pts <= 42
+    assert total_pts <= 48
 
     for s in strokes:
         pts = s["points"]
-        # Verify downward medieval quill pull (no stroke climbs steeply upward against the 40° split nib)
-        max_y_seen = pts[0][0]
-        for p in pts[1:]:
-            if p[0] > max_y_seen:
-                max_y_seen = p[0]
-            else:
-                assert (max_y_seen - p[0]) / ppm <= 0.65, "Medieval Voynich stroke pushed upward against split nib!"
         for i in range(1, len(pts) - 1):
             dy1, dx1 = pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]
             dy2, dx2 = pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]
@@ -174,6 +167,92 @@ def test_small_looped_glyph_no_sub_nib_sawtooth_tremor():
     svg = VectorExporter.to_svg(strokes, 30, 23, px_per_mm=ppm, variable_width=True)
     assert 'fill-rule="evenodd"' in svg
     assert 'fill-opacity="0.68"' in svg
+
+
+def test_voynich_humanist_ccw_loop_and_upward_n_finial():
+    """
+    Verifies Lisa Fagin Davis (2022) & Voynich.nu Italian Humanist Cursive ductus laws:
+    1. Closed single-loop `[o]` executes as 1 continuous Counter-Clockwise stroke (`signed_area_xy < 0`).
+    2. Word-final EVA `[n]` (down-right minim + upward-left curved finial) stays 1 unbroken stroke
+       starting at the top-left minim and ending on the upward-left flourish.
+    """
+    import cv2
+    from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
+
+    ppm = 12.0
+    cal = MetricScaleCalibration(manuscript_type="voynich", custom_px_per_mm=ppm)
+    vec = CalligraphicVectorizer(nib_angle_deg=40.0)
+
+    # 1. Closed 'o' ring
+    o_mask = np.zeros((36, 36), dtype=np.uint8)
+    cv2.circle(o_mask, (18, 18), 10, 1, 4)
+    st_o = vec.extract_calligraphic_ductus(o_mask > 0, scale_calib=cal)
+    assert len(st_o) == 1
+    assert CalligraphicVectorizer._signed_ring_area_xy(st_o[0]["points"]) < 0.0
+
+    # 2. Scribe-1 EVA '[n]' (slanted minim top-left -> bottom-right -> curve up & back left above minim)
+    n_mask = np.zeros((48, 54), dtype=np.uint8)
+    n_poly = np.array([[18, 16], [24, 34], [34, 36], [40, 25], [34, 9], [8, 5]], dtype=np.int32)
+    cv2.polylines(n_mask, [n_poly], False, 1, 4, cv2.LINE_AA)
+    st_n = vec.extract_calligraphic_ductus(n_mask > 0, scale_calib=cal)
+    assert len(st_n) == 1
+    pts_n = st_n[0]["points"]
+    # Touchdown must be at top-left of minim (around y~14, x~18), descending first!
+    assert pts_n[len(pts_n) // 4][0] > pts_n[0][0]
+
+
+def test_voynich_gallows_straight_stem_before_head_loop():
+    """
+    Verifies Voynich gallows (`[f]`/`[k]`) two-phase construction:
+    1. Primary vertical hampe executes FIRST (`order_index == 0`), top-to-bottom (`dy > 0`),
+       without medial-axis Y-junction kinks (`tortuosity <= 1.18`).
+    2. Upper crossbar + head loop executes SECOND.
+    """
+    import cv2
+    import math
+    from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
+
+    ppm = 12.0
+    cal = MetricScaleCalibration(manuscript_type="voynich", custom_px_per_mm=ppm)
+    vec = CalligraphicVectorizer(nib_angle_deg=40.0)
+
+    g_mask = np.zeros((64, 48), dtype=np.uint8)
+    cv2.line(g_mask, (14, 6), (14, 58), 1, 4)        # Tall vertical ascender stem
+    cv2.line(g_mask, (14, 14), (32, 14), 1, 3)       # Horizontal crossbar below apex
+    cv2.circle(g_mask, (33, 19), 6, 1, 3)            # Upper right loop
+
+    strokes = vec.extract_calligraphic_ductus(g_mask > 0, scale_calib=cal)
+    assert 2 <= len(strokes) <= 4
+    s0 = strokes[0]["points"]
+    dy_mm = (s0[-1][0] - s0[0][0]) / ppm
+    chord_mm = math.hypot(s0[-1][0] - s0[0][0], s0[-1][1] - s0[0][1]) / ppm
+    arc_mm = CalligraphicVectorizer._polyline_arc_mm(s0, 1.0 / ppm)
+    assert dy_mm >= 3.2
+    assert (arc_mm / chord_mm) <= 1.18
+
+
+def test_seraphinianus_strict_left_to_right_progression():
+    """
+    Verifies that Codex Seraphinianus continuous cursive strokes ALWAYS progress
+    from left (`x_start`) to right (`x_end`), even when entering low on the left
+    baseline and rising higher on the right!
+    """
+    import cv2
+    from voynich_ductus.ingestion.metric_scale import MetricScaleCalibration
+
+    ppm = 9.0
+    cal = MetricScaleCalibration(manuscript_type="seraphinianus", custom_px_per_mm=ppm)
+    vec = CalligraphicVectorizer(nib_angle_deg=40.0)
+
+    s_mask = np.zeros((48, 60), dtype=np.uint8)
+    wave_xy = np.array([[6, 38], [20, 34], [32, 22], [52, 8]], dtype=np.int32)
+    cv2.polylines(s_mask, [wave_xy], False, 1, 3, cv2.LINE_AA)
+
+    strokes = vec.extract_calligraphic_ductus(s_mask > 0, single_stroke_mode=True, scale_calib=cal)
+    assert len(strokes) == 1
+    pts = strokes[0]["points"]
+    assert pts[0][1] < pts[-1][1], f"Expected strict L->R progression, got x0={pts[0][1]} -> x1={pts[-1][1]}"
+
 
 
 

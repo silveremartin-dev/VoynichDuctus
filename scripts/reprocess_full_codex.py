@@ -21,7 +21,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
 sys.path.insert(0, str(ROOT_DIR / "scripts"))
 
-CURRENT_ENGINE_STAMP = "quill_bernoulli_mm_v3"
+CURRENT_ENGINE_STAMP = "humanist_quill_mm_v4"
 
 
 def _process_single_page(args: Tuple[str, str, bool]) -> Tuple[str, str, float, int, int, str]:
@@ -123,12 +123,17 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=max(1, min(3, (os.cpu_count() or 4) - 1)))
     parser.add_argument("--force", action="store_true", help="Force recompute even if stamped with v3")
     parser.add_argument("--skip-explorer", action="store_true", help="Only reprocess page JSONs")
+    parser.add_argument("--pages", type=str, default="", help="Comma-separated page stems to reprocess selectively")
     args = parser.parse_args()
 
     t_start = time.perf_counter()
     base = ROOT_DIR / "data/processed/atlas_dataset"
     v_files = sorted((base / "voynich/pages").glob("*.json"))
     s_files = sorted((base / "seraphinianus/pages").glob("*.json"))
+    if args.pages.strip():
+        wanted = {s.strip() for s in args.pages.split(",") if s.strip()}
+        v_files = [p for p in v_files if p.stem in wanted]
+        s_files = [p for p in s_files if p.stem in wanted]
 
     tasks = [(str(p), "voynich", args.force) for p in v_files] + [
         (str(p), "seraphinianus", args.force) for p in s_files

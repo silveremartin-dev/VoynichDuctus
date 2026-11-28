@@ -1,0 +1,7 @@
+{
+  "nib_angle_deg": 40.0,
+  "fit_cubic_bezier": true,
+  "hole_margin_scale": 1.08,
+  "gain_bias": 1.0,
+  "inertia_scale": 1.1
+}

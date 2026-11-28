@@ -163,7 +163,7 @@ The `VoynichDuctus` vectorization engine implements a **strict kinematic bifurca
 | **Skeleton Coverage** | **100% skeleton pixel coverage**: 12-pass ridge extension loop bridging branches and orphan loops without backtracking. | Analytical decomposition at critical nodes (degree $\neq 2$) via Euler-Bernoulli minimum bending energy. |
 | **Crossing Resolution** | The pen traverses intersections while maintaining forward momentum without retracing previously drawn strokes. | Bifurcation resolution governed by chronological pen-lift order (stems before crossbars/ligatures). |
 | **Thickness Profile** | Constant or lightly pressure-modulated monoline thickness. | **Marked *pleins et déliés* contrast**: $w(\theta) = (W_{\text{nib}} - w_0)\cdot|\sin(\theta - 40^\circ)| + w_0$. |
-| **Preferential Orientation** | Left-to-right kinematic progression ($x$-weight = 3.2) and top-to-bottom flow. | Upper-left crest attack, vertical downward pull, ascending rightward ligature. |
+| **Preferential Orientation** | **Strict Left-to-Right continuous progression** (`x_start <= x_end` across cursive ribbons) with detached supralinear/infralinear diacritics. | **15th-c. Italian Humanist Cursive** (Lisa Fagin Davis 2022 / Voynich.nu): Counter-clockwise closed loops (`o`, `e`, `8`, `9`), unbroken upward-left `[n]` finials, and two-phase gallows (straight vertical hampes top-to-bottom first, upper loop/crossbar second). |
 
 #### 1. The 1-to-4 Stroke Rule for Voynich
 In the Voynich script, an individual glyph cannot physically exceed **4 quill strokes**:
